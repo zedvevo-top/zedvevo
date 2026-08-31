@@ -69,7 +69,7 @@ serve(async (req) => {
   // referenceId = our payment.id
   const { data: payment, error: fetchErr } = await supabase
     .from('payments')
-    .select('id, user_id, status, payment_type, plan_id')
+    .select('id, user_id, status, payment_type, plan_id, amount, metadata')
     .eq('id', referenceId)
     .maybeSingle();
 
@@ -165,6 +165,52 @@ serve(async (req) => {
       if (newSub) {
         await supabase.from('payments').update({ subscription_id: newSub.id }).eq('id', referenceId);
       }
+    }
+  }
+
+  if (newStatus === 'completed' && payment.payment_type === 'vote') {
+    const metadata = (payment.metadata ?? {}) as { nominee_id?: string; category_id?: string; vote_count?: number };
+    const voteCount = Math.max(1, Math.floor(Number(metadata.vote_count) || 1));
+    if (payment.user_id && metadata.nominee_id && metadata.category_id) {
+      const { error: voteError } = await supabase.from('votes').insert({
+        user_id: payment.user_id,
+        nominee_id: metadata.nominee_id,
+        category_id: metadata.category_id,
+        amount: payment.amount,
+        vote_count: voteCount,
+        payment_id: payment.id,
+        payment_status: 'successful',
+      });
+      if (voteError) {
+        console.error('[webhook] vote insert error:', voteError.message);
+      } else {
+        const { data: nominee } = await supabase.from('nominees').select('total_votes').eq('id', metadata.nominee_id).maybeSingle();
+        await supabase.from('nominees').update({ total_votes: (nominee?.total_votes ?? 0) + voteCount }).eq('id', metadata.nominee_id);
+      }
+    }
+  }
+
+  if (newStatus === 'completed' && payment.payment_type === 'nominee_registration') {
+    const metadata = (payment.metadata ?? {}) as {
+      category_id?: string; nominee_name?: string; bio?: string; photo_url?: string;
+      song_title?: string; song_url?: string; video_url?: string;
+    };
+    if (payment.user_id && metadata.category_id && metadata.nominee_name) {
+      const { error: nomineeError } = await supabase.from('nominees').insert({
+        user_id: payment.user_id,
+        category_id: metadata.category_id,
+        name: metadata.nominee_name,
+        bio: metadata.bio ?? null,
+        photo_url: metadata.photo_url ?? null,
+        song_title: metadata.song_title ?? null,
+        song_url: metadata.song_url ?? null,
+        video_url: metadata.video_url ?? null,
+        payment_id: payment.id,
+        total_votes: 0,
+        registration_status: 'successful',
+        nomination_status: 'approved',
+      });
+      if (nomineeError) console.error('[webhook] nominee insert error:', nomineeError.message);
     }
   }
 
