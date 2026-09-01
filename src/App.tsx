@@ -18,6 +18,8 @@ import AdminAwardsPage from '@/pages/admin/AdminAwardsPage';
 import AdminSettingsPage from '@/pages/admin/AdminSettingsPage';
 import AdminDownloadsPage from '@/pages/admin/AdminDownloadsPage';
 import AdminNotificationsPage from '@/pages/admin/AdminNotificationsPage';
+import AdminSponsorsPage from '@/pages/admin/AdminSponsorsPage';
+import AdminPaymentGatewayPage from '@/pages/admin/AdminPaymentGatewayPage';
 import { Navigate as NavRedirect } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { routes } from './routes';
@@ -68,6 +70,8 @@ const App: React.FC = () => {
             <Route path="/admin/notifications" element={<SuperAdminGuard><AdminNotificationsPage /></SuperAdminGuard>} />
             <Route path="/admin/banners"       element={<SuperAdminGuard><AdminSettingsPage /></SuperAdminGuard>} />
             <Route path="/admin/settings"      element={<SuperAdminGuard><AdminSettingsPage /></SuperAdminGuard>} />
+            <Route path="/admin/sponsors"      element={<SuperAdminGuard><AdminSponsorsPage /></SuperAdminGuard>} />
+            <Route path="/admin/payment-gateway" element={<SuperAdminGuard><AdminPaymentGatewayPage /></SuperAdminGuard>} />
 
             {/* All other routes wrapped in the public layout */}
             <Route path="/*" element={

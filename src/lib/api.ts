@@ -2,7 +2,7 @@ import { supabase } from '@/db/supabase';
 import type {
   Song, Video, HeroBanner, Artist, Sponsor, Award, AwardCategory,
   Nominee, Vote, UploadPlan, UserSubscription, Payment, Notification,
-  Profile, Download, WeeklyTrending, WinnerOfMonth,
+  Profile, Download, WeeklyTrending, WinnerOfMonth, AppSetting,
   SearchResult, SearchFilter, SearchSort
 } from '@/types/index';
 
@@ -793,4 +793,110 @@ export async function incrementVisitorCount(): Promise<number> {
   const { data, error } = await supabase.rpc('increment_visitor_count');
   if (error) return 0;
   return Number(data);
+}
+
+// ============================================================
+// SPONSORS
+// ============================================================
+export async function getAllSponsors(): Promise<Sponsor[]> {
+  const { data, error } = await supabase
+    .from('sponsors').select('*')
+    .order('display_order', { ascending: true })
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return Array.isArray(data) ? data as Sponsor[] : [];
+}
+
+export async function getActiveSponsorsForAward(awardId?: string): Promise<Sponsor[]> {
+  let q = supabase
+    .from('sponsors').select('*')
+    .eq('is_active', true)
+    .order('display_order', { ascending: true });
+  if (awardId) q = q.eq('award_id', awardId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return Array.isArray(data) ? data as Sponsor[] : [];
+}
+
+export async function createSponsor(payload: Partial<Sponsor>) {
+  const { error } = await supabase.from('sponsors').insert(payload);
+  if (error) throw error;
+}
+
+export async function updateSponsor(id: string, payload: Partial<Sponsor>) {
+  const { error } = await supabase.from('sponsors').update(payload).eq('id', id);
+  if (error) throw error;
+}
+
+export async function deleteSponsor(id: string) {
+  const { error } = await supabase.from('sponsors').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ============================================================
+// LIPILA CONFIG (payment gateway settings)
+// ============================================================
+export interface LipilaConfig {
+  id: string;
+  merchant_id: string;
+  service_id: string;
+  api_key: string;
+  webhook_secret?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getLipilaConfig(): Promise<LipilaConfig | null> {
+  const { data, error } = await supabase
+    .from('lipila_config').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  return data as LipilaConfig | null;
+}
+
+export async function updateLipilaConfig(payload: Partial<LipilaConfig>): Promise<LipilaConfig> {
+  const { data, error } = await supabase
+    .from('lipila_config').upsert(payload, { onConflict: 'id' }).select().single();
+  if (error) throw error;
+  return data as LipilaConfig;
+}
+
+// ============================================================
+// APP SETTINGS — dynamic key management
+// ============================================================
+export async function getAllSettingsKeys(): Promise<AppSetting[]> {
+  const { data, error } = await supabase.from('app_settings').select('key, value, description, updated_at').order('key');
+  if (error) throw error;
+  return Array.isArray(data) ? data as AppSetting[] : [];
+}
+
+export async function createSetting(key: string, value: string, description?: string) {
+  const { error } = await supabase.from('app_settings').insert({ key, value, description });
+  if (error) throw error;
+}
+
+export async function deleteSetting(key: string) {
+  const { error } = await supabase.from('app_settings').delete().eq('key', key);
+  if (error) throw error;
+}
+
+// ============================================================
+// DONATION EDGE FUNCTION — verify donation payment status
+// ============================================================
+export async function verifyDonationPayment(paymentId: string): Promise<{
+  verified: boolean;
+  status: string;
+  amount?: number;
+  transaction_id?: string;
+  failure_reason?: string;
+}> {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session?.session?.access_token;
+  const { data, error } = await supabase.functions.invoke('verify-donation-payment', {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: { payment_id: paymentId },
+  });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data;
 }

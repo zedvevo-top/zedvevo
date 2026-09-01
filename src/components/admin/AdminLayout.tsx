@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Music2, Video, CreditCard, Trophy,
   Image, Settings, Menu, X, LogOut, ChevronRight, Download,
-  Star, TrendingUp, Bell,
+  Star, TrendingUp, Bell, Wallet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -20,6 +20,8 @@ const NAV_ITEMS_ADMIN = [
 const NAV_ITEMS_SUPER_ADMIN = [
   { label: 'Users',         path: '/admin/users',         icon: Users },
   { label: 'Payments',      path: '/admin/payments',      icon: CreditCard },
+  { label: 'Payment Gateway', path: '/admin/payment-gateway', icon: Wallet },
+  { label: 'Sponsors',      path: '/admin/sponsors',      icon: Star },
   { label: 'Downloads',     path: '/admin/downloads',     icon: Download },
   { label: 'Awards',        path: '/admin/awards',        icon: Trophy },
   { label: 'Nominees',      path: '/admin/nominees',      icon: Star },
