@@ -326,6 +326,95 @@ export async function getUserVotes(userId: string): Promise<Vote[]> {
   return Array.isArray(data) ? data : [];
 }
 
+export async function createNominee(payload: Partial<any>) {
+  const { data, error } = await supabase.from('nominees').insert(payload).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateNominee(id: string, payload: Partial<any>) {
+  const { data, error } = await supabase.from('nominees').update(payload).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function createVote(payload: Partial<Vote>) {
+  const { data, error } = await supabase.from('votes').insert(payload).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateVote(id: string, payload: Partial<Vote>) {
+  const { data, error } = await supabase.from('votes').update(payload).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getNomineeById(id: string) {
+  const { data, error } = await supabase.from('nominees').select('*').eq('id', id).single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getVoteById(id: string) {
+  const { data, error } = await supabase.from('votes').select('*').eq('id', id).single();
+  if (error) throw error;
+  return data;
+}
+
+// ============================================================
+// PAYMENT VERIFICATION & AUTO-APPROVAL
+// ============================================================
+
+export async function getPaymentStatus(paymentId: string) {
+  const { data, error } = await supabase.from('payments').select('status, amount').eq('id', paymentId).single();
+  if (error) throw error;
+  return data;
+}
+
+// Auto-approve nominee with 0.00 payment
+export async function autoApprovNominee(nomineeId: string, paymentId?: string) {
+  const { data, error } = await supabase
+    .from('nominees')
+    .update({
+      registration_status: 'completed',
+      nomination_status: 'approved',
+      payment_id: paymentId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', nomineeId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Auto-create vote with 0.00 payment
+export async function autoCreateVote(userId: string, nomineeId: string, categoryId: string, voteCount: number = 1) {
+  const { data, error } = await supabase.from('votes').insert({
+    user_id: userId,
+    nominee_id: nomineeId,
+    category_id: categoryId,
+    amount: 0,
+    vote_count: voteCount,
+    payment_status: 'successful',
+  }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Get successful votes for a nominee
+export async function getNomineeVotes(nomineeId: string) {
+  const { data, error } = await supabase
+    .from('votes')
+    .select('*')
+    .eq('nominee_id', nomineeId)
+    .in('payment_status', ['successful', 'pending'])
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
+}
+
 // ============================================================
 // UPLOAD PLANS
 // ============================================================

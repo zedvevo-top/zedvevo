@@ -107,16 +107,92 @@ serve(async (req) => {
 
   console.log('[lipila] request — user:', userId, 'method:', payment_method, 'amount:', amount);
 
-  if (!amount || amount <= 0) return json({ error: 'Invalid amount' }, 400);
-  if (payment_method === 'mobile_money' && !phone_number)
+  if (amount === undefined || amount === null) return json({ error: 'Invalid amount' }, 400);
+  if (amount < 0) return json({ error: 'Amount cannot be negative' }, 400);
+  if (payment_method === 'mobile_money' && amount > 0 && !phone_number)
     return json({ error: 'Phone number is required for mobile money payments' }, 400);
 
   // ── Idempotency ─────────────────────────────────────────────────────
   const { data: existing } = await supabase
-    .from('payments').select('id, status').eq('idempotency_key', idempotency_key).maybeSingle();
+    .from('payments').select('id, status').eq('idempotency_key', idempotencyKey).maybeSingle();
   if (existing) {
     console.log('[lipila] duplicate key, returning existing:', existing.id);
     return json({ payment_id: existing.id, status: existing.status });
+  }
+
+  // ── Handle 0.00 amount auto-approval ─────────────────────────────────
+  if (amount === 0) {
+    console.log('[lipila] zero amount - auto-approving');
+    
+    // Create completed payment record
+    const { data: payment, error: payErr } = await supabase
+      .from('payments')
+      .insert({
+        user_id: userId ?? null,
+        amount: 0,
+        payment_method,
+        payment_type,
+        plan_id: plan_id ?? null,
+        status: 'completed',
+        phone_number: phone_number ?? null,
+        idempotency_key: idempotencyKey,
+        metadata: metadata ?? {},
+        completed_at: new Date().toISOString(),
+      })
+      .select().single();
+
+    if (payErr || !payment) {
+      console.error('[lipila] zero-amount payment record failed:', JSON.stringify(payErr));
+      return json({ error: 'Failed to create payment record' }, 500);
+    }
+
+    // Auto-approve based on payment type
+    if (payment_type === 'nominee_registration' && metadata?.category_id && metadata?.nominee_name && userId) {
+      const nomMetadata = metadata as Record<string, any>;
+      const { data: existing } = await supabase
+        .from('nominees')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('category_id', nomMetadata.category_id)
+        .maybeSingle();
+
+      if (existing) {
+        await supabase.from('nominees').update({
+          name: nomMetadata.nominee_name,
+          registration_status: 'completed',
+          nomination_status: 'approved',
+          payment_id: payment.id,
+        }).eq('id', existing.id);
+      } else {
+        await supabase.from('nominees').insert({
+          user_id: userId,
+          category_id: nomMetadata.category_id,
+          name: nomMetadata.nominee_name,
+          payment_id: payment.id,
+          registration_status: 'completed',
+          nomination_status: 'approved',
+        });
+      }
+      console.log('[lipila] nominee auto-approved');
+    } else if (payment_type === 'vote' && metadata?.nominee_id && metadata?.category_id && userId) {
+      const voteMetadata = metadata as Record<string, any>;
+      await supabase.from('votes').insert({
+        user_id: userId,
+        nominee_id: voteMetadata.nominee_id,
+        category_id: voteMetadata.category_id,
+        amount: 0,
+        vote_count: voteMetadata.vote_count || 1,
+        payment_id: payment.id,
+        payment_status: 'successful',
+      });
+      console.log('[lipila] vote auto-created');
+    }
+
+    return json({
+      payment_id: payment.id,
+      status: 'completed',
+      message: 'Auto-approved without payment required.'
+    });
   }
 
     // ── Create pending payment record ──────────────────────────────────

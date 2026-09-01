@@ -12,6 +12,8 @@ import SearchPage from './pages/SearchPage';
 import TrendingPage from './pages/TrendingPage';
 import MyDownloadsPage from './pages/MyDownloadsPage';
 import PaymentSuccessPage from './pages/PaymentSuccessPage';
+import TermsPage from './pages/TermsPage';
+import PrivacyPage from './pages/PrivacyPage';
 
 export interface RouteConfig {
   name: string;
@@ -31,6 +33,8 @@ export const routes: RouteConfig[] = [
   { name: 'Trending',       path: '/trending',        component: TrendingPage,       public: true },
   { name: 'Search',         path: '/search',          component: SearchPage,         public: true },
   { name: 'PaymentSuccess', path: '/payment-success', component: PaymentSuccessPage, public: true },
+  { name: 'Terms',          path: '/terms',           component: TermsPage,          public: true },
+  { name: 'Privacy',        path: '/privacy',         component: PrivacyPage,        public: true },
   { name: 'Upload',         path: '/upload',          component: UploadPage,         public: false },
   { name: 'Library',        path: '/library',         component: LibraryPage,        public: false },
   { name: 'Downloads',      path: '/downloads',       component: MyDownloadsPage,    public: false },

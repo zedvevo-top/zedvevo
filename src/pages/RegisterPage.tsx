@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Eye, EyeOff, Mail, Lock, User, Play } from 'lucide-react'
+import { Eye, EyeOff, Mail, Lock, User, Play, Upload, X } from 'lucide-react'
 import { supabase, isConfigured } from '@/lib/supabase'
 import { useAuthStore } from '@/store'
 import { Button } from '@/components/ui/button'
@@ -29,6 +29,8 @@ export default function RegisterPage() {
   const { toast } = useToast()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
 
   const {
     register,
@@ -42,6 +44,33 @@ export default function RegisterPage() {
     loginDemo()
     toast({ title: 'Welcome to ZedVevo Demo!' })
     navigate('/')
+  }
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      toast({ title: 'Error', description: 'Please select an image file', variant: 'destructive' })
+      return
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: 'Error', description: 'File size must be less than 5MB', variant: 'destructive' })
+      return
+    }
+
+    setPhotoFile(file)
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      setPhotoPreview(e.target?.result as string)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const clearPhoto = () => {
+    setPhotoFile(null)
+    setPhotoPreview(null)
   }
 
   const onSubmit = async (data: RegisterForm) => {
@@ -75,12 +104,38 @@ export default function RegisterPage() {
       }
 
       if (signUpData.user) {
+        let avatarUrl: string | undefined
+
+        // Upload photo if provided
+        if (photoFile) {
+          try {
+            const fileExt = photoFile.name.split('.').pop()
+            const fileName = `${signUpData.user.id}-${Date.now()}.${fileExt}`
+            const { error: uploadError, data: uploadData } = await supabase.storage
+              .from('avatars')
+              .upload(fileName, photoFile, { upsert: true })
+
+            if (uploadError) {
+              console.error('Photo upload error:', uploadError)
+              toast({ title: 'Warning', description: 'Photo upload failed, but account was created' })
+            } else if (uploadData) {
+              const { data: urlData } = await supabase.storage
+                .from('avatars')
+                .getPublicUrl(uploadData.path)
+              avatarUrl = urlData.publicUrl
+            }
+          } catch (photoError) {
+            console.error('Photo upload error:', photoError)
+          }
+        }
+
         // Create profile
         const { error: profileError } = await supabase.from('profiles').insert({
           id: signUpData.user.id,
           email: data.email,
           full_name: data.fullName,
           username: data.fullName.toLowerCase().replace(/\s+/g, '_'),
+          avatar_url: avatarUrl,
         })
 
         if (profileError) {
@@ -163,6 +218,37 @@ export default function RegisterPage() {
               error={errors.confirmPassword?.message}
               {...register('confirmPassword')}
             />
+
+            {/* Photo Upload */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Profile Photo (Optional)
+              </label>
+              {photoPreview ? (
+                <div className="relative w-20 h-20 rounded-lg overflow-hidden bg-muted mb-2">
+                  <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={clearPhoto}
+                    className="absolute top-1 right-1 bg-red-600 hover:bg-red-700 rounded-full p-1"
+                  >
+                    <X className="h-3 w-3 text-white" />
+                  </button>
+                </div>
+              ) : null}
+              <label className="flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-gray-500 rounded-lg cursor-pointer hover:border-gray-300 transition-colors">
+                <Upload className="h-4 w-4" />
+                <span className="text-sm">Click to upload photo</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePhotoChange}
+                  className="hidden"
+                  disabled={isLoading}
+                />
+              </label>
+              <p className="text-xs text-gray-500 mt-1">Max 5MB, JPG/PNG</p>
+            </div>
 
             <Button type="submit" className="w-full" isLoading={isLoading}>
               Create Account

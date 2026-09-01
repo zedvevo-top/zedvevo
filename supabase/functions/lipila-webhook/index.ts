@@ -168,6 +168,75 @@ serve(async (req) => {
     }
   }
 
+  // ── On successful nominee registration: create/update nominee ────────────
+  if (newStatus === 'completed' && payment.payment_type === 'nominee_registration') {
+    const metadata = (payment.metadata || {}) as Record<string, any>;
+    const { category_id, nominee_name } = metadata;
+
+    if (category_id && nominee_name && payment.user_id) {
+      // Check if nominee already exists for this user + category
+      const { data: existing } = await supabase
+        .from('nominees')
+        .select('id')
+        .eq('user_id', payment.user_id)
+        .eq('category_id', category_id)
+        .maybeSingle();
+
+      if (existing) {
+        // Update existing nominee
+        await supabase
+          .from('nominees')
+          .update({
+            name: nominee_name,
+            registration_status: 'completed',
+            nomination_status: 'approved',
+            payment_id: referenceId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existing.id);
+        console.log('[webhook] nominee updated:', existing.id);
+      } else {
+        // Create new nominee
+        const { error: nomErr } = await supabase.from('nominees').insert({
+          user_id: payment.user_id,
+          category_id,
+          name: nominee_name,
+          payment_id: referenceId,
+          registration_status: 'completed',
+          nomination_status: 'approved',
+        });
+        if (nomErr) {
+          console.error('[webhook] nominee insert error:', nomErr.message);
+        } else {
+          console.log('[webhook] nominee created for user:', payment.user_id);
+        }
+      }
+    }
+  }
+
+  // ── On successful vote: create vote record ───────────────────────────────
+  if (newStatus === 'completed' && payment.payment_type === 'vote') {
+    const metadata = (payment.metadata || {}) as Record<string, any>;
+    const { nominee_id, category_id, vote_count } = metadata;
+
+    if (nominee_id && category_id && payment.user_id) {
+      const { error: voteErr } = await supabase.from('votes').insert({
+        user_id: payment.user_id,
+        nominee_id,
+        category_id,
+        amount: payment.amount || 0,
+        vote_count: vote_count || 1,
+        payment_id: referenceId,
+        payment_status: 'successful',
+      });
+      if (voteErr) {
+        console.error('[webhook] vote insert error:', voteErr.message);
+      } else {
+        console.log('[webhook] vote created for user:', payment.user_id, 'nominee:', nominee_id);
+      }
+    }
+  }
+
   // ── Notifications ──────────────────────────────────────────────────────────
   const notifMap: Record<string, { title: string; message: string; type: string; notification_type: string }> = {
     completed: {
