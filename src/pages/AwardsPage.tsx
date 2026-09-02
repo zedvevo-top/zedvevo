@@ -1006,7 +1006,7 @@ interface NomineeCardProps {
   onShare: () => void;
 }
 
-function NomineeCard({ nominee, rank, maxVotes, votingOpen, user, onView, onVote, onShare }: NomineeCardProps) {
+function NomineeCard({ nominee, rank, maxVotes, votingOpen, onView, onVote, onShare }: NomineeCardProps) {
   const canVote = (nominee.nomination_status === 'approved' || nominee.nomination_status === 'winner') && votingOpen;
   const votes = nominee.total_votes ?? 0;
   const pct = maxVotes > 0 ? Math.round((votes / maxVotes) * 100) : 0;
