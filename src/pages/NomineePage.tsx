@@ -23,19 +23,19 @@ export default function NomineePage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const shareUrl = nominee
-    ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/share?nominee=${nominee.id}`
+  // Clean app URL for sharing — crawlers hit /nominee/:id and get OG meta
+  // from the share edge function via the SPA meta injection
+  const appUrl = nominee
+    ? `${window.location.origin}/nominee/${nominee.id}`
     : '';
 
   useOgMeta({
     title: nominee ? `${nominee.name} — ZedVevo Awards Nominee` : 'ZedVevo Awards',
     description: nominee
-      ? (nominee.bio ? nominee.bio.slice(0, 140) : `Vote for ${nominee.name} at the ZedVevo Awards! Currently ${nominee.total_votes} votes.`)
+      ? (nominee.bio ? nominee.bio.slice(0, 140) : `Vote for ${nominee.name} at the ZedVevo Awards! Currently ${Number(nominee.total_votes ?? 0).toLocaleString()} votes.`)
       : 'Vote for your favourite artists at the ZedVevo Awards.',
     imageUrl: nominee?.photo_url ?? undefined,
-    pageUrl: nominee
-      ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/share?nominee=${nominee.id}`
-      : undefined,
+    pageUrl: appUrl || undefined,
     type: 'profile',
   });
 
@@ -63,10 +63,11 @@ export default function NomineePage() {
   );
 
   const handleShare = () => {
+    const shareUrl = appUrl;
     if (navigator.share) {
       navigator.share({
         title: `Vote for ${nominee.name} — ZedVevo Awards`,
-        text: `Support ${nominee.name} at the ZedVevo Awards! 🏆`,
+        text: `Support ${nominee.name} at the ZedVevo Awards! 🏆 ${Number(nominee.total_votes ?? 0).toLocaleString()} votes so far.`,
         url: shareUrl,
       }).catch(() => {});
     } else {
@@ -93,7 +94,11 @@ export default function NomineePage() {
           <div className="space-y-1">
             <h1 className="text-xl font-semibold leading-tight">{nominee.name}</h1>
             {nominee.song_title && <p className="text-sm text-muted-foreground">{nominee.song_title}</p>}
-            <p className="text-sm font-medium text-accent">{nominee.total_votes.toLocaleString()} votes</p>
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <Vote className="h-4 w-4 text-accent shrink-0" />
+              <span className="text-lg font-bold tabular-nums text-accent">{Number(nominee.total_votes ?? 0).toLocaleString()}</span>
+              <span className="text-sm text-muted-foreground">votes</span>
+            </div>
             {nominee.bio && <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{nominee.bio}</p>}
           </div>
 

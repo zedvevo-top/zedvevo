@@ -36,7 +36,7 @@ export default function VideosPage() {
     title: `${focusVideo.title} — ${focusVideo.featured_artists ? `${focusVideo.artist_name} ft. ${focusVideo.featured_artists}` : focusVideo.artist_name} | ZedVevo MP4`,
     description: `Watch "${focusVideo.title}" by ${focusVideo.featured_artists ? `${focusVideo.artist_name} ft. ${focusVideo.featured_artists}` : focusVideo.artist_name} on ZedVevo — Zambia's video platform.`,
     imageUrl: focusVideo.thumbnail_url ?? undefined,
-    pageUrl: `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/share?video=${focusVideo.id}`,
+    pageUrl: `${window.location.origin}/video/${focusVideo.id}`,
   } : {
     title: 'ZedVevo — Zambian Music Videos',
     description: 'Watch the best Zambian music videos on ZedVevo.',

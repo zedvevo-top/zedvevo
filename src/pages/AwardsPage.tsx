@@ -97,7 +97,7 @@ export default function AwardsPage() {
     : 'Cast your vote for the best Zambian artists at the ZedVevo Awards.';
   const ogImage = focusNominee?.photo_url ?? undefined;
   const ogUrl = focusNominee
-    ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/share?nominee=${focusNominee.id}`
+    ? `${window.location.origin}/nominee/${focusNominee.id}`
     : `${window.location.origin}/awards`;
   const ogType = focusNominee ? 'profile' : 'website';
 
@@ -138,21 +138,19 @@ export default function AwardsPage() {
     loadNomineesForAward(selectedAward);
   }, [selectedAward, loadNomineesForAward]);
 
-  // ── Realtime: auto-refresh nominees when webhook inserts a new one ──────────
+  // ── Realtime: auto-refresh nominees when votes change or nominees updated ───
   useEffect(() => {
     const channel = supabase
       .channel('awards-nominees-realtime')
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'nominees' },
         async (payload) => {
-          console.log('[AwardsPage] nominee change:', payload.eventType);
           // Refresh nominees for the affected category
           const affected = payload.new as Nominee | null;
           const categoryId = affected?.category_id;
           if (categoryId) {
             const data = await getNomineesByCategory(categoryId);
             setNominees(prev => ({ ...prev, [categoryId]: data }));
-            // Also update profileNominee if open
             setProfileNominee(prev => {
               if (prev?.id === affected?.id) return { ...prev, ...affected } as Nominee;
               return prev;
@@ -160,10 +158,39 @@ export default function AwardsPage() {
           }
         }
       )
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'votes' },
+        async (payload) => {
+          // When a vote is approved, refresh the nominee's category so vote count updates
+          const vote = payload.new as { nominee_id?: string } | null;
+          if (!vote?.nominee_id) return;
+          // Find which category this nominee belongs to
+          const allNominees = Object.values(nominees).flat();
+          const nom = allNominees.find(n => n.id === vote.nominee_id);
+          if (nom?.category_id) {
+            const data = await getNomineesByCategory(nom.category_id);
+            setNominees(prev => ({ ...prev, [nom.category_id]: data }));
+          }
+        }
+      )
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'votes' },
+        async (payload) => {
+          const vote = payload.new as { nominee_id?: string } | null;
+          if (!vote?.nominee_id) return;
+          const allNominees = Object.values(nominees).flat();
+          const nom = allNominees.find(n => n.id === vote.nominee_id);
+          if (nom?.category_id) {
+            const data = await getNomineesByCategory(nom.category_id);
+            setNominees(prev => ({ ...prev, [nom.category_id]: data }));
+          }
+        }
+      )
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nominees]);
 
   // Manual refresh
   const handleRefresh = async () => {
@@ -370,13 +397,12 @@ export default function AwardsPage() {
 
   /* ── share nominee ── */
   const handleShare = (nominee: Nominee) => {
-    const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/share?nominee=${nominee.id}`;
+    const url = `${window.location.origin}/nominee/${nominee.id}`;
     setSearchParams({ nominee: nominee.id });
     setShareNominee(nominee);
-    // Also try native share
     if (navigator.share) {
       navigator.share({ title: `Vote for ${nominee.name} — ZedVevo Awards`, text: `Support ${nominee.name} at the ZedVevo Awards! 🏆`, url })
-        .catch(() => {}); // fallback to ShareSheet
+        .catch(() => {});
     }
   };
 
@@ -530,13 +556,13 @@ export default function AwardsPage() {
                         /* Nominee cards grid: 1 col mobile / 2 col tablet / 4 col desktop */
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 p-3">
                           {[...catNominees]
-                            .sort((a, b) => (b.total_votes ?? 0) - (a.total_votes ?? 0))
+                            .sort((a, b) => (Number(b.total_votes) ?? 0) - (Number(a.total_votes) ?? 0))
                             .map((nominee, idx) => (
                             <NomineeCard
                               key={nominee.id}
-                              nominee={nominee}
+                              nominee={{ ...nominee, total_votes: Number(nominee.total_votes ?? 0) }}
                               rank={idx + 1}
-                              maxVotes={Math.max(...catNominees.map(n => n.total_votes ?? 0), 1)}
+                              maxVotes={Math.max(...catNominees.map(n => Number(n.total_votes ?? 0)), 1)}
                               votingOpen={!!selectedAward.voting_open}
                               user={user}
                               onView={() => setProfileNominee(nominee)}
@@ -595,7 +621,7 @@ export default function AwardsPage() {
                 {/* Votes */}
                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                   <Star className="h-3.5 w-3.5 text-accent" />
-                  <span><strong className="text-foreground">{profileNominee.total_votes.toLocaleString()}</strong> votes</span>
+                  <span><strong className="text-foreground">{Number(profileNominee.total_votes ?? 0).toLocaleString()}</strong> votes</span>
                 </div>
 
                 {profileNominee.song_title && (
@@ -686,7 +712,7 @@ export default function AwardsPage() {
         <ShareSheet
           open={!!shareNominee}
           onClose={() => { setShareNominee(null); setSearchParams({}); }}
-          url={`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/share?nominee=${shareNominee.id}`}
+          url={`${window.location.origin}/nominee/${shareNominee.id}`}
           title={`${shareNominee.name} — ZedVevo Awards`}
           text={`Vote for ${shareNominee.name} at the ZedVevo Awards! 🏆`}
           thumbnailUrl={shareNominee.photo_url ?? undefined}
@@ -859,7 +885,7 @@ export default function AwardsPage() {
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-semibold truncate">{voteNominee.name}</p>
-                <p className="text-xs text-muted-foreground">{voteNominee.total_votes.toLocaleString()} current votes</p>
+                <p className="text-xs text-muted-foreground">{Number(voteNominee.total_votes ?? 0).toLocaleString()} current votes</p>
               </div>
             </div>
           )}
@@ -1006,9 +1032,10 @@ interface NomineeCardProps {
   onShare: () => void;
 }
 
-function NomineeCard({ nominee, rank, maxVotes, votingOpen, onView, onVote, onShare }: NomineeCardProps) {
+function NomineeCard({ nominee, rank, maxVotes, votingOpen, user, onView, onVote, onShare }: NomineeCardProps) {
   const canVote = (nominee.nomination_status === 'approved' || nominee.nomination_status === 'winner') && votingOpen;
-  const votes = nominee.total_votes ?? 0;
+  // Coerce to number — guards against bigint returned as string from DB/RPC
+  const votes = Number(nominee.total_votes ?? 0);
   const pct = maxVotes > 0 ? Math.round((votes / maxVotes) * 100) : 0;
 
   // Rank badge styling

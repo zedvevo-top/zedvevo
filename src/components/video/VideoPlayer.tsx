@@ -42,8 +42,8 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
   const [shareOpen, setShareOpen] = useState(false);
   const countedRef = useRef(false);
 
-  const shareUrl = `${window.location.origin}/videos?id=${video.id}`;
-  const shareText = `Watch "${video.title}" by ${video.artist_name} on ZedVevo — ${window.location.origin}/videos?id=${video.id}`;
+  const shareUrl = `${window.location.origin}/video/${video.id}`;
+  const shareText = `Watch "${video.title}" by ${video.artist_name} on ZedVevo — ${window.location.origin}/video/${video.id}`;
 
   // Reset when video changes
   useEffect(() => {

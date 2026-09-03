@@ -36,7 +36,7 @@ export default function MusicPage() {
     title: `${focusSong.title} — ${focusSong.featured_artists ? `${focusSong.artist_name} ft. ${focusSong.featured_artists}` : focusSong.artist_name} | ZedVevo MP3`,
     description: `Listen to "${focusSong.title}" by ${focusSong.featured_artists ? `${focusSong.artist_name} ft. ${focusSong.featured_artists}` : focusSong.artist_name} on ZedVevo — Zambia's music platform.`,
     imageUrl: focusSong.cover_url ?? undefined,
-    pageUrl: `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/share?song=${focusSong.id}`,
+    pageUrl: `${window.location.origin}/song/${focusSong.id}`,
   } : {
     title: 'ZedVevo — Zambian Music & Video',
     description: 'Stream and discover the best Zambian music on ZedVevo.',

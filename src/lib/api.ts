@@ -300,17 +300,20 @@ export async function deleteAwardCategory(id: string) {
 // NOMINEES
 // ============================================================
 export async function getNomineesByCategory(categoryId: string): Promise<Nominee[]> {
+  // Direct select — total_votes is kept accurate by DB triggers + migration recalc.
+  // Coerce total_votes to Number in case Postgres returns bigint as string in some paths.
   const { data, error } = await supabase
     .from('nominees')
     .select('id, name, bio, photo_url, song_title, song_url, achievements, social_links, total_votes, is_winner, nomination_status, registration_status, category_id, user_id, created_at')
     .eq('category_id', categoryId)
     .eq('registration_status', 'successful')
     .in('nomination_status', ['approved', 'winner'])
-    // newest first within same vote count — ensures new nominees appear at top initially
-    .order('created_at', { ascending: false })
-    .order('total_votes', { ascending: false });
+    .order('total_votes', { ascending: false })
+    .order('created_at', { ascending: false });
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  const rows = Array.isArray(data) ? data : [];
+  // Normalise: coerce total_votes to a plain JS number (guards against bigint→string from RPC paths)
+  return rows.map(r => ({ ...r, total_votes: Number(r.total_votes ?? 0) }));
 }
 
 export async function getUserNominations(userId: string): Promise<Nominee[]> {
@@ -543,10 +546,13 @@ export async function deleteNominee(id: string): Promise<void> {
 export async function getAllVotes(): Promise<Vote[]> {
   const { data, error } = await supabase
     .from('votes')
-    .select('*, nominees(name, photo_url, award_categories(name))')
+    .select('*, nominees(name, photo_url, category_id, award_categories(name))')
     .order('created_at', { ascending: false })
     .limit(500);
-  if (error) throw error;
+  if (error) {
+    console.error('[getAllVotes] error:', error.message);
+    return [];
+  }
   return Array.isArray(data) ? data : [];
 }
 

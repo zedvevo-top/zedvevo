@@ -7,6 +7,7 @@
     "npm": ">=10"
   },
   "scripts": {
+    "postinstall": "mkdir -p node_modules/@types/react-grid-layout && echo 'declare module \"react-grid-layout\";\\nexport {}; ' > node_modules/@types/react-grid-layout/index.d.ts",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
@@ -83,7 +84,6 @@
     "@tailwindcss/container-queries": "^0.1.1",
     "@types/bmapgl": "^0.0.7",
     "@types/lodash": "^4.17.24",
-    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@types/react-grid-layout": "^2.1.0",

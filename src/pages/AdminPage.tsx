@@ -227,12 +227,40 @@ export default function AdminPage() {
     };
     load();
 
-    // Realtime: increment today's visitor count on every new log row
+    // Realtime: visitors + votes + nominees live updates
     const channel = supabase
-      .channel('admin-visitor-realtime')
+      .channel('admin-realtime')
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'visitor_logs' },
         () => setTodayVisitors(prev => prev + 1)
+      )
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'votes' },
+        async () => {
+          const vts = await getAllVotes();
+          setVotes(vts);
+        }
+      )
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'votes' },
+        async () => {
+          const vts = await getAllVotes();
+          setVotes(vts);
+        }
+      )
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'nominees' },
+        async () => {
+          const nom = await getAllNominees();
+          setNominees(nom);
+        }
+      )
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'nominees' },
+        async () => {
+          const nom = await getAllNominees();
+          setNominees(nom);
+        }
       )
       .subscribe();
 
@@ -549,18 +577,18 @@ export default function AdminPage() {
     try {
       const count = parseInt(editVoteCount);
       if (isNaN(count) || count < 0) { toast.error('Invalid vote count'); setVoteSaving(false); return; }
+      const wasApproved = voteDialog.vote.vote_approval_status === 'approved';
+      const diff = count - voteDialog.vote.vote_count;
       await updateVote(voteDialog.vote.id, {
         vote_count: count,
         payment_status: editVoteStatus as VoteType['payment_status'],
       });
-      // Also sync nominee total_votes if vote_count changed
-      const diff = count - voteDialog.vote.vote_count;
-      if (diff !== 0) {
+      // Only sync total_votes delta if vote was/is approved
+      if (diff !== 0 && wasApproved) {
         await supabase.rpc('increment_nominee_votes', { nom_id: voteDialog.vote.nominee_id, delta: diff });
       }
-      const updated = await getAllVotes();
+      const [updated, updatedNoms] = await Promise.all([getAllVotes(), getAllNominees()]);
       setVotes(updated);
-      const updatedNoms = await getAllNominees();
       setNominees(updatedNoms);
       toast.success('Vote updated');
       setVoteDialog({ open: false });
@@ -572,8 +600,8 @@ export default function AdminPage() {
     if (!confirm('Delete this vote record?')) return;
     try {
       await deleteVote(vote.id);
-      // Subtract votes from nominee
-      if (vote.vote_count > 0) {
+      // If vote was approved, subtract from nominee total
+      if (vote.vote_approval_status === 'approved' && vote.vote_count > 0) {
         await supabase.rpc('increment_nominee_votes', { nom_id: vote.nominee_id, delta: -vote.vote_count });
       }
       setVotes(prev => prev.filter(v => v.id !== vote.id));
@@ -581,6 +609,26 @@ export default function AdminPage() {
       setNominees(updatedNoms);
       toast.success('Vote deleted');
     } catch (e: unknown) { toast.error((e as Error).message || 'Failed to delete vote'); }
+  };
+
+  const handleApproveVote = async (vote: VoteType) => {
+    try {
+      await supabase.from('votes').update({ vote_approval_status: 'approved' }).eq('id', vote.id);
+      setVotes(prev => prev.map(v => v.id === vote.id ? { ...v, vote_approval_status: 'approved' as const } : v));
+      const updatedNoms = await getAllNominees();
+      setNominees(updatedNoms);
+      toast.success(`Vote approved — ${vote.vote_count} vote${vote.vote_count > 1 ? 's' : ''} counted`);
+    } catch (e: unknown) { toast.error((e as Error).message || 'Failed to approve vote'); }
+  };
+
+  const handleRejectVote = async (vote: VoteType) => {
+    try {
+      await supabase.from('votes').update({ vote_approval_status: 'rejected' }).eq('id', vote.id);
+      setVotes(prev => prev.map(v => v.id === vote.id ? { ...v, vote_approval_status: 'rejected' as const } : v));
+      const updatedNoms = await getAllNominees();
+      setNominees(updatedNoms);
+      toast.success('Vote rejected — votes removed from count');
+    } catch (e: unknown) { toast.error((e as Error).message || 'Failed to reject vote'); }
   };
 
   const stats = {
@@ -808,24 +856,33 @@ export default function AdminPage() {
           <TabsContent value="votes">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold">Votes ({votes.length})</h2>
-              <p className="text-xs text-muted-foreground">Total votes cast: {votes.reduce((a, v) => a + (v.vote_count || 0), 0).toLocaleString()}</p>
+              <div className="flex items-center gap-3">
+                <p className="text-xs text-muted-foreground">
+                  Pending: <span className="font-semibold text-foreground">{votes.filter(v => v.vote_approval_status === 'pending').length}</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Confirmed: <span className="font-semibold text-foreground">
+                    {votes.filter(v => v.vote_approval_status === 'approved').reduce((a, v) => a + (v.vote_count || 0), 0).toLocaleString()}
+                  </span>
+                </p>
+              </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[700px] text-sm">
+              <table className="w-full min-w-[900px] text-sm">
                 <thead>
                   <tr className="border-b border-border">
-                    {['Nominee', 'Category', 'Votes', 'Amount', 'Status', 'Date', 'Actions'].map(h => (
+                    {['Nominee', 'Category', 'Voter', 'Votes', 'Amount', 'Payment', 'Approval', 'Date', 'Actions'].map(h => (
                       <th key={h} className="text-left py-2 px-2 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={7}><Skeleton className="h-8 w-full mt-2" /></td></tr>
+                    <tr><td colSpan={9}><Skeleton className="h-8 w-full mt-2" /></td></tr>
                   ) : votes.length === 0 ? (
-                    <tr><td colSpan={7} className="py-8 text-center text-muted-foreground text-xs">No votes yet</td></tr>
+                    <tr><td colSpan={9} className="py-8 text-center text-muted-foreground text-xs">No votes yet</td></tr>
                   ) : votes.slice(0, 200).map(v => (
-                    <tr key={v.id} className="border-b border-border hover:bg-muted/30">
+                    <tr key={v.id} className={`border-b border-border hover:bg-muted/30 ${v.vote_approval_status === 'pending' ? 'bg-yellow-500/5' : ''}`}>
                       <td className="py-2 px-2 whitespace-nowrap font-medium">
                         <div className="flex items-center gap-2">
                           {(v.nominees as { photo_url?: string } | null)?.photo_url && (
@@ -837,6 +894,13 @@ export default function AdminPage() {
                       <td className="py-2 px-2 whitespace-nowrap text-muted-foreground text-xs">
                         {((v.nominees as { award_categories?: { name?: string } } | null)?.award_categories as { name?: string } | null)?.name ?? '—'}
                       </td>
+                      <td className="py-2 px-2 whitespace-nowrap text-xs text-muted-foreground">
+                        {v.user_id ? (
+                          <span className="font-mono text-[10px]">{v.user_id.slice(0, 8)}…</span>
+                        ) : (
+                          <Badge variant="secondary" className="text-[9px] px-1 py-0">Guest</Badge>
+                        )}
+                      </td>
                       <td className="py-2 px-2 whitespace-nowrap font-semibold">{v.vote_count}</td>
                       <td className="py-2 px-2 whitespace-nowrap">{formatCurrency(v.amount)}</td>
                       <td className="py-2 px-2 whitespace-nowrap">
@@ -847,9 +911,41 @@ export default function AdminPage() {
                           {v.payment_status}
                         </Badge>
                       </td>
+                      <td className="py-2 px-2 whitespace-nowrap">
+                        <Badge
+                          variant={v.vote_approval_status === 'approved' ? 'default' : v.vote_approval_status === 'rejected' ? 'destructive' : 'secondary'}
+                          className="text-[10px] capitalize"
+                        >
+                          {v.vote_approval_status ?? 'pending'}
+                        </Badge>
+                      </td>
                       <td className="py-2 px-2 whitespace-nowrap text-muted-foreground text-xs">{formatDate(v.created_at)}</td>
                       <td className="py-2 px-2 whitespace-nowrap">
                         <div className="flex gap-1">
+                          {v.vote_approval_status === 'pending' && (
+                            <>
+                              <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px] text-green-600 hover:text-green-700 hover:bg-green-50"
+                                onClick={() => handleApproveVote(v)} title="Approve — count these votes">
+                                ✓ Approve
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px] text-destructive hover:bg-destructive/10"
+                                onClick={() => handleRejectVote(v)} title="Reject — do not count">
+                                ✗ Reject
+                              </Button>
+                            </>
+                          )}
+                          {v.vote_approval_status === 'approved' && (
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px] text-destructive hover:bg-destructive/10"
+                              onClick={() => handleRejectVote(v)} title="Revoke approval">
+                              Revoke
+                            </Button>
+                          )}
+                          {v.vote_approval_status === 'rejected' && (
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px] text-green-600 hover:text-green-700 hover:bg-green-50"
+                              onClick={() => handleApproveVote(v)} title="Re-approve">
+                              Re-approve
+                            </Button>
+                          )}
                           <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit"
                             onClick={() => openVoteDialog(v)}>
                             <Pencil className="h-3.5 w-3.5" />

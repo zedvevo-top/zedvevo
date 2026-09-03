@@ -25,7 +25,7 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
   const [shareOpen, setShareOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
 
-  const shareUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/share?song=${song.id}`;
+  const shareUrl = `${window.location.origin}/song/${song.id}`;
   // Build artist label: "Artist ft. Featured1, Featured2"
   const artistLabel = song.featured_artists
     ? `${song.artist_name} ft. ${song.featured_artists}`

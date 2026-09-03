@@ -279,13 +279,14 @@ export interface SearchResult {
 
 export interface Vote {
   id: string;
-  user_id: string;
+  user_id: string | null;
   nominee_id: string;
   category_id: string;
   amount: number;
   vote_count: number;
   payment_id?: string;
   payment_status: PaymentStatus;
+  vote_approval_status: 'pending' | 'approved' | 'rejected';
   created_at: string;
   nominees?: Nominee;
 }

@@ -1,0 +1,11 @@
+{
+  "remoteName": "origin",
+  "projects": [
+    {
+      "id": "prj_UuMrUSAdLl9eaC8ek1FNeo9mVwPX",
+      "name": "zedvevo-full-source",
+      "directory": ".",
+      "orgId": "team_jXZHZlYBWj5VnAub56j5qyk5"
+    }
+  ]
+}

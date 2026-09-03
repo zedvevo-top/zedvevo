@@ -116,7 +116,12 @@ serve(async (req) => {
 
   console.log('[webhook] payment', referenceId, '->', newStatus);
 
-  // ── On successful/failed vote payment: update nominee total_votes ────────────
+  // ── Vote payment handling ────────────────────────────────────────────────────
+  // Flow:
+  //   Lipila webhook fires:
+  //     successful → upsert vote row as approved → DB trigger increments total_votes
+  //     failed     → upsert vote row as rejected, no count change
+  //   Admin can still manually approve/reject from the Votes tab.
   if (payment.payment_type === 'vote') {
     const { data: pmtFull } = await supabase
       .from('payments')
@@ -131,78 +136,104 @@ serve(async (req) => {
       user_id?: string;
     } | null;
 
-    const nomineeId   = meta?.nominee_id ?? null;
-    const voteCount   = Math.max(1, meta?.vote_count ?? 1);
-    const voterId     = pmtFull?.user_id ?? meta?.user_id ?? null;
+    const nomineeId = meta?.nominee_id ?? null;
+    const voteCount = Math.max(1, meta?.vote_count ?? 1);
+    const voterId   = pmtFull?.user_id ?? meta?.user_id ?? null;
 
-    if (nomineeId) {
+    if (!nomineeId) {
+      console.error('[webhook] vote payment missing nominee_id in metadata:', JSON.stringify(meta));
+    } else {
+      const { data: nomineeRow } = await supabase
+        .from('nominees').select('name, category_id').eq('id', nomineeId).maybeSingle();
+
       if (newStatus === 'successful') {
-        // Idempotency check via vote_records table (also enforced by DB trigger,
-        // but webhook is the primary path for Lipila callbacks)
-        const { data: existingRecord } = await supabase
-          .from('vote_records')
-          .select('id')
-          .eq('payment_id', referenceId)
-          .maybeSingle();
+        // ── Lipila confirmed: upsert vote as APPROVED ─────────────────────────
+        // The DB payment trigger (handle_vote_payment_success) already inserts the
+        // vote as 'approved' when payments.status flips to 'successful'.
+        // This webhook upsert is idempotent — it confirms/corrects the status and
+        // fires the UPDATE trigger if somehow the row was left as 'pending'.
 
-        if (existingRecord) {
-          console.log(`[webhook] vote already recorded for payment ${referenceId}, skipping`);
+        console.log(`[webhook] approving vote — payment=${referenceId} nominee=${nomineeId} count=${voteCount}`);
+
+        // Check current state before upsert for diagnostics
+        const { data: existingVote, error: checkErr } = await supabase
+          .from('votes').select('id, vote_approval_status, vote_count').eq('payment_id', referenceId).maybeSingle();
+        if (checkErr) console.error('[webhook] vote check error:', checkErr.message);
+        console.log(`[webhook] existing vote row:`, JSON.stringify(existingVote));
+
+        const { data: upsertData, error: upsertErr } = await supabase.from('votes').upsert({
+          nominee_id:           nomineeId,
+          category_id:          nomineeRow?.category_id ?? null,
+          amount:               pmtFull?.amount ?? 0,
+          vote_count:           voteCount,
+          payment_id:           referenceId,
+          payment_status:       'successful',
+          vote_approval_status: 'approved',
+          user_id:              voterId ?? null,
+        }, { onConflict: 'payment_id' }).select('id, vote_approval_status');
+
+        if (upsertErr) {
+          console.error('[webhook] vote upsert FAILED:', upsertErr.code, upsertErr.message, upsertErr.details, upsertErr.hint);
+          // Hard fallback: direct RPC increment + force approve
+          const { error: rpcErr } = await supabase.rpc('increment_nominee_votes', { nom_id: nomineeId, delta: voteCount });
+          if (rpcErr) console.error('[webhook] fallback RPC also failed:', rpcErr.message);
+          else console.log(`[webhook] fallback increment applied for nominee ${nomineeId}`);
         } else {
-          // Insert vote_record first — UNIQUE(payment_id) prevents double insert
-          const { error: vrErr } = await supabase
-            .from('vote_records')
-            .insert({
-              payment_id: referenceId,
-              nominee_id: nomineeId,
-              vote_count: voteCount,
-              lipila_tx_id: identifier ?? externalId ?? null,
-            });
-
-          if (vrErr && vrErr.code === '23505') {
-            // Unique violation — race condition with DB trigger, already counted
-            console.log(`[webhook] vote_record unique conflict for payment ${referenceId}, already counted`);
-          } else if (vrErr) {
-            console.error('[webhook] vote_record insert error:', vrErr.message);
-          } else {
-            // vote_records inserted — DB trigger handles total_votes increment automatically
-            console.log(`[webhook] vote_record inserted for nominee ${nomineeId} +${voteCount} votes`);
-
-            // Notify voter if we have their ID
-            if (voterId) {
-              const { data: nomineeRow } = await supabase
-                .from('nominees').select('name').eq('id', nomineeId).maybeSingle();
-              await supabase.from('notifications').insert({
-                user_id: voterId,
-                title: '🗳️ Vote Confirmed!',
-                message: `Your ${voteCount} vote${voteCount > 1 ? 's' : ''} for "${nomineeRow?.name ?? 'nominee'}" have been counted!`,
-                type: 'success',
-                notification_type: 'vote_confirmed',
-                link: '/awards',
-              });
-            }
-          }
+          console.log(`[webhook] vote upserted OK — id=${upsertData?.[0]?.id} status=${upsertData?.[0]?.vote_approval_status} nominee=${nomineeId} +${voteCount}`);
         }
-      } else {
-        // Failed — notify voter, no votes added
+
+        // Verify total_votes updated
+        const { data: updatedNom } = await supabase.from('nominees').select('total_votes').eq('id', nomineeId).maybeSingle();
+        console.log(`[webhook] nominee ${nomineeId} total_votes after approve:`, updatedNom?.total_votes);
+
+        // Idempotency record
+        await supabase.from('vote_records').upsert({
+          payment_id:   referenceId,
+          nominee_id:   nomineeId,
+          vote_count:   voteCount,
+          lipila_tx_id: identifier ?? externalId ?? null,
+        }, { onConflict: 'payment_id', ignoreDuplicates: true });
+
+        // Notify voter if logged in
         if (voterId) {
-          const { data: nomineeRow } = await supabase
-            .from('nominees').select('name').eq('id', nomineeId).maybeSingle();
+          await supabase.from('notifications').insert({
+            user_id:           voterId,
+            title:             '🗳️ Vote Confirmed!',
+            message:           `Your ${voteCount} vote${voteCount > 1 ? 's' : ''} for "${nomineeRow?.name ?? 'nominee'}" have been counted!`,
+            type:              'success',
+            notification_type: 'vote_confirmed',
+            link:              '/awards',
+          });
+        }
+
+      } else {
+        // ── Payment failed → upsert as rejected, no count change ─────────────
+        await supabase.from('votes').upsert({
+          nominee_id:           nomineeId,
+          category_id:          nomineeRow?.category_id ?? null,
+          amount:               pmtFull?.amount ?? 0,
+          vote_count:           voteCount,
+          payment_id:           referenceId,
+          payment_status:       newStatus,
+          vote_approval_status: 'rejected',
+          user_id:              voterId ?? null,
+        }, { onConflict: 'payment_id' });
+
+        if (voterId) {
           const failMsg = newStatus === 'insufficient_funds'
             ? `Your vote payment for "${nomineeRow?.name ?? 'nominee'}" failed: insufficient funds. Please top up and try again.`
             : `Your vote payment for "${nomineeRow?.name ?? 'nominee'}" was not processed. No votes were counted.`;
           await supabase.from('notifications').insert({
-            user_id: voterId,
-            title: '❌ Vote Not Counted',
-            message: failMsg,
-            type: 'error',
+            user_id:           voterId,
+            title:             '❌ Vote Not Counted',
+            message:           failMsg,
+            type:              'error',
             notification_type: 'vote_failed',
-            link: '/awards',
+            link:              '/awards',
           });
         }
         console.log(`[webhook] vote ${newStatus} — no votes added for nominee: ${nomineeId}`);
       }
-    } else {
-      console.error('[webhook] vote payment missing nominee_id in metadata:', JSON.stringify(meta));
     }
   }
 
@@ -225,9 +256,11 @@ serve(async (req) => {
       achievements?: string;
       social_links?: string;
       user_id?: string;
+      contact_email?: string;
     } | null;
 
-    const userId = pmtFull?.user_id ?? meta?.user_id ?? null;
+    // Prefer JWT-resolved user_id from payment row; fall back to metadata (logged-in users pass it there too)
+    const userId = pmtFull?.user_id ?? (meta?.user_id ? meta.user_id as string : null) ?? null;
 
     if (meta?.category_id && meta?.nominee_name) {
       const nomineePayload: Record<string, unknown> = {
@@ -235,16 +268,17 @@ serve(async (req) => {
         category_id: meta.category_id,
         payment_id: referenceId,
         registration_status: 'successful',
-        nomination_status: 'approved',   // ← auto-approved on payment
+        nomination_status: 'approved',
         total_votes: 0,
       };
-      if (userId) nomineePayload.user_id = userId;
-      if (meta.bio) nomineePayload.bio = meta.bio;
-      if (meta.photo_url) nomineePayload.photo_url = meta.photo_url;
-      if (meta.song_title) nomineePayload.song_title = meta.song_title;
-      if (meta.song_url) nomineePayload.song_url = meta.song_url;
-      if (meta.achievements) nomineePayload.achievements = meta.achievements;
-      if (meta.social_links) nomineePayload.social_links = meta.social_links;
+      if (userId)            nomineePayload.user_id       = userId;
+      if (meta.bio)          nomineePayload.bio            = meta.bio;
+      if (meta.photo_url)    nomineePayload.photo_url      = meta.photo_url;
+      if (meta.song_title)   nomineePayload.song_title     = meta.song_title;
+      if (meta.song_url)     nomineePayload.song_url       = meta.song_url;
+      if (meta.achievements) nomineePayload.achievements   = meta.achievements;
+      if (meta.social_links) nomineePayload.social_links   = meta.social_links;
+      if (meta.contact_email) nomineePayload.contact_email = meta.contact_email;
 
       const { data: existing } = await supabase
         .from('nominees').select('id').eq('payment_id', referenceId).maybeSingle();

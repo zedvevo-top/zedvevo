@@ -93,12 +93,10 @@ serve(async (req) => {
   try { body = await req.json(); }
   catch { return json({ error: 'Invalid request body' }, 400); }
 
-  // Allow anonymous/guest votes — user_id will be NULL
-  if (!userId && body.payment_type === 'vote') {
-    console.log('[lipila] guest voter — user_id will be null');
-    userId = null;
-  } else if (!userId && body.payment_type === 'donation') {
-    console.log('[lipila] guest donor — user_id will be null');
+  // Allow anonymous/guest payments for specific types — user_id will be NULL
+  const guestAllowedTypes = ['vote', 'donation', 'nominee_registration'];
+  if (!userId && guestAllowedTypes.includes(body.payment_type)) {
+    console.log(`[lipila] guest ${body.payment_type} — user_id will be null`);
     userId = null;
   } else if (!userId) {
     return json({ error: 'Unauthorized: could not identify user' }, 401);

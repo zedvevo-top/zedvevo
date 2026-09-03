@@ -324,6 +324,7 @@ export default function UploadPage() {
     if (!title || !artistName || !file) { toast.error('Fill in all required fields'); return; }
     if (uploadType === 'song' && !coverFile) { toast.error('Song cover image is required'); return; }
     const isAdminUser = profile?.role === 'admin' || profile?.role === 'super_admin';
+    const isArtistUser = profile?.role === 'artist';
     // Expired plan blocks everyone (including artists); admins always pass
     if (!isAdminUser && !hasValidSub) {
       toast.error('No active upload plan. Please purchase a plan to continue.');
