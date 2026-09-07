@@ -343,6 +343,23 @@ export interface HelpMessage {
   updated_at?: string;
 }
 
+export interface SupportTicket {
+  id: string;
+  user_id?: string;
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  status: 'open' | 'in_progress' | 'waiting' | 'resolved' | 'closed';
+  category: 'general' | 'billing' | 'technical' | 'content' | 'awards' | 'other';
+  assigned_to?: string;
+  admin_notes?: string;
+  resolved_at?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
 export interface LipilaPaymentResponse {
   success: boolean;
   transaction_id?: string;

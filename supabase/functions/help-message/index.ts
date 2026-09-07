@@ -69,6 +69,25 @@ serve(async (req) => {
     // Don't fail — still send email
   }
 
+  // 1b. Also record as a support ticket (support_tickets extends help_messages with priority/assignment)
+  const { error: ticketErr } = await supabase
+    .from('support_tickets')
+    .insert({
+      user_id:    user_id ?? null,
+      name:       senderName,
+      email:      senderEmail,
+      subject:    msgSubject,
+      message:    message.trim(),
+      priority:   'normal',
+      status:     'open',
+      category:   'general',
+      created_at: now,
+    });
+
+  if (ticketErr) {
+    console.error('[help-message] support_tickets insert error:', ticketErr.message);
+  }
+
   const msgId = stored?.id ?? 'N/A';
 
   // 2. Email admin

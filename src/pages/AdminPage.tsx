@@ -45,7 +45,7 @@ import {
 import type {
   Profile, Song, Video as VideoType, Payment, Award, AwardCategory,
   HeroBanner, UploadPlan, Download as DownloadType, Nominee, WinnerOfMonth, WeeklyTrending,
-  VisitorLog as VisitorLogType, Vote as VoteType, HelpMessage,
+  VisitorLog as VisitorLogType, Vote as VoteType, HelpMessage, SupportTicket,
 } from '@/types/index';
 import { formatDate, formatCurrency, getPaymentStatusColor, getPaymentStatusLabel } from '@/lib/utils';
 
@@ -160,6 +160,10 @@ export default function AdminPage() {
   const [helpLoading, setHelpLoading] = useState(false);
   const [helpNotes, setHelpNotes] = useState<Record<string, string>>({});
   const [helpSaving, setHelpSaving] = useState<Record<string, boolean>>({});
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [ticketNotes, setTicketNotes] = useState<Record<string, string>>({});
+  const [ticketSaving, setTicketSaving] = useState<Record<string, boolean>>({});
   const [awardSaving, setAwardSaving] = useState(false);
 
   // Nominee edit/add dialog
@@ -222,6 +226,13 @@ export default function AdminPage() {
           .select('*')
           .order('created_at', { ascending: false })
           .then(({ data }) => { if (data) setHelpMessages(data as HelpMessage[]); });
+
+        // Load support tickets separately (non-blocking)
+        supabase
+          .from('support_tickets')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .then(({ data }) => { if (data) setTickets(data as SupportTicket[]); });
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     };
@@ -687,6 +698,7 @@ export default function AdminPage() {
               { value: 'banners',   label: 'Banners',       icon: Image },
               { value: 'visitors',  label: 'Visitors',      icon: Eye },
               { value: 'help',      label: 'Help',          icon: MessageCircle },
+              { value: 'tickets',   label: 'Tickets',       icon: MessageCircle },
               { value: 'settings',  label: 'Settings',      icon: Settings },
             ].map(({ value, label, icon: Icon }) => (
               <TabsTrigger key={value} value={value} className="flex items-center gap-1.5 text-xs">
@@ -1691,6 +1703,87 @@ export default function AdminPage() {
                         toast.success('Notes saved');
                       }}>
                         {helpSaving[msg.id] && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}Save Notes
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ── Support Tickets tab ── */}
+          <TabsContent value="tickets">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold">Support Tickets ({tickets.length})</h2>
+              <Button size="sm" variant="outline" disabled={ticketsLoading} onClick={async () => {
+                setTicketsLoading(true);
+                const { data } = await supabase.from('support_tickets').select('*').order('created_at', { ascending: false });
+                if (data) setTickets(data as SupportTicket[]);
+                setTicketsLoading(false);
+              }}>
+                <RefreshCw className={`h-3.5 w-3.5 mr-1 ${ticketsLoading ? 'animate-spin' : ''}`} />Refresh
+              </Button>
+            </div>
+            {tickets.length === 0 ? (
+              <Card><CardContent className="py-10 text-center text-muted-foreground text-sm">No support tickets yet.</CardContent></Card>
+            ) : (
+              <div className="space-y-3">
+                {tickets.map(t => (
+                  <Card key={t.id} className="border border-border">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-sm truncate">{t.name}</p>
+                          <p className="text-xs text-muted-foreground truncate">{t.email}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Badge variant={t.priority === 'urgent' || t.priority === 'high' ? 'destructive' : 'secondary'} className="text-xs">
+                            {t.priority}
+                          </Badge>
+                          <Badge variant={t.status === 'open' ? 'destructive' : t.status === 'resolved' || t.status === 'closed' ? 'default' : 'secondary'} className="text-xs">
+                            {t.status}
+                          </Badge>
+                          <Select value={t.status} onValueChange={async (val) => {
+                            const resolvedAt = (val === 'resolved' || val === 'closed') ? new Date().toISOString() : null;
+                            await supabase.from('support_tickets').update({ status: val, resolved_at: resolvedAt, updated_at: new Date().toISOString() }).eq('id', t.id);
+                            setTickets(prev => prev.map(x => x.id === t.id ? { ...x, status: val as SupportTicket['status'], resolved_at: resolvedAt ?? undefined } : x));
+                            toast.success('Status updated');
+                          }}>
+                            <SelectTrigger className="h-7 text-xs w-32"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="open">Open</SelectItem>
+                              <SelectItem value="in_progress">In Progress</SelectItem>
+                              <SelectItem value="waiting">Waiting</SelectItem>
+                              <SelectItem value="resolved">Resolved</SelectItem>
+                              <SelectItem value="closed">Closed</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        <strong>Subject:</strong> {t.subject} &nbsp;·&nbsp; <span className="capitalize">{t.category}</span> &nbsp;·&nbsp; {new Date(t.created_at).toLocaleString()}
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="bg-muted/50 rounded p-3 text-sm whitespace-pre-wrap leading-relaxed">{t.message}</div>
+                      <div>
+                        <Label className="text-xs mb-1 block">Admin Notes</Label>
+                        <Textarea
+                          rows={2}
+                          className="text-xs resize-none"
+                          placeholder="Internal notes (not sent to user)…"
+                          value={ticketNotes[t.id] ?? t.admin_notes ?? ''}
+                          onChange={e => setTicketNotes(prev => ({ ...prev, [t.id]: e.target.value }))}
+                        />
+                      </div>
+                      <Button size="sm" variant="outline" disabled={!!ticketSaving[t.id]} onClick={async () => {
+                        setTicketSaving(prev => ({ ...prev, [t.id]: true }));
+                        await supabase.from('support_tickets').update({ admin_notes: ticketNotes[t.id] ?? t.admin_notes ?? '', updated_at: new Date().toISOString() }).eq('id', t.id);
+                        setTickets(prev => prev.map(x => x.id === t.id ? { ...x, admin_notes: ticketNotes[t.id] } : x));
+                        setTicketSaving(prev => ({ ...prev, [t.id]: false }));
+                        toast.success('Notes saved');
+                      }}>
+                        {ticketSaving[t.id] && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}Save Notes
                       </Button>
                     </CardContent>
                   </Card>

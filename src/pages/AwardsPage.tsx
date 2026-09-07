@@ -1032,7 +1032,7 @@ interface NomineeCardProps {
   onShare: () => void;
 }
 
-function NomineeCard({ nominee, rank, maxVotes, votingOpen, user, onView, onVote, onShare }: NomineeCardProps) {
+function NomineeCard({ nominee, rank, maxVotes, votingOpen, onView, onVote, onShare }: NomineeCardProps) {
   const canVote = (nominee.nomination_status === 'approved' || nominee.nomination_status === 'winner') && votingOpen;
   // Coerce to number — guards against bigint returned as string from DB/RPC
   const votes = Number(nominee.total_votes ?? 0);
