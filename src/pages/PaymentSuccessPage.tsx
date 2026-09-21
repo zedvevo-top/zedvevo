@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, XCircle, Loader2, Clock, Music2, Trophy } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, Clock, Music2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/db/supabase';
 
@@ -12,22 +12,11 @@ export default function PaymentSuccessPage() {
   const paymentId = params.get('payment_id');
   const [state, setState] = useState<State>('loading');
   const [countdown, setCountdown] = useState(5);
-  const [info, setInfo] = useState<{
-    amount?: number;
-    currency?: string;
-    donorName?: string;
-    paymentType?: string;
-  } | null>(null);
+  const [info, setInfo] = useState<{ amount?: number; currency?: string; donorName?: string } | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const getRedirectPath = (paymentType?: string) => {
-    if (paymentType === 'nominee_registration' || paymentType === 'vote') return '/awards';
-    return '/';
-  };
-
   // Start countdown + auto-redirect when success confirmed
-  const startAutoRedirect = (paymentType?: string) => {
-    const target = getRedirectPath(paymentType);
+  const startAutoRedirect = () => {
     let secs = 5;
     setCountdown(secs);
     countdownRef.current = setInterval(() => {
@@ -35,7 +24,7 @@ export default function PaymentSuccessPage() {
       setCountdown(secs);
       if (secs <= 0) {
         clearInterval(countdownRef.current!);
-        navigate(target, { replace: true });
+        navigate('/', { replace: true });
       }
     }, 1000);
   };
@@ -60,11 +49,10 @@ export default function PaymentSuccessPage() {
         if (cancelled) return;
         const status = data?.status;
 
-        if (status === 'successful') {
-          const pType = data?.payment_type as string | undefined;
-          setInfo({ amount: data.amount, currency: data.currency, donorName: data.donor_name, paymentType: pType });
+        if (status === 'completed' || status === 'successful') {
+          setInfo({ amount: data.amount, currency: data.currency, donorName: data.donor_name });
           setState('success');
-          startAutoRedirect(pType);
+          startAutoRedirect();
           return;
         }
         if (status === 'failed' || status === 'insufficient_funds') {
@@ -84,8 +72,6 @@ export default function PaymentSuccessPage() {
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paymentId]);
-
-  const isAwardsPayment = info?.paymentType === 'nominee_registration' || info?.paymentType === 'vote';
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-20">
@@ -118,48 +104,26 @@ export default function PaymentSuccessPage() {
 
         {state === 'success' && (
           <>
-            <div className={`mx-auto h-20 w-20 rounded-full flex items-center justify-center ${isAwardsPayment ? 'bg-accent/10' : 'bg-green-500/10'}`}>
-              {isAwardsPayment
-                ? <Trophy className="h-10 w-10 text-accent" />
-                : <CheckCircle2 className="h-10 w-10 text-green-500" />
-              }
+            <div className="mx-auto h-20 w-20 rounded-full bg-green-500/10 flex items-center justify-center">
+              <CheckCircle2 className="h-10 w-10 text-green-500" />
             </div>
             <div className="space-y-2">
-              <h1 className="text-2xl font-bold">
-                {info?.paymentType === 'nominee_registration'
-                  ? 'Nomination Registered! 🏆'
-                  : info?.paymentType === 'vote'
-                  ? 'Vote Confirmed! 🗳'
-                  : 'Thank you! 🎵'
-                }
-              </h1>
+              <h1 className="text-2xl font-bold">Thank you! 🎵</h1>
               {info?.amount && (
                 <p className="text-lg font-semibold text-accent">
                   K{Number(info.amount).toFixed(0)} {info.currency?.toUpperCase() ?? 'ZMW'} received
                 </p>
               )}
               <p className="text-muted-foreground text-sm">
-                {info?.paymentType === 'nominee_registration'
-                  ? 'Your nomination is being reviewed. Check the Awards page for status updates.'
-                  : info?.paymentType === 'vote'
-                  ? 'Your votes will be counted once payment is fully verified by Lipila.'
-                  : 'Your donation helps keep Zambian music free for everyone.'
-                }
+                Your donation helps keep Zambian music free for everyone.
                 {info?.donorName && <><br />Thank you, <span className="font-medium">{info.donorName}</span>!</>}
               </p>
             </div>
             <p className="text-xs text-muted-foreground">
-              Redirecting to {isAwardsPayment ? 'Awards' : 'ZedVevo'} in {countdown}s…
+              Returning to ZedVevo in {countdown}s…
             </p>
-            <Button className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
-              onClick={() => {
-                clearInterval(countdownRef.current!);
-                navigate(getRedirectPath(info?.paymentType), { replace: true });
-              }}>
-              {isAwardsPayment
-                ? <><Trophy className="h-4 w-4 mr-2" />Go to Awards</>
-                : <><Music2 className="h-4 w-4 mr-2" />Back to ZedVevo</>
-              }
+            <Button className="w-full" onClick={() => { clearInterval(countdownRef.current!); navigate('/'); }}>
+              <Music2 className="h-4 w-4 mr-2" />Back to ZedVevo now
             </Button>
           </>
         )}

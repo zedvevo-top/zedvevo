@@ -45,4 +45,4 @@ history/*.json
 .env.local
 .env.production
 .env.*.local
-.vite
+.ideavo/project

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, Music2, Video, Trophy, Upload, Library, User, LayoutDashboard, LogOut, LogIn, TrendingUp, Download, Heart, HelpCircle } from 'lucide-react';
+import { Menu, X, Music2, Video, Trophy, Upload, Library, User, LayoutDashboard, LogOut, LogIn, TrendingUp, Download, Heart } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -8,14 +8,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/db/supabase';
 import CDLogo from '@/components/ui/CDLogo';
 import SearchBar from '@/components/search/SearchBar';
 import NotificationBell from '@/components/notifications/NotificationBell';
@@ -39,22 +32,6 @@ export default function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [donateOpen, setDonateOpen] = useState(false);
 
-  // Help dialog state
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [helpSubject, setHelpSubject] = useState('');
-  const [helpMessage, setHelpMessage] = useState('');
-  const [helpName, setHelpName] = useState(profile?.display_name || profile?.username || '');
-  const [helpEmail, setHelpEmail] = useState(profile?.email || '');
-  const [helpSending, setHelpSending] = useState(false);
-
-  // Prefill name/email when profile loads
-  useEffect(() => {
-    if (profile) {
-      setHelpName(profile.display_name || profile.username || '');
-      setHelpEmail(profile.email || '');
-    }
-  }, [profile]);
-
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
     window.addEventListener('scroll', onScroll, { passive: true });
@@ -62,31 +39,6 @@ export default function Header() {
   }, []);
 
   const isActive = (to: string) => location.pathname === to;
-
-  const handleSendHelp = async () => {
-    if (!helpMessage.trim()) { toast.error('Please write your message'); return; }
-    setHelpSending(true);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      const res = await supabase.functions.invoke('help-message', {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        body: {
-          message: helpMessage.trim(),
-          name: helpName.trim() || undefined,
-          email: helpEmail.trim() || undefined,
-          subject: helpSubject.trim() || 'General Help',
-          user_id: user?.id,
-        },
-      });
-      if (res.error) throw res.error;
-      toast.success('Message sent! We\'ll get back to you soon.');
-      setHelpOpen(false);
-      setHelpSubject(''); setHelpMessage('');
-    } catch (e: unknown) {
-      toast.error((e as Error).message || 'Failed to send message');
-    } finally { setHelpSending(false); }
-  };
 
   return (
     <>
@@ -157,17 +109,6 @@ export default function Header() {
               <Heart className="h-4 w-4 text-destructive fill-destructive" />
             </Button>
 
-            {/* Help button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 text-muted-foreground hover:text-foreground"
-              title="Get help / send message"
-              onClick={() => setHelpOpen(true)}
-            >
-              <HelpCircle className="h-4 w-4" />
-            </Button>
-
             {/* Notification bell */}
             <NotificationBell />
 
@@ -236,15 +177,6 @@ export default function Header() {
                     <Heart className="h-4 w-4 shrink-0 text-destructive fill-destructive" />
                     Donate
                   </button>
-                  {/* Mobile help row */}
-                  <button
-                    type="button"
-                    onClick={() => { setMobileOpen(false); setHelpOpen(true); }}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted"
-                  >
-                    <HelpCircle className="h-4 w-4 shrink-0" />
-                    Help / Contact Us
-                  </button>
                   {navLinks.map(({ to, label, icon: Icon }) => (
                     <Link
                       key={to}
@@ -294,69 +226,6 @@ export default function Header() {
       </header>
 
       <DonationDialog open={donateOpen} onClose={() => setDonateOpen(false)} />
-
-      {/* Help / Contact Dialog */}
-      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
-        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <HelpCircle className="h-4 w-4 text-accent" />
-              Help &amp; Support
-            </DialogTitle>
-            <DialogDescription>
-              Send a message to the ZedVevo team. We'll reply by email.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Label>Your Name</Label>
-                <Input className="mt-1" value={helpName} onChange={e => setHelpName(e.target.value)} placeholder="Name" />
-              </div>
-              <div>
-                <Label>Your Email</Label>
-                <Input className="mt-1" type="email" value={helpEmail} onChange={e => setHelpEmail(e.target.value)} placeholder="email@example.com" />
-              </div>
-            </div>
-            <div>
-              <Label>Subject</Label>
-              <Select value={helpSubject} onValueChange={setHelpSubject}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Select subject…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="General Help">General Help</SelectItem>
-                  <SelectItem value="Nomination Issue">Nomination Issue</SelectItem>
-                  <SelectItem value="Payment Issue">Payment Issue</SelectItem>
-                  <SelectItem value="Voting Issue">Voting Issue</SelectItem>
-                  <SelectItem value="Account Issue">Account Issue</SelectItem>
-                  <SelectItem value="Report Content">Report Content</SelectItem>
-                  <SelectItem value="Other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Message *</Label>
-              <Textarea
-                className="mt-1"
-                rows={4}
-                value={helpMessage}
-                onChange={e => setHelpMessage(e.target.value)}
-                placeholder="Describe your issue or question…"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setHelpOpen(false)}>Cancel</Button>
-            <Button
-              className="bg-accent hover:bg-accent/90 text-accent-foreground"
-              onClick={handleSendHelp}
-              disabled={helpSending || !helpMessage.trim()}
-            >
-              {helpSending && <span className="mr-2 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
-              Send Message
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

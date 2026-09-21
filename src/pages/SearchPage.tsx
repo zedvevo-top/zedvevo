@@ -11,10 +11,10 @@ import type { SearchResult, SearchFilter, SearchSort } from '@/types/index';
 
 const FILTERS: { value: SearchFilter; label: string }[] = [
   { value: 'all', label: 'All' },
-  { value: 'music', label: 'Songs' },
+  { value: 'music', label: 'Music' },
   { value: 'videos', label: 'Videos' },
   { value: 'artists', label: 'Artists' },
-  { value: 'awards', label: 'Nominees' },
+  { value: 'awards', label: 'Awards' },
 ];
 
 const SORTS: { value: SearchSort; label: string }[] = [

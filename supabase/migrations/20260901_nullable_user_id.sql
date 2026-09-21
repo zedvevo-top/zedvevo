@@ -1,0 +1,2 @@
+ALTER TABLE public.payments ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE public.votes ALTER COLUMN user_id DROP NOT NULL;

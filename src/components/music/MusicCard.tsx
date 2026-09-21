@@ -25,12 +25,8 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
   const [shareOpen, setShareOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
 
-  const shareUrl = `${window.location.origin}/song/${song.id}`;
-  // Build artist label: "Artist ft. Featured1, Featured2"
-  const artistLabel = song.featured_artists
-    ? `${song.artist_name} ft. ${song.featured_artists}`
-    : song.artist_name;
-  const shareText = `Listen to "${song.title}" by ${artistLabel} on ZedVevo — ${shareUrl}`;
+  const shareUrl = `${window.location.origin}/music?id=${song.id}`;
+  const shareText = `Listen to "${song.title}" by ${song.artist_name} on ZedVevo — ${window.location.origin}/music?id=${song.id}`;
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -272,7 +268,7 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         url={shareUrl}
-        title={`${song.title} — ${artistLabel}`}
+        title={song.title}
         text={shareText}
         thumbnailUrl={song.cover_url}
         embedId={song.id}

@@ -328,8 +328,8 @@ export default function DashboardPage() {
                     <div key={pmt.id} className="p-3 border border-border rounded-lg">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm font-medium capitalize">{pmt.payment_type.replace('_', ' ')}</p>
-                          <p className="text-xs text-muted-foreground">{formatDate(pmt.created_at)} · {pmt.payment_method.replace('_', ' ')}</p>
+                          <p className="text-sm font-medium capitalize">{(pmt.payment_type || '').replace('_', ' ')}</p>
+                          <p className="text-xs text-muted-foreground">{formatDate(pmt.created_at)} · {(pmt.payment_method || 'lipila').replace('_', ' ')}</p>
                           {pmt.failure_reason && <p className="text-xs text-destructive mt-0.5">{pmt.failure_reason}</p>}
                         </div>
                         <div className="text-right shrink-0 ml-4">

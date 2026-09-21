@@ -21,21 +21,11 @@ import { Navigate, useNavigate } from 'react-router-dom';
 type PayMethod = 'mobile_money' | 'card';
 
 export default function UploadPage() {
-  const { user, profile, refreshProfile } = useAuth();
+  const { user, profile } = useAuth();
   const navigate = useNavigate();
   const [plans, setPlans] = useState<UploadPlan[]>([]);
   const [subscription, setSubscription] = useState<UserSubscription | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Show any payment-failure message stored before a reload
-  useEffect(() => {
-    const msg = sessionStorage.getItem('payment_fail_msg');
-    if (msg) {
-      sessionStorage.removeItem('payment_fail_msg');
-      // Small delay so the page is fully mounted before toast fires
-      setTimeout(() => toast.error(msg), 150);
-    }
-  }, []);
 
   // Payment dialog state
   const [payDialog, setPayDialog] = useState(false);
@@ -62,19 +52,16 @@ export default function UploadPage() {
 
   useEffect(() => {
     if (!user) return;
-    // Admins always skip plan check; all other roles (artist, user) must load subscription
-    const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
-    if (isAdmin) { setLoading(false); return; }
-
-    // Artists AND regular users both need their subscription loaded —
-    // artists get canUpload because role='artist' is always entitled
+    // Admins skip plan check entirely
+    if ((profile?.role === 'admin' || profile?.role === 'super_admin')) { setLoading(false); return; }
     Promise.all([getActivePlans(), getUserActiveSubscription(user.id)])
       .then(([p, s]) => { setPlans(p); setSubscription(s); })
       .catch(console.error)
       .finally(() => setLoading(false));
 
-    // Realtime: re-fetch subscription whenever a user_subscriptions row changes for this user
-    // This fires instantly when admin grants a plan, so UI unlocks without page refresh.
+    // Realtime: re-fetch subscription whenever a user_subscriptions row changes for this user.
+    // This ensures paid access is reflected immediately after webhook activates the plan,
+    // and persists across page refreshes (getSession restores JWT, then this listener fires).
     const channel = supabase
       .channel(`user_sub_${user.id}`)
       .on(
@@ -88,6 +75,8 @@ export default function UploadPage() {
 
     return () => { supabase.removeChannel(channel); };
   }, [user, profile]);
+
+  if (!user) return <Navigate to="/login" replace />;
 
   // Generate thumbnail from a video file by seeking to 1 second and snapshotting
   const generateVideoThumbnail = useCallback((videoFile: File): Promise<string> => {
@@ -137,18 +126,6 @@ export default function UploadPage() {
   // Poll payment status
   const pollPayment = async (paymentId: string) => {
     let attempts = 0;
-
-    // Retry helper: poll for active subscription up to maxTries × interval ms
-    const waitForSubscription = async (uid: string, maxTries = 8, intervalMs = 1500): Promise<UserSubscription | null> => {
-      for (let i = 0; i < maxTries; i++) {
-        const sub = await getUserActiveSubscription(uid);
-        if (sub) return sub;
-        await new Promise(r => setTimeout(r, intervalMs));
-      }
-      return null;
-    };
-
-    // Poll every 5s for up to 10 minutes (120 attempts)
     const interval = setInterval(async () => {
       attempts++;
       try {
@@ -156,90 +133,20 @@ export default function UploadPage() {
         if (data?.status && data.status !== 'pending') {
           clearInterval(interval);
           setPaymentStatus(data.status as PaymentStatus);
-          if (data.status === 'successful') {
-            // Refresh session first so new JWT role claim is included
-            await supabase.auth.refreshSession();
-            // Wait for webhook to set role=artist + insert new subscription (up to ~12s)
-            const [sub] = await Promise.all([
-              waitForSubscription(user!.id),
-              refreshProfile(),
-            ]);
+          if (data.status === 'completed') {
+            const sub = await getUserActiveSubscription(user!.id);
             setSubscription(sub);
             setPayDialog(false);
-            const planType = selectedPlan?.plan_type;
-            const planMsg = planType === 'k10_single'
-              ? '🎵 Access granted! You have 1 upload ready.'
-              : planType === 'k100_weekly'
-              ? '🎵 Weekly plan active! Upload freely for 7 days.'
-              : planType === 'k300_yearly'
-              ? '🎵 Yearly plan active! Upload freely for 365 days.'
-              : '🎵 Your artist account is active. Start uploading!';
-            toast.success(planMsg);
-            setTimeout(() => window.location.reload(), 200);
+            toast.success('Payment verified! You can now upload content.');
+          } else if (data.status === 'insufficient_funds') {
+            toast.error('Insufficient funds. Please top up and try again.');
           } else {
-            const errMsg = data.status === 'insufficient_funds'
-              ? 'Payment failed: Insufficient funds. Please top up your account and try again.'
-              : data.status === 'failed'
-              ? 'Payment failed. Please check your details and try again.'
-              : data.status === 'cancelled'
-              ? 'Payment was cancelled. Please try again.'
-              : `Payment ${data.status}. Please try again.`;
-            sessionStorage.setItem('payment_fail_msg', errMsg);
-            window.location.reload();
+            toast.error(`Payment ${data.status}. Please try again.`);
           }
         }
       } catch { /* ignore polling errors */ }
-      if (attempts >= 120) { clearInterval(interval); setPaymentStatus('review'); }
+      if (attempts >= 30) { clearInterval(interval); setPaymentStatus('failed'); }
     }, 5000);
-
-    // Also listen via Realtime for instant notification when webhook fires
-    const channel = supabase
-      .channel(`payment_status_${paymentId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'payments', filter: `id=eq.${paymentId}` },
-        async (payload) => {
-          const newStatus = (payload.new as { status: string }).status;
-          if (newStatus && newStatus !== 'pending') {
-            clearInterval(interval);
-            supabase.removeChannel(channel);
-            setPaymentStatus(newStatus as PaymentStatus);
-            if (newStatus === 'successful') {
-              // Refresh session first so new JWT role claim is included
-              await supabase.auth.refreshSession();
-              // Wait for webhook to set role=artist + insert new subscription (up to ~12s)
-              const [sub] = await Promise.all([
-                waitForSubscription(user!.id),
-                refreshProfile(),
-              ]);
-              setSubscription(sub);
-              setPayDialog(false);
-              const planType = selectedPlan?.plan_type;
-              const planMsg = planType === 'k10_single'
-                ? '🎵 Access granted! You have 1 upload ready.'
-                : planType === 'k100_weekly'
-                ? '🎵 Weekly plan active! Upload freely for 7 days.'
-                : planType === 'k300_yearly'
-                ? '🎵 Yearly plan active! Upload freely for 365 days.'
-                : '🎵 Your artist account is active. Start uploading!';
-              toast.success(planMsg);
-              setTimeout(() => window.location.reload(), 200);
-            } else {
-              // Store the error message so it survives the reload
-              const errMsg = newStatus === 'insufficient_funds'
-                ? 'Payment failed: Insufficient funds. Please top up your account and try again.'
-                : newStatus === 'failed'
-                ? 'Payment failed. Please check your details and try again.'
-                : newStatus === 'cancelled'
-                ? 'Payment was cancelled. Please try again.'
-                : `Payment ${newStatus}. Please try again.`;
-              sessionStorage.setItem('payment_fail_msg', errMsg);
-              window.location.reload();
-            }
-          }
-        }
-      )
-      .subscribe();
   };
 
   const openPayDialog = (plan: UploadPlan) => {
@@ -322,19 +229,14 @@ export default function UploadPage() {
 
   const handleUpload = async () => {
     if (!title || !artistName || !file) { toast.error('Fill in all required fields'); return; }
-    if (uploadType === 'song' && !coverFile) { toast.error('Song cover image is required'); return; }
-    const isAdminUser = profile?.role === 'admin' || profile?.role === 'super_admin';
-    // Expired plan blocks everyone (including artists); admins always pass
-    if (!isAdminUser && !hasValidSub) {
-      toast.error('No active upload plan. Please purchase a plan to continue.');
-      return;
-    }
+    const isAdmin = (profile?.role === 'admin' || profile?.role === 'super_admin');
+    if (!isAdmin && !subscription) { toast.error('No active upload plan'); return; }
     setUploading(true);
     setUploadProgress(0);
     try {
       const ext = file.name.split('.').pop();
       const bucket = uploadType === 'song' ? 'songs' : 'videos';
-      const fileName = `${user!.id}/${snakeCaseFileName(title)}_${Date.now()}.${ext}`;
+      const fileName = `${user.id}/${snakeCaseFileName(title)}_${Date.now()}.${ext}`;
       setUploadProgress(20);
       const fileUrl = await uploadFile(bucket, fileName, file);
       setUploadProgress(60);
@@ -342,31 +244,29 @@ export default function UploadPage() {
       let coverUrl: string | undefined;
       if (coverFile) {
         const coverExt = coverFile.name.split('.').pop();
-        const coverPath = `${user!.id}/cover_${Date.now()}.${coverExt}`;
+        const coverPath = `${user.id}/cover_${Date.now()}.${coverExt}`;
         coverUrl = await uploadFile('thumbnails', coverPath, coverFile);
       } else if (uploadType === 'video' && autoThumb) {
         // Always upload the auto-generated canvas thumbnail for videos
         const thumbFile = dataUrlToFile(autoThumb, `thumb_${Date.now()}.jpg`);
-        coverUrl = await uploadFile('thumbnails', `${user!.id}/thumb_${Date.now()}.jpg`, thumbFile);
+        coverUrl = await uploadFile('thumbnails', `${user.id}/thumb_${Date.now()}.jpg`, thumbFile);
       }
       // If still no thumbail and it's a video, retry generating one more time from the file
       if (uploadType === 'video' && !coverUrl && file) {
         try {
           const retryThumb = await generateVideoThumbnail(file);
           const thumbFile = dataUrlToFile(retryThumb, `thumb_retry_${Date.now()}.jpg`);
-          coverUrl = await uploadFile('thumbnails', `${user!.id}/thumb_${Date.now()}.jpg`, thumbFile);
+          coverUrl = await uploadFile('thumbnails', `${user.id}/thumb_${Date.now()}.jpg`, thumbFile);
         } catch { /* best-effort */ }
       }
       setUploadProgress(80);
 
-      // Admin uploads default to approved; artists & regular users to pending
-      // Admins and artists get auto-approved; regular users go to pending review
-      const isAdminUpload = profile?.role === 'admin' || profile?.role === 'super_admin' || profile?.role === 'artist';
-      const uploadStatus = isAdminUpload ? 'approved' : 'pending';
+      // Admin uploads default to approved; regular users to pending
+      const uploadStatus = isAdmin ? 'approved' : 'pending';
 
       if (uploadType === 'song') {
         await supabase.from('songs').insert({
-          user_id: user!.id, title, artist_name: artistName,
+          user_id: user.id, title, artist_name: artistName,
           album: album || null, genre: genre || null,
           featured_artists: featuredArtists || null,
           producer: producer || null,
@@ -375,7 +275,7 @@ export default function UploadPage() {
         });
       } else {
         await supabase.from('videos').insert({
-          user_id: user!.id, title, artist_name: artistName,
+          user_id: user.id, title, artist_name: artistName,
           genre: genre || null,
           featured_artists: featuredArtists || null,
           producer: producer || null,
@@ -385,23 +285,23 @@ export default function UploadPage() {
         });
       }
 
-      // Deduct allowance for non-admin plans — deactivate after use/expiry
-      if (!isAdminUpload && subscription) {
+      // Deduct allowance for non-admin k10 plan — deactivate AFTER upload succeeds
+      if (!isAdmin && subscription) {
         if (subscription.plan_type === 'k10_single') {
-          // K10: deactivate immediately after the single upload is consumed
+          // Mark used + deactivate now that the single upload has been consumed
           await supabase.from('user_subscriptions')
             .update({ uploads_used: (subscription.uploads_used || 0) + 1, is_active: false })
             .eq('id', subscription.id);
           setSubscription(null);
+          // Notify user their single upload has been used
           await supabase.from('notifications').insert({
-            user_id: user!.id,
+            user_id: user.id,
             title: 'Upload Complete',
-            message: 'Your K10 single upload has been used. Your access expires in 1 day. Purchase a new plan to upload more.',
+            message: 'Your K10 single upload has been used. Purchase a new plan to upload more content.',
             type: 'info',
             notification_type: 'package_expiry',
           });
         } else {
-          // K100 / K300: just increment usage counter; expiry handled by expires_at
           await supabase.from('user_subscriptions')
             .update({ uploads_used: (subscription.uploads_used || 0) + 1 })
             .eq('id', subscription.id);
@@ -410,7 +310,7 @@ export default function UploadPage() {
 
       setUploadProgress(100);
       toast.success(
-        isAdminUpload
+        isAdmin
           ? 'Upload published successfully!'
           : 'Upload submitted! It will go live once approved by Admin.'
       );
@@ -425,22 +325,12 @@ export default function UploadPage() {
     } finally { setUploading(false); }
   };
 
-  const now = new Date();
-  const isAdminRole = profile?.role === 'admin' || profile?.role === 'super_admin';
-  const isArtistRole = profile?.role === 'artist';
-  const subExpired = subscription?.expires_at ? new Date(subscription.expires_at) <= now : false;
-  const hasValidSub = !!(
-    subscription &&
-    subscription.is_active &&
-    !subExpired &&
-    (subscription.plan_type !== 'k10_single' || (subscription.uploads_used || 0) < 1)
-  );
-  // Admins: always allowed.
-  // Artists: allowed only when they have a non-expired active subscription.
-  // Regular users: need a valid active subscription.
-  const canUpload = isAdminRole || (isArtistRole && hasValidSub) || (!isArtistRole && hasValidSub);
-
-  if (!user) return <Navigate to="/login" replace />;
+  const canUpload = (profile?.role === 'admin' || profile?.role === 'super_admin' || profile?.role === 'artist') || (subscription && (
+    subscription.plan_type !== 'k10_single' ||
+    (subscription.uploads_used || 0) < 1
+  ) && (
+    !subscription.expires_at || new Date(subscription.expires_at) > new Date()
+  ));
 
   if (loading) return (
     <div className="min-h-screen pt-20 flex items-center justify-center">
@@ -459,22 +349,14 @@ export default function UploadPage() {
 
         {/* Active plan banner */}
         {subscription && (
-          <Card className={`mb-6 ${subExpired ? 'border-destructive/30 bg-destructive/5' : 'border-accent/30 bg-accent/5'}`}>
+          <Card className="mb-6 border-accent/30 bg-accent/5">
             <CardContent className="flex items-center gap-3 py-3">
-              {subExpired
-                ? <XCircle className="h-5 w-5 text-destructive shrink-0" />
-                : <CheckCircle2 className="h-5 w-5 text-accent shrink-0" />
-              }
+              <CheckCircle2 className="h-5 w-5 text-accent shrink-0" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">
-                  {subExpired ? 'Plan expired: ' : 'Active plan: '}
-                  {subscription.upload_plans?.name}
-                </p>
+                <p className="text-sm font-medium">Active plan: {subscription.upload_plans?.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {subExpired
-                    ? 'Your plan has expired. Purchase a new plan to upload again.'
-                    : subscription.plan_type === 'k10_single'
-                    ? `${1 - (subscription.uploads_used || 0)} upload(s) remaining${subscription.expires_at ? ` · Valid until ${formatDate(subscription.expires_at)}` : ''}`
+                  {subscription.plan_type === 'k10_single'
+                    ? `${1 - (subscription.uploads_used || 0)} upload(s) remaining`
                     : `Unlimited uploads${subscription.expires_at ? ` · Expires ${formatDate(subscription.expires_at)}` : ''}`
                   }
                 </p>
@@ -483,33 +365,26 @@ export default function UploadPage() {
           </Card>
         )}
 
-        {/* Plans grid — shown when no active sub and not admin/super_admin */}
-        {!canUpload && !isAdminRole && (
+        {/* Plans grid — shown when no active sub and not admin */}
+        {!canUpload && profile?.role !== 'admin' && (
           <div className="space-y-4 mb-6">
             <h2 className="text-base font-semibold">Choose an Upload Plan</h2>
             <div className="grid gap-3">
-              {plans.map(plan => {
-                const limitLabel =
-                  plan.plan_type === 'k10_single'  ? '1 upload (song or video)' :
-                  plan.plan_type === 'k100_weekly' ? 'Unlimited uploads · 7 days' :
-                  plan.plan_type === 'k300_yearly' ? 'Unlimited uploads · 365 days' :
-                  plan.description ?? '';
-                return (
-                  <button
-                    key={plan.id}
-                    onClick={() => openPayDialog(plan)}
-                    className="text-left w-full border border-border rounded-lg p-4 transition-colors hover:border-accent focus:outline-none focus:border-accent"
-                  >
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <p className="font-semibold">{plan.name}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{limitLabel}</p>
-                      </div>
-                      <p className="text-xl font-bold text-accent shrink-0">{formatCurrency(plan.price)}</p>
+              {plans.map(plan => (
+                <button
+                  key={plan.id}
+                  onClick={() => openPayDialog(plan)}
+                  className="text-left w-full border border-border rounded-lg p-4 transition-colors hover:border-accent focus:outline-none focus:border-accent"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold">{plan.name}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{plan.description}</p>
                     </div>
-                  </button>
-                );
-              })}
+                    <p className="text-xl font-bold text-accent shrink-0 ml-4">{formatCurrency(plan.price)}</p>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
         )}
@@ -618,20 +493,13 @@ export default function UploadPage() {
               )}
 
               <div>
-                <Label>
-                  {uploadType === 'song' ? 'Cover Image *' : 'Custom Thumbnail (optional)'}
-                </Label>
+                <Label>{uploadType === 'song' ? 'Cover Art (optional)' : 'Custom Thumbnail (optional)'}</Label>
                 <Input
                   type="file"
                   accept="image/*"
                   className="mt-1 cursor-pointer"
                   onChange={e => setCoverFile(e.target.files?.[0] || null)}
                 />
-                {uploadType === 'song' && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Required. Used as music card, player, search and trending image.
-                  </p>
-                )}
                 {uploadType === 'video' && (
                   <p className="text-xs text-muted-foreground mt-1">
                     {autoThumb ? 'Thumbnail auto-generated from video. Upload a custom one to override.' : 'A thumbnail will be generated from your video automatically.'}
@@ -677,14 +545,14 @@ export default function UploadPage() {
             )}
           </DialogHeader>
 
-          {/* Pending / waiting state */}
+          {/* Pending state inside dialog */}
           {paymentStatus === 'pending' ? (
             <div className="py-6 text-center space-y-3">
               <Clock className="h-12 w-12 mx-auto text-yellow-500 animate-pulse" />
               <p className="font-semibold">Waiting for Confirmation</p>
               <p className="text-sm text-muted-foreground">
                 {payMethod === 'mobile_money'
-                  ? 'Check your phone and enter your Mobile Money PIN to confirm payment.'
+                  ? 'Check your phone and confirm the Mobile Money prompt.'
                   : 'Complete your payment in the opened tab.'}
               </p>
               {paymentUrl && (
@@ -692,24 +560,7 @@ export default function UploadPage() {
                   Re-open Payment Page
                 </Button>
               )}
-              <p className="text-xs text-muted-foreground">
-                Your plan will activate automatically as soon as Lipila confirms your payment.
-              </p>
-            </div>
-          ) : paymentStatus === 'review' ? (
-            <div className="py-6 text-center space-y-3">
-              <Clock className="h-12 w-12 mx-auto text-muted-foreground" />
-              <p className="font-semibold">Under Review</p>
-              <p className="text-sm text-muted-foreground">
-                We could not confirm your payment automatically. The ZedVevo team will review
-                your payment and activate your plan manually within a few hours.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                If you have any questions, please contact the ZedVevo team.
-              </p>
-              <Button variant="outline" size="sm" onClick={() => setPayDialog(false)}>
-                Close
-              </Button>
+              <p className="text-xs text-muted-foreground">This will update automatically once verified.</p>
             </div>
           ) : paymentStatus === 'insufficient_funds' || paymentStatus === 'failed' || paymentStatus === 'cancelled' ? (
             <div className="py-6 text-center space-y-3">

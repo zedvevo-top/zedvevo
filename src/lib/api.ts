@@ -2,9 +2,11 @@ import { supabase } from '@/db/supabase';
 import type {
   Song, Video, HeroBanner, Artist, Sponsor, Award, AwardCategory,
   Nominee, Vote, UploadPlan, UserSubscription, Payment, Notification,
-  Profile, Download, WeeklyTrending, WinnerOfMonth,
+  Profile, Download, WeeklyTrending, WinnerOfMonth, AppSetting,
   SearchResult, SearchFilter, SearchSort
 } from '@/types/index';
+
+export type { Payment, Sponsor, Song, Video, Artist, Award, Nominee, Vote, Profile };
 
 // ============================================================
 // SONGS
@@ -300,20 +302,11 @@ export async function deleteAwardCategory(id: string) {
 // NOMINEES
 // ============================================================
 export async function getNomineesByCategory(categoryId: string): Promise<Nominee[]> {
-  // Direct select — total_votes is kept accurate by DB triggers + migration recalc.
-  // Coerce total_votes to Number in case Postgres returns bigint as string in some paths.
   const { data, error } = await supabase
-    .from('nominees')
-    .select('id, name, bio, photo_url, song_title, song_url, achievements, social_links, total_votes, is_winner, nomination_status, registration_status, category_id, user_id, created_at')
-    .eq('category_id', categoryId)
-    .eq('registration_status', 'successful')
-    .in('nomination_status', ['approved', 'winner'])
-    .order('total_votes', { ascending: false })
-    .order('created_at', { ascending: false });
+    .from('nominees').select('*').eq('category_id', categoryId).eq('registration_status', 'successful')
+    .order('total_votes', { ascending: false });
   if (error) throw error;
-  const rows = Array.isArray(data) ? data : [];
-  // Normalise: coerce total_votes to a plain JS number (guards against bigint→string from RPC paths)
-  return rows.map(r => ({ ...r, total_votes: Number(r.total_votes ?? 0) }));
+  return Array.isArray(data) ? data : [];
 }
 
 export async function getUserNominations(userId: string): Promise<Nominee[]> {
@@ -331,6 +324,95 @@ export async function getUserVotes(userId: string): Promise<Vote[]> {
   const { data, error } = await supabase
     .from('votes').select('*, nominees(name, photo_url)')
     .eq('user_id', userId).order('created_at', { ascending: false });
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
+}
+
+export async function createNominee(payload: Partial<any>) {
+  const { data, error } = await supabase.from('nominees').insert(payload).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateNominee(id: string, payload: Partial<any>) {
+  const { data, error } = await supabase.from('nominees').update(payload).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function createVote(payload: Partial<Vote>) {
+  const { data, error } = await supabase.from('votes').insert(payload).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateVote(id: string, payload: Partial<Vote>) {
+  const { data, error } = await supabase.from('votes').update(payload).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getNomineeById(id: string) {
+  const { data, error } = await supabase.from('nominees').select('*').eq('id', id).single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getVoteById(id: string) {
+  const { data, error } = await supabase.from('votes').select('*').eq('id', id).single();
+  if (error) throw error;
+  return data;
+}
+
+// ============================================================
+// PAYMENT VERIFICATION & AUTO-APPROVAL
+// ============================================================
+
+export async function getPaymentStatus(paymentId: string) {
+  const { data, error } = await supabase.from('payments').select('status, amount').eq('id', paymentId).single();
+  if (error) throw error;
+  return data;
+}
+
+// Auto-approve nominee with 0.00 payment
+export async function autoApprovNominee(nomineeId: string, paymentId?: string) {
+  const { data, error } = await supabase
+    .from('nominees')
+    .update({
+      registration_status: 'completed',
+      nomination_status: 'approved',
+      payment_id: paymentId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', nomineeId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Auto-create vote with 0.00 payment
+export async function autoCreateVote(userId: string, nomineeId: string, categoryId: string, voteCount: number = 1) {
+  const { data, error } = await supabase.from('votes').insert({
+    user_id: userId,
+    nominee_id: nomineeId,
+    category_id: categoryId,
+    amount: 0,
+    vote_count: voteCount,
+    payment_status: 'successful',
+  }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Get successful votes for a nominee
+export async function getNomineeVotes(nomineeId: string) {
+  const { data, error } = await supabase
+    .from('votes')
+    .select('*')
+    .eq('nominee_id', nomineeId)
+    .in('payment_status', ['successful', 'pending'])
+    .order('created_at', { ascending: false });
   if (error) throw error;
   return Array.isArray(data) ? data : [];
 }
@@ -387,19 +469,9 @@ export async function getUserPayments(userId: string): Promise<Payment[]> {
 
 export async function getAllPayments(): Promise<Payment[]> {
   const { data, error } = await supabase
-    .from('payments').select('*, upload_plans(name), profiles!payments_user_id_fkey(display_name, username, email, role)')
-    .order('created_at', { ascending: false }).limit(200);
+    .from('payments').select('*, upload_plans(name)').order('created_at', { ascending: false }).limit(100);
   if (error) throw error;
   return Array.isArray(data) ? data : [];
-}
-
-// Manually complete a pending payment (triggers full artist promotion + subscription flow)
-export async function processPayment(paymentId: string): Promise<{ ok: boolean; error?: string }> {
-  const { data, error } = await supabase.rpc('process_pending_payment', { p_payment_id: paymentId });
-  if (error) return { ok: false, error: error.message };
-  const result = data as { ok: boolean; error?: string } | null;
-  if (!result?.ok) return { ok: false, error: result?.error ?? 'Unknown error' };
-  return { ok: true };
 }
 
 export async function getPaymentByIdempotencyKey(key: string): Promise<Payment | null> {
@@ -451,21 +523,10 @@ export async function getAllProfiles(): Promise<Profile[]> {
   return Array.isArray(data) ? data : [];
 }
 
-// Get all active subscriptions keyed by user_id for admin overview
-export async function getAllActiveSubscriptions(): Promise<Record<string, UserSubscription>> {
-  const { data, error } = await supabase
-    .from('user_subscriptions')
-    .select('*, upload_plans(name)')
-    .eq('is_active', true)
-    .order('created_at', { ascending: false });
-  if (error) return {};
-  const map: Record<string, UserSubscription> = {};
-  (Array.isArray(data) ? data : []).forEach((s: UserSubscription) => {
-    if (s.user_id && !map[s.user_id]) map[s.user_id] = s;
-  });
-  return map;
+export async function updateProfile(id: string, payload: Partial<Profile>) {
+  const { error } = await supabase.from('profiles').update(payload).eq('id', id);
+  if (error) throw error;
 }
-
 
 // ============================================================
 // STORAGE HELPERS
@@ -520,126 +581,6 @@ export async function getAllNominees(): Promise<Nominee[]> {
 
 export async function updateNomineeStatus(id: string, nomination_status: string) {
   const { error } = await supabase.from('nominees').update({ nomination_status }).eq('id', id);
-  if (error) throw error;
-}
-
-export async function updateNominee(id: string, payload: Partial<Nominee>) {
-  const { error } = await supabase.from('nominees').update(payload).eq('id', id);
-  if (error) throw error;
-}
-
-export async function createNominee(payload: Partial<Nominee>): Promise<Nominee> {
-  const { data, error } = await supabase
-    .from('nominees')
-    .insert({ ...payload, registration_status: 'successful', total_votes: 0 })
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Nominee;
-}
-
-export async function deleteNominee(id: string): Promise<void> {
-  const { error } = await supabase.from('nominees').delete().eq('id', id);
-  if (error) throw error;
-}
-
-export async function getAllVotes(): Promise<Vote[]> {
-  const { data, error } = await supabase
-    .from('votes')
-    .select('*, nominees(name, photo_url, category_id, award_categories(name))')
-    .order('created_at', { ascending: false })
-    .limit(500);
-  if (error) {
-    console.error('[getAllVotes] error:', error.message);
-    return [];
-  }
-  return Array.isArray(data) ? data : [];
-}
-
-export async function updateVote(id: string, payload: Partial<Vote>): Promise<void> {
-  const { error } = await supabase.from('votes').update(payload).eq('id', id);
-  if (error) throw error;
-}
-
-export async function deleteVote(id: string): Promise<void> {
-  const { error } = await supabase.from('votes').delete().eq('id', id);
-  if (error) throw error;
-}
-
-export async function updateUserRole(userId: string, role: string): Promise<void> {
-  const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
-  if (error) throw error;
-}
-
-/**
- * Promote a user to artist and immediately grant them an active upload subscription.
- * Called by admin when they set role = 'artist' and pick a plan.
- */
-export async function createArtistSubscription(
-  userId: string,
-  planId: string
-): Promise<void> {
-  // 1. Get plan details (validity_days, plan_type)
-  const { data: plan, error: planErr } = await supabase
-    .from('upload_plans')
-    .select('id, plan_type, validity_days, name')
-    .eq('id', planId)
-    .single();
-  if (planErr || !plan) throw new Error(planErr?.message ?? 'Plan not found');
-
-  const validityDays: number =
-    plan.plan_type === 'k10_single' ? 1
-    : plan.plan_type === 'k100_weekly' ? 7
-    : plan.plan_type === 'k300_yearly' ? 365
-    : (plan.validity_days ?? 7);
-
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + validityDays);
-
-  // 2. Deactivate any existing active subscriptions for this user
-  await supabase
-    .from('user_subscriptions')
-    .update({ is_active: false })
-    .eq('user_id', userId)
-    .eq('is_active', true);
-
-  // 3. Set role = 'artist' on the profile
-  const { error: roleErr } = await supabase
-    .from('profiles')
-    .update({ role: 'artist' })
-    .eq('id', userId);
-  if (roleErr) throw roleErr;
-
-  // 4. Insert active subscription (admin grant — no payment required)
-  const { error: subErr } = await supabase.from('user_subscriptions').insert({
-    user_id: userId,
-    plan_id: planId,
-    plan_type: plan.plan_type,
-    is_active: true,
-    uploads_used: 0,
-    expires_at: expiresAt.toISOString(),
-  });
-  if (subErr) throw subErr;
-
-  // 5. Notify the user
-  await supabase.from('notifications').insert({
-    user_id: userId,
-    title: '🎉 You are now an Artist on ZedVevo!',
-    message: `Your account has been promoted to Artist and you have been granted the ${plan.name} upload plan. Start uploading your music and videos!`,
-    type: 'success',
-    notification_type: 'payment_success',
-    link: '/upload',
-  });
-}
-
-export async function deleteUser(userId: string): Promise<void> {
-  // Deletes the profile; the Auth user must be removed via service-role (admin-reset-password edge fn or Supabase dashboard)
-  const { error } = await supabase.from('profiles').delete().eq('id', userId);
-  if (error) throw error;
-}
-
-export async function updateProfile(userId: string, payload: Partial<Profile>): Promise<void> {
-  const { error } = await supabase.from('profiles').update(payload).eq('id', userId);
   if (error) throw error;
 }
 
@@ -923,112 +864,130 @@ export async function createNotification(payload: {
   if (error) throw error;
 }
 
-// Send a help/support message to admin (email + in-app notification)
-export async function sendHelpMessage(payload: {
-  message: string;
-  name?: string;
-  email?: string;
-  subject?: string;
-  user_id?: string;
-}): Promise<void> {
-  const { error } = await supabase.functions.invoke('help-message', { body: payload });
-  if (error) throw error;
-}
-
 // ============================================================
-// AWARD VOTING / NOMINEES TOGGLE
-// ============================================================
-export async function toggleAwardVoting(id: string, open: boolean): Promise<void> {
-  const { error } = await supabase.from('awards').update({ voting_open: open }).eq('id', id);
-  if (error) throw error;
-}
-
-export async function toggleAwardNominees(id: string, open: boolean): Promise<void> {
-  const { error } = await supabase.from('awards').update({ nominees_open: open }).eq('id', id);
-  if (error) throw error;
-}
-
-// ============================================================
-// VISITOR LOGS
+// SITE STATS / VISITOR COUNTER
 // ============================================================
 
-// Generate or retrieve a stable session ID for this browser tab
-function getSessionId(): string {
-  const key = 'zv_session_id';
-  let id = sessionStorage.getItem(key);
-  if (!id) {
-    id = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    sessionStorage.setItem(key, id);
-  }
-  return id;
+export async function getVisitorCount(): Promise<number> {
+  if (!supabase) return 0;
+  const { data, error } = await supabase
+    .from('site_stats')
+    .select('visitor_count')
+    .eq('key', 'main')
+    .single();
+  if (error || !data) return 0;
+  return Number(data.visitor_count);
 }
 
-export async function logVisit(page: string): Promise<void> {
-  try {
-    // Route through edge function to avoid browser CORS issues on direct insert
-    await supabase.functions.invoke('log-visit', {
-      body: {
-        page,
-        session_id: getSessionId(),
-        user_agent: navigator.userAgent.slice(0, 200),
-        referrer: document.referrer.slice(0, 200) || undefined,
-      },
-    });
-  } catch {
-    // silent — visitor tracking must never break the UI
-  }
-}
-
-export async function incrementShareCount(contentType: 'song' | 'video', contentId: string): Promise<void> {
-  try {
-    await supabase.functions.invoke('share', {
-      body: { content_type: contentType, content_id: contentId },
-    });
-  } catch {
-    // silent — share tracking must never break the UI
-  }
-}
-
-export async function getTodayVisitorCount(): Promise<number> {
-  const startOfDay = new Date();
-  startOfDay.setUTCHours(0, 0, 0, 0);
-  const { count, error } = await supabase
-    .from('visitor_logs')
-    .select('id', { count: 'exact', head: true })
-    .gte('visited_at', startOfDay.toISOString());
+export async function incrementVisitorCount(): Promise<number> {
+  if (!supabase) return 0;
+  const { data, error } = await supabase.rpc('increment_visitor_count');
   if (error) return 0;
-  return count ?? 0;
+  return Number(data);
 }
 
-export async function getNomineeById(id: string): Promise<Nominee | null> {
+// ============================================================
+// SPONSORS
+// ============================================================
+export async function getAllSponsors(): Promise<Sponsor[]> {
   const { data, error } = await supabase
-    .from('nominees')
-    .select('*, award_categories(name, awards(name))')
-    .eq('id', id)
-    .maybeSingle();
+    .from('sponsors').select('*')
+    .order('display_order', { ascending: true })
+    .order('created_at', { ascending: false });
   if (error) throw error;
-  return data as Nominee | null;
+  return Array.isArray(data) ? data as Sponsor[] : [];
 }
 
-export async function getPaymentStatus(paymentId: string): Promise<{ status: string } | null> {
-  const { data, error } = await supabase
-    .from('payments')
-    .select('id, status')
-    .eq('id', paymentId)
-    .maybeSingle();
-  if (error) return null;
-  return data as { status: string } | null;
+export async function getActiveSponsorsForAward(awardId?: string): Promise<Sponsor[]> {
+  let q = supabase
+    .from('sponsors').select('*')
+    .eq('is_active', true)
+    .order('display_order', { ascending: true });
+  if (awardId) q = q.eq('award_id', awardId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return Array.isArray(data) ? data as Sponsor[] : [];
 }
 
-export async function getTodayVisitorLogs(): Promise<import('@/types/index').VisitorLog[]> {
-  const startOfDay = new Date();
-  startOfDay.setUTCHours(0, 0, 0, 0);
+export async function createSponsor(payload: Partial<Sponsor>) {
+  const { error } = await supabase.from('sponsors').insert(payload);
+  if (error) throw error;
+}
+
+export async function updateSponsor(id: string, payload: Partial<Sponsor>) {
+  const { error } = await supabase.from('sponsors').update(payload).eq('id', id);
+  if (error) throw error;
+}
+
+export async function deleteSponsor(id: string) {
+  const { error } = await supabase.from('sponsors').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ============================================================
+// LIPILA CONFIG (payment gateway settings)
+// ============================================================
+export interface LipilaConfig {
+  id: string;
+  merchant_id: string;
+  service_id: string;
+  api_key: string;
+  webhook_secret?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getLipilaConfig(): Promise<LipilaConfig | null> {
   const { data, error } = await supabase
-    .from('visitor_logs')
-    .select('*')
-    .gte('visited_at', startOfDay.toISOString())
-    .order('visited_at', { ascending: false })
-    .limit(500);
-  if (error) return [];
-  return Array.isArray(data) ? data : [];
+    .from('lipila_config').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  return data as LipilaConfig | null;
+}
+
+export async function updateLipilaConfig(payload: Partial<LipilaConfig>): Promise<LipilaConfig> {
+  const { data, error } = await supabase
+    .from('lipila_config').upsert(payload, { onConflict: 'id' }).select().single();
+  if (error) throw error;
+  return data as LipilaConfig;
+}
+
+// ============================================================
+// APP SETTINGS — dynamic key management
+// ============================================================
+export async function getAllSettingsKeys(): Promise<AppSetting[]> {
+  const { data, error } = await supabase.from('app_settings').select('key, value, description, updated_at').order('key');
+  if (error) throw error;
+  return Array.isArray(data) ? data as AppSetting[] : [];
+}
+
+export async function createSetting(key: string, value: string, description?: string) {
+  const { error } = await supabase.from('app_settings').insert({ key, value, description });
+  if (error) throw error;
+}
+
+export async function deleteSetting(key: string) {
+  const { error } = await supabase.from('app_settings').delete().eq('key', key);
+  if (error) throw error;
+}
+
+// ============================================================
+// DONATION EDGE FUNCTION — verify donation payment status
+// ============================================================
+export async function verifyDonationPayment(paymentId: string): Promise<{
+  verified: boolean;
+  status: string;
+  amount?: number;
+  transaction_id?: string;
+  failure_reason?: string;
+}> {
+  const { data: session } = await supabase.auth.getSession();
+  const token = session?.session?.access_token;
+  const { data, error } = await supabase.functions.invoke('verify-donation-payment', {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: { payment_id: paymentId },
+  });
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data;
 }

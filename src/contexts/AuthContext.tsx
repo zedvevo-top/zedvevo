@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { supabase } from '@/db/supabase';
 import type { User } from '@supabase/supabase-js';
 import type { Profile } from '@/types/index';
+import { toast } from 'sonner';
 
 export async function getProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
@@ -21,9 +22,6 @@ interface AuthContextType {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
-  isArtist: boolean;
-  isAdmin: boolean;
-  isSuperAdmin: boolean;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, username: string, displayName?: string) => Promise<void>;
   /** @deprecated kept for any remaining callers — maps to signInWithEmail */
@@ -38,9 +36,6 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
   loading: true,
-  isArtist: false,
-  isAdmin: false,
-  isSuperAdmin: false,
   signInWithEmail: noop,
   signUpWithEmail: noop,
   signInWithUsername: noop,
@@ -60,21 +55,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // Safety timeout: never stay in loading state longer than 5s
-    const timeout = setTimeout(() => setLoading(false), 5000);
-
     supabase.auth.getSession()
       .then(({ data: { session } }) => {
         setUser(session?.user ?? null);
         if (session?.user) getProfile(session.user.id).then(setProfile);
       })
-      .catch(error => {
-        console.error('[AuthContext] getSession failed:', error);
-      })
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
+      .catch(error => toast.error(`Session error: ${error.message}`))
+      .finally(() => setLoading(false));
 
     // Do NOT use await inside onAuthStateChange – use .then() to avoid deadlocks.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -86,28 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // Realtime: watch for profile row changes (e.g. role promoted to 'artist' by webhook)
-    // so the UI updates immediately without requiring a manual page refresh.
-    let profileChannel: ReturnType<typeof supabase.channel> | null = null;
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const uid = session?.user?.id;
-      if (!uid) return;
-      profileChannel = supabase
-        .channel(`profile_watch_${uid}`)
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${uid}` },
-          () => { getProfile(uid).then(setProfile); }
-        )
-        .subscribe();
-    });
-
-    return () => {
-      clearTimeout(timeout);
-      subscription.unsubscribe();
-      if (profileChannel) supabase.removeChannel(profileChannel);
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
   // Sign in directly with real email
@@ -155,12 +121,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
   };
 
-  const isArtist = profile?.role === 'artist' || profile?.role === 'admin' || profile?.role === 'super_admin';
-  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
-  const isSuperAdmin = profile?.role === 'super_admin';
-
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isArtist, isAdmin, isSuperAdmin, signInWithEmail, signUpWithEmail, signInWithUsername, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ user, profile, loading, signInWithEmail, signUpWithEmail, signInWithUsername, signOut, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

@@ -62,7 +62,7 @@ export default function DonationDialog({ open, onClose }: DonationDialogProps) {
 
         const status = payment?.status;
 
-        if (status === 'successful') {
+        if (status === 'completed' || status === 'successful') {
           stopPolling();
           setStep('done');
           toast.success('Donation confirmed! Thank you for supporting ZedVevo.');

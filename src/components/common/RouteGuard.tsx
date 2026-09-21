@@ -30,23 +30,20 @@ export function RouteGuard({ children }: RouteGuardProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
-
   useEffect(() => {
     if (loading) return;
+
+    const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
+
     if (!user && !isPublic) {
       navigate('/login', { state: { from: location.pathname }, replace: true });
     }
-  }, [user, loading, isPublic, location.pathname, navigate]);
+  }, [user, loading, location.pathname, navigate]);
 
-  // For public routes: render immediately, don't block on auth loading
-  if (isPublic) return <>{children}</>;
-
-  // For protected routes: show spinner while auth resolves
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
       </div>
     );
   }

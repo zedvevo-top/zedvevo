@@ -4,13 +4,10 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Song } from '@/types/index';
-import { getSongs, getSongById } from '@/lib/api';
+import { getSongs } from '@/lib/api';
 import MusicCard from '@/components/music/MusicCard';
 import BackToHome from '@/components/common/BackToHome';
 import { usePlayer } from '@/contexts/PlayerContext';
-import { useOgMeta } from '@/hooks/use-og-meta';
-import { useVisitorTracking } from '@/hooks/use-visitor-tracking';
-import { useSearchParams } from 'react-router-dom';
 
 const GENRES = ['All', 'Afrobeats', 'Hip-Hop', 'R&B', 'Gospel', 'Traditional', 'Pop', 'Dance'];
 
@@ -22,27 +19,6 @@ export default function MusicPage() {
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const { currentSong, playSong } = usePlayer();
-  const [searchParams] = useSearchParams();
-  const [focusSong, setFocusSong] = useState<Song | null>(null);
-
-  // Fetch focused song from ?id= and inject OG meta for share previews
-  useEffect(() => {
-    const id = searchParams.get('id');
-    if (!id) { setFocusSong(null); return; }
-    getSongById(id).then(s => { if (s) setFocusSong(s); }).catch(() => {});
-  }, [searchParams]);
-
-  useOgMeta(focusSong ? {
-    title: `${focusSong.title} — ${focusSong.featured_artists ? `${focusSong.artist_name} ft. ${focusSong.featured_artists}` : focusSong.artist_name} | ZedVevo MP3`,
-    description: `Listen to "${focusSong.title}" by ${focusSong.featured_artists ? `${focusSong.artist_name} ft. ${focusSong.featured_artists}` : focusSong.artist_name} on ZedVevo — Zambia's music platform.`,
-    imageUrl: focusSong.cover_url ?? undefined,
-    pageUrl: `${window.location.origin}/song/${focusSong.id}`,
-  } : {
-    title: 'ZedVevo — Zambian Music & Video',
-    description: 'Stream and discover the best Zambian music on ZedVevo.',
-  });
-
-  useVisitorTracking('/music');
 
   const LIMIT = 24;
 

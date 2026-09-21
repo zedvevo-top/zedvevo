@@ -48,3 +48,36 @@ const AvatarFallback = React.forwardRef<
 AvatarFallback.displayName = AvatarPrimitive.Fallback.displayName
 
 export { Avatar, AvatarImage, AvatarFallback }
+
+export function UserAvatar({
+  name,
+  src,
+  image,
+  size,
+  className,
+}: {
+  name?: string | null;
+  src?: string | null;
+  image?: string | null;
+  size?: 'sm' | 'md' | 'lg' | 'xl' | string;
+  className?: string;
+}) {
+  const finalSrc = src || image;
+  const sizeClasses =
+    size === 'sm'
+      ? 'h-8 w-8'
+      : size === 'lg'
+      ? 'h-14 w-14'
+      : size === 'xl'
+      ? 'h-20 w-20'
+      : size === 'md'
+      ? 'h-10 w-10'
+      : '';
+
+  return (
+    <Avatar className={cn(sizeClasses, className)}>
+      {finalSrc && <AvatarImage src={finalSrc} alt={name || 'Avatar'} />}
+      <AvatarFallback>{(name || 'U').slice(0, 2).toUpperCase()}</AvatarFallback>
+    </Avatar>
+  );
+}

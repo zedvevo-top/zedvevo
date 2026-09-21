@@ -9,19 +9,8 @@ Sentry.init({
   environment: import.meta.env.MODE,
 });
 
-const rootEl = document.getElementById("root");
-if (!rootEl) throw new Error("Root element #root not found");
-
-createRoot(rootEl).render(
-  <Sentry.ErrorBoundary fallback={
-    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'100vh', fontFamily:'sans-serif', gap:'12px' }}>
-      <p style={{ fontSize:'1.1rem', fontWeight:600 }}>Something went wrong</p>
-      <p style={{ fontSize:'0.875rem', color:'#666' }}>Please refresh the page</p>
-      <button onClick={() => window.location.reload()} style={{ padding:'8px 20px', borderRadius:'6px', background:'#000', color:'#fff', border:'none', cursor:'pointer' }}>
-        Refresh
-      </button>
-    </div>
-  }>
+createRoot(document.getElementById("root")!).render(
+  <Sentry.ErrorBoundary fallback={<p>应用发生错误，请刷新页面重试</p>}>
     <AppWrapper>
       <App />
     </AppWrapper>

@@ -5,11 +5,12 @@ export interface Option {
   withCount?: boolean;
 }
 
-export type UserRole = 'user' | 'artist' | 'admin' | 'super_admin';
+export type UserRole = 'user' | 'artist' | 'admin' | 'super_admin' | 'judge';
 export type ContentStatus = 'pending' | 'approved' | 'rejected';
-export type PaymentStatus = 'pending' | 'successful' | 'failed' | 'cancelled' | 'insufficient_funds' | 'invalid_transaction' | 'review';
+export type PaymentStatus = 'pending' | 'successful' | 'failed' | 'cancelled' | 'insufficient_funds' | 'invalid_transaction';
 export type PaymentMethod = 'mobile_money' | 'card';
 export type PlanType = 'k10_single' | 'k100_weekly' | 'k300_yearly';
+export type PaymentType = 'vote' | 'nominee_registration' | 'plan' | 'subscription';
 
 export interface Profile {
   id: string;
@@ -20,6 +21,7 @@ export interface Profile {
   avatar_url?: string;
   bio?: string;
   role: UserRole;
+  is_artist?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -59,34 +61,59 @@ export interface UserSubscription {
 
 export interface Payment {
   id: string;
-  user_id: string;
+  user_id?: string | null;
   amount: number;
-  payment_method: PaymentMethod;
+  currency?: string;
+  payment_method?: PaymentMethod | string;
+  payment_provider?: string;
+  provider_reference?: string;
+  internal_reference?: string;
+  external_reference?: string;
   lipila_transaction_id?: string;
   lipila_reference?: string;
   plan_id?: string;
   subscription_id?: string;
-  payment_type: 'plan' | 'nominee_registration' | 'vote';
+  payment_type: PaymentType;
   status: PaymentStatus;
   failure_reason?: string;
   phone_number?: string;
-  metadata?: Record<string, unknown>;
-  idempotency_key: string;
+  metadata?: Record<string, any>;
+  idempotency_key?: string;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
   upload_plans?: UploadPlan;
+  user?: {
+    email?: string;
+    display_name?: string;
+    username?: string;
+  };
 }
 
 export interface Artist {
   id: string;
   user_id?: string;
   name: string;
+  stage_name?: string;
   bio?: string;
   avatar_url?: string;
   cover_url?: string;
+  cover_image_url?: string;
   genre?: string;
   is_featured: boolean;
+  featured?: boolean;
+  verified?: boolean;
   play_count: number;
+  monthly_listeners?: number;
+  total_followers?: number;
+  total_streams?: number;
+  website?: string;
+  social_links?: Record<string, string>;
+  user?: {
+    id?: string;
+    avatar_url?: string;
+    full_name?: string;
+    username?: string;
+  };
   created_at: string;
 }
 
@@ -170,20 +197,10 @@ export interface Award {
   season_label?: string;
   is_active: boolean;
   voting_open: boolean;
-  nominees_open: boolean;
   voting_starts_at?: string;
   voting_ends_at?: string;
   created_at: string;
   award_categories?: AwardCategory[];
-}
-
-export interface VisitorLog {
-  id: string;
-  visited_at: string;
-  page: string;
-  session_id?: string;
-  user_agent?: string;
-  referrer?: string;
 }
 
 export interface AwardCategory {
@@ -208,8 +225,6 @@ export interface Nominee {
   song_title?: string;
   song_url?: string;
   video_url?: string;
-  achievements?: string;
-  social_links?: string;   // JSON string: { facebook?, twitter?, instagram?, linkedin? }
   total_votes: number;
   payment_id?: string;
   registration_status: PaymentStatus;
@@ -279,27 +294,33 @@ export interface SearchResult {
 
 export interface Vote {
   id: string;
-  user_id: string | null;
+  user_id: string;
   nominee_id: string;
   category_id: string;
   amount: number;
   vote_count: number;
   payment_id?: string;
   payment_status: PaymentStatus;
-  vote_approval_status: 'pending' | 'approved' | 'rejected';
   created_at: string;
   nominees?: Nominee;
 }
 
 export interface Sponsor {
   id: string;
-  award_id?: string;
+  award_id?: string | null;
   name: string;
+  headline?: string;
   logo_url?: string;
+  banner_url?: string;
   website_url?: string;
+  cta_text?: string;
+  cta_url?: string;
   tier: 'gold' | 'silver' | 'bronze';
   display_order: number;
   is_active: boolean;
+  position?: string;
+  impression_count?: number;
+  click_count?: number;
   created_at: string;
 }
 
@@ -328,36 +349,6 @@ export interface Notification {
   metadata?: Record<string, unknown>;
   is_read: boolean;
   created_at: string;
-}
-
-export interface HelpMessage {
-  id: string;
-  user_id?: string;
-  name: string;
-  email: string;
-  subject: string;
-  message: string;
-  status: 'open' | 'in_progress' | 'resolved' | 'closed';
-  admin_notes?: string;
-  created_at: string;
-  updated_at?: string;
-}
-
-export interface SupportTicket {
-  id: string;
-  user_id?: string;
-  name: string;
-  email: string;
-  subject: string;
-  message: string;
-  priority: 'low' | 'normal' | 'high' | 'urgent';
-  status: 'open' | 'in_progress' | 'waiting' | 'resolved' | 'closed';
-  category: 'general' | 'billing' | 'technical' | 'content' | 'awards' | 'other';
-  assigned_to?: string;
-  admin_notes?: string;
-  resolved_at?: string;
-  created_at: string;
-  updated_at?: string;
 }
 
 export interface LipilaPaymentResponse {
