@@ -55,6 +55,24 @@ const FALLBACK_ADS: Sponsor[] = [
   }
 ];
 
+// Dynamic script injection wrapper to parse and execute <script> tags inside pasted ad codes
+function ScriptHtmlContainer({ code }: { code: string }) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || !code) return;
+    
+    containerRef.current.innerHTML = '';
+    
+    const range = document.createRange();
+    const documentFragment = range.createContextualFragment(code);
+    
+    containerRef.current.appendChild(documentFragment);
+  }, [code]);
+
+  return <div ref={containerRef} className="w-full flex justify-center items-center overflow-hidden" />;
+}
+
 interface AdBannerProps {
   position?: 'all' | 'home' | 'music' | 'videos' | 'awards';
   format?: 'leaderboard' | 'feed' | 'compact';
@@ -71,6 +89,8 @@ export default function AdBanner({
   const [activeAd, setActiveAd] = useState<Sponsor | null>(null);
   const [adsenseClientId, setAdsenseClientId] = useState<string | null>(null);
   const [adsEnabled, setAdsEnabled] = useState<boolean>(true);
+  const [customLeaderboardCode, setCustomLeaderboardCode] = useState<string | null>(null);
+  const [customFeedCode, setCustomFeedCode] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -81,21 +101,30 @@ export default function AdBanner({
         const { data: settings } = await supabase
           .from('app_settings')
           .select('key, value')
-          .in('key', ['ads_enabled', 'adsense_client_id']);
+          .in('key', ['ads_enabled', 'adsense_client_id', 'ad_code_leaderboard', 'ad_code_feed']);
 
         let enabled = true;
         let client = import.meta.env.VITE_ADSENSE_CLIENT_ID || null;
+        let leaderboardCode: string | null = null;
+        let feedCode: string | null = null;
 
         if (settings) {
           const adsSetting = settings.find((s: any) => s.key === 'ads_enabled');
           const clientSetting = settings.find((s: any) => s.key === 'adsense_client_id');
-          if (adsSetting && adsSetting.value === false) enabled = false;
+          const leaderboardSetting = settings.find((s: any) => s.key === 'ad_code_leaderboard');
+          const feedSetting = settings.find((s: any) => s.key === 'ad_code_feed');
+
+          if (adsSetting && (adsSetting.value === false || adsSetting.value === 'false')) enabled = false;
           if (clientSetting && clientSetting.value) client = String(clientSetting.value);
+          if (leaderboardSetting && leaderboardSetting.value) leaderboardCode = String(leaderboardSetting.value);
+          if (feedSetting && feedSetting.value) feedCode = String(feedSetting.value);
         }
 
         if (!isMounted) return;
         setAdsEnabled(enabled);
         setAdsenseClientId(client);
+        setCustomLeaderboardCode(leaderboardCode);
+        setCustomFeedCode(feedCode);
 
         if (!enabled) return;
 
@@ -137,6 +166,33 @@ export default function AdBanner({
 
   // If ads are explicitly disabled by admin, render nothing
   if (!adsEnabled) return null;
+
+  // 1. Render custom admin ad codes if provided (Adsterra, PropellerAds, custom banner scripts, etc.)
+  if (format === 'leaderboard' && customLeaderboardCode) {
+    return (
+      <div className={`w-full overflow-hidden rounded-xl border border-border/40 bg-card/40 my-4 text-center ${className}`}>
+        <div className="flex items-center justify-between px-3 py-1 bg-muted/40 border-b border-border/20 text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">
+          <span>Sponsored Ad</span>
+        </div>
+        <div className="p-2 min-h-[90px] flex items-center justify-center">
+          <ScriptHtmlContainer code={customLeaderboardCode} />
+        </div>
+      </div>
+    );
+  }
+
+  if (format === 'feed' && customFeedCode) {
+    return (
+      <div className={`w-full overflow-hidden rounded-xl border border-border/40 bg-card/40 my-4 text-center ${className}`}>
+        <div className="flex items-center justify-between px-3 py-1 bg-muted/40 border-b border-border/20 text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">
+          <span>Sponsored Ad</span>
+        </div>
+        <div className="p-2 min-h-[90px] flex items-center justify-center">
+          <ScriptHtmlContainer code={customFeedCode} />
+        </div>
+      </div>
+    );
+  }
 
   // Handle click to track clicks
   const handleAdClick = () => {

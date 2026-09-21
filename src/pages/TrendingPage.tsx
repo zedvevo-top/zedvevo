@@ -862,15 +862,15 @@ export default function TrendingPage() {
                     className="bg-card border border-border rounded-xl p-4 text-center group hover:border-accent transition-all"
                   >
                     <div className="h-20 w-20 sm:h-24 sm:w-24 rounded-full overflow-hidden mx-auto mb-3 bg-muted border-2 border-border group-hover:border-accent transition-colors">
-                      {artist.avatar_url ? (
-                        <img src={artist.avatar_url} alt={artist.name} className="w-full h-full object-cover" />
+                      {(artist.avatar_url || artist.cover_image_url || artist.cover_url) ? (
+                        <img src={artist.avatar_url || artist.cover_image_url || artist.cover_url} alt={artist.stage_name || artist.name || 'Artist'} className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground/40">
-                          {artist.name[0]}
+                          {(artist.stage_name || artist.name || 'Artist')[0]}
                         </div>
                       )}
                     </div>
-                    <p className="text-xs font-bold truncate group-hover:text-accent">{artist.name}</p>
+                    <p className="text-xs font-bold truncate group-hover:text-accent">{artist.stage_name || artist.name || 'Artist'}</p>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
                       {artist.play_count.toLocaleString()} plays
                     </p>

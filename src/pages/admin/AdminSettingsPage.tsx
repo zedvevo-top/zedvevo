@@ -315,12 +315,19 @@ export default function AdminSettingsPage() {
             {[
               { key: 'site_name', label: 'Site Name', type: 'text' },
               { key: 'site_tagline', label: 'Tagline', type: 'text' },
+              { key: 'theme_primary_color', label: 'Primary Brand Color (HSL, e.g., 220 13% 10%)', type: 'text' },
+              { key: 'theme_accent_color', label: 'Accent Highlight Color (HSL, e.g., 28 85% 50%)', type: 'text' },
+              { key: 'theme_border_radius', label: 'Theme Border Radius (e.g., 0.375rem, 0.5rem)', type: 'text' },
+              { key: 'theme_mode', label: 'Default Theme Mode (dark / light)', type: 'text' },
               { key: 'vote_min_amount', label: 'Price Per Vote (ZMW)', type: 'number' },
               { key: 'nominee_registration_fee', label: 'Nominee Registration Fee (ZMW)', type: 'number' },
               { key: 'contact_email', label: 'Contact Email', type: 'email' },
               { key: 'currency', label: 'Platform Currency', type: 'text' },
               { key: 'max_file_size_mb', label: 'Max Upload Size (MB)', type: 'number' },
               { key: 'maintenance_mode', label: 'Maintenance Mode (true/false)', type: 'text' },
+              { key: 'ad_code_header', label: 'Global Header/Script Code (Popunder, Social Bar, Auto Ads)', type: 'textarea' },
+              { key: 'ad_code_leaderboard', label: 'Leaderboard Banner HTML/Script Code (Horizontal Ads)', type: 'textarea' },
+              { key: 'ad_code_feed', label: 'Feed Banner HTML/Script Code (Mid-Page Ads)', type: 'textarea' },
             ].map(({ key, label, type }) => (
               <SettingRow
                 key={key}
@@ -500,14 +507,23 @@ function SettingRow({ label, type, value: init, saving, onSave }: {
   // Sync external changes
   useEffect(() => { setVal(init); }, [init]);
   return (
-    <div>
+    <div className={type === 'textarea' ? 'col-span-1 md:col-span-2' : ''}>
       <Label>{label}</Label>
-      <div className="flex gap-2 mt-1">
-        <Input type={type} className="flex-1 h-8 text-sm" value={val} onChange={e => setVal(e.target.value)} />
-        <Button size="sm" variant="outline" className="h-8 text-xs shrink-0" onClick={() => onSave(val)} disabled={saving}>
-          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Save'}
-        </Button>
-      </div>
+      {type === 'textarea' ? (
+        <div className="space-y-2 mt-1">
+          <Textarea className="w-full text-xs font-mono min-h-[100px] bg-background" value={val} onChange={e => setVal(e.target.value)} placeholder="Paste your script / HTML code here..." />
+          <Button size="sm" variant="outline" className="h-8 text-xs shrink-0" onClick={() => onSave(val)} disabled={saving}>
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Save Ad Code'}
+          </Button>
+        </div>
+      ) : (
+        <div className="flex gap-2 mt-1">
+          <Input type={type} className="flex-1 h-8 text-sm" value={val} onChange={e => setVal(e.target.value)} />
+          <Button size="sm" variant="outline" className="h-8 text-xs shrink-0" onClick={() => onSave(val)} disabled={saving}>
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Save'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

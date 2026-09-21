@@ -48,6 +48,81 @@ function SuperAdminGuard({ children }: { children: React.ReactNode }) {
   return <AdminLayout>{children}</AdminLayout>;
 }
 
+// Dynamic head script injection & dynamic platform theme loader from Supabase
+const GlobalScriptsAndTheme: React.FC = () => {
+  React.useEffect(() => {
+    async function loadConfigAndTheme() {
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        const { data: settings } = await supabase
+          .from('app_settings')
+          .select('key, value');
+        
+        if (!settings) return;
+
+        // 1. Paste global header ad scripts (popunders, push, etc.)
+        const adHeader = settings.find(s => s.key === 'ad_code_header')?.value;
+        if (adHeader) {
+          try {
+            const range = document.createRange();
+            const fragment = range.createContextualFragment(adHeader);
+            document.head.appendChild(fragment);
+          } catch (e) {
+            console.warn('Could not parse ad_code_header fragment safely:', e);
+          }
+        }
+
+        // 2. Set dynamic branding
+        const siteName = settings.find(s => s.key === 'site_name')?.value;
+        if (siteName) {
+          (window as any).ZED_SITE_NAME = siteName;
+          document.title = document.title.replace('ZedVevo', siteName);
+          window.dispatchEvent(new CustomEvent('site_name_changed', { detail: siteName }));
+        }
+
+        // 3. Set dynamic theme attributes (primary color, accent highlight, and radius)
+        const primaryColor = settings.find(s => s.key === 'theme_primary_color')?.value;
+        const accentColor = settings.find(s => s.key === 'theme_accent_color')?.value;
+        const borderRadius = settings.find(s => s.key === 'theme_border_radius')?.value;
+        const themeMode = settings.find(s => s.key === 'theme_mode')?.value;
+
+        let styleRules = '';
+        if (primaryColor || accentColor || borderRadius) {
+          styleRules += `
+            :root {
+              ${primaryColor ? `--primary: ${primaryColor};` : ''}
+              ${accentColor ? `--accent: ${accentColor}; --ring: ${accentColor};` : ''}
+              ${borderRadius ? `--radius: ${borderRadius};` : ''}
+            }
+          `;
+        }
+
+        if (styleRules) {
+          let styleEl = document.getElementById('supabase-theme-style');
+          if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'supabase-theme-style';
+            document.head.appendChild(styleEl);
+          }
+          styleEl.textContent = styleRules;
+        }
+
+        // 4. Force default theme mode if configured
+        if (themeMode === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else if (themeMode === 'light') {
+          document.documentElement.classList.remove('dark');
+        }
+
+      } catch (err) {
+        console.warn('Failed to load global ads header or theme scripts:', err);
+      }
+    }
+    loadConfigAndTheme();
+  }, []);
+  return null;
+};
+
 const App: React.FC = () => {
   return (
     <Router>
@@ -55,6 +130,7 @@ const App: React.FC = () => {
         <PlayerProvider>
         <RouteGuard>
           <ScrollToTop />
+          <GlobalScriptsAndTheme />
           <IntersectObserver />
           <Routes>
             {/* Admin sub-routes — full-screen layout, no Header/MobileNav */}

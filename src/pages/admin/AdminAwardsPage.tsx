@@ -32,6 +32,8 @@ export default function AdminAwardsPage() {
   const [trending, setTrending] = useState<WeeklyTrending[]>([]);
   const [loading, setLoading]   = useState(true);
   const [trendRefreshing, setTrendRefreshing] = useState(false);
+  const [votePrice, setVotePrice] = useState('5.00');
+  const [regFee, setRegFee] = useState('100.00');
 
   // Award dialog
   const [awardDlg, setAwardDlg]   = useState<{ open: boolean; award?: Award }>({ open: false });
@@ -72,6 +74,25 @@ export default function AdminAwardsPage() {
       .then(([a, n, w, t]) => { setAwards(a); setNominees(n); setWinners(w); setTrending(t); })
       .catch(console.error)
       .finally(() => setLoading(false));
+
+    async function loadPrices() {
+      try {
+        const { supabase } = await import('@/db/supabase');
+        const { data: settingsData } = await supabase
+          .from('app_settings')
+          .select('key, value')
+          .in('key', ['vote_min_amount', 'nominee_registration_fee']);
+        if (settingsData) {
+          const p = settingsData.find(s => s.key === 'vote_min_amount')?.value;
+          const f = settingsData.find(s => s.key === 'nominee_registration_fee')?.value;
+          if (p) setVotePrice(p);
+          if (f) setRegFee(f);
+        }
+      } catch (err) {
+        console.warn('Failed to load pricing settings:', err);
+      }
+    }
+    loadPrices();
   }, []);
 
   // Award CRUD
@@ -247,8 +268,42 @@ export default function AdminAwardsPage() {
         </TabsContent>
 
         {/* Nominees tab */}
-        <TabsContent value="nominees" className="mt-4">
-          <div className="flex justify-end mb-4">
+        <TabsContent value="nominees" className="mt-4 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-muted/20 p-4 rounded-xl border border-border">
+            <div>
+              <Label className="text-xs font-semibold">Price Per Vote (ZMW)</Label>
+              <div className="flex gap-2 mt-1">
+                <Input type="number" className="h-8 text-xs max-w-[120px] bg-background" value={votePrice} onChange={e => setVotePrice(e.target.value)} />
+                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={async () => {
+                  try {
+                    const { supabase } = await import('@/db/supabase');
+                    await supabase.from('app_settings').upsert({ key: 'vote_min_amount', value: votePrice }, { onConflict: 'key' });
+                    toast.success('Vote price updated successfully!');
+                  } catch (e: any) {
+                    toast.error('Failed to update vote price');
+                  }
+                }}>Save Price</Button>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold">Nominee Registration Fee (ZMW)</Label>
+              <div className="flex gap-2 mt-1">
+                <Input type="number" className="h-8 text-xs max-w-[120px] bg-background" value={regFee} onChange={e => setRegFee(e.target.value)} />
+                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={async () => {
+                  try {
+                    const { supabase } = await import('@/db/supabase');
+                    await supabase.from('app_settings').upsert({ key: 'nominee_registration_fee', value: regFee }, { onConflict: 'key' });
+                    toast.success('Nominee registration fee updated successfully!');
+                  } catch (e: any) {
+                    toast.error('Failed to update registration fee');
+                  }
+                }}>Save Fee</Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-sm font-semibold">Nominees & Votes List</h3>
             <Button size="sm" className="bg-accent hover:bg-accent/90 text-accent-foreground gap-1.5 text-xs"
               onClick={() => { setNomineeName(''); setNomineeCategoryId(''); setNomineePhoto(null); setNomineeDlg(true); }}>
               <Plus className="h-3.5 w-3.5" />Add Nominee
@@ -276,7 +331,30 @@ export default function AdminAwardsPage() {
                     <td className="py-2.5 px-3 whitespace-nowrap">
                       <Badge variant={nom.nomination_status === 'approved' ? 'default' : nom.nomination_status === 'rejected' ? 'destructive' : 'secondary'} className="text-[10px] capitalize">{nom.nomination_status}</Badge>
                     </td>
-                    <td className="py-2.5 px-3 whitespace-nowrap text-muted-foreground">{nom.total_votes ?? 0}</td>
+                    <td className="py-2.5 px-3 whitespace-nowrap text-muted-foreground">
+                      <Input
+                        type="number"
+                        className="h-7 w-24 text-xs font-semibold bg-background border border-input text-center"
+                        defaultValue={nom.total_votes ?? 0}
+                        onBlur={async (e) => {
+                          const val = parseInt(e.target.value);
+                          if (isNaN(val)) return;
+                          if (val === nom.total_votes) return;
+                          try {
+                            const { supabase } = await import('@/db/supabase');
+                            const { error } = await supabase
+                              .from('nominees')
+                              .update({ total_votes: val })
+                              .eq('id', nom.id);
+                            if (error) throw error;
+                            setNominees(prev => prev.map(n => n.id === nom.id ? { ...n, total_votes: val } : n));
+                            toast.success(`Votes updated for ${nom.name}`);
+                          } catch (err: any) {
+                            toast.error(err.message || 'Failed to update votes');
+                          }
+                        }}
+                      />
+                    </td>
                     <td className="py-2.5 px-3 whitespace-nowrap text-muted-foreground text-xs">{formatDate(nom.created_at)}</td>
                     <td className="py-2.5 px-3 whitespace-nowrap">
                       <div className="flex gap-1">

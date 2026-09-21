@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { Link } from 'react-router-dom'
 import { Music, Video, ShoppingBag, Mic, Calendar, Info, Mail, Phone, MapPin, Facebook, Twitter, Instagram, Youtube } from 'lucide-react'
 
@@ -39,6 +40,20 @@ const socialLinks = [
 ]
 
 export function Footer() {
+  const [siteName, setSiteName] = import.meta.env.SSR ? ['ZedVevo'] : (function() {
+    const [name, setName] = React.useState((window as any).ZED_SITE_NAME || 'ZedVevo');
+    React.useEffect(() => {
+      const handleBrandChanged = (e: any) => {
+        if (e.detail) setName(e.detail);
+      };
+      window.addEventListener('site_name_changed', handleBrandChanged);
+      return () => window.removeEventListener('site_name_changed', handleBrandChanged);
+    }, []);
+    return [name, setName];
+  })();
+
+  const tagline = `The best Zambian music streaming and digital marketplace platform.`;
+
   return (
     <footer className="border-t border-border bg-deep-black">
       <div className="container px-4 py-12">
@@ -51,10 +66,10 @@ export function Footer() {
                   <polygon points="5,3 19,12 5,21" />
                 </svg>
               </div>
-              <span className="text-xl font-bold text-white">ZedVevo</span>
+              <span className="text-xl font-bold text-white">{siteName}</span>
             </Link>
             <p className="text-sm text-gray-400 mb-4">
-              The best Zambian music streaming and digital marketplace platform.
+              {tagline}
             </p>
             <div className="flex gap-4">
               {socialLinks.map((social) => (

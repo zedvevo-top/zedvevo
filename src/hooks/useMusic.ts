@@ -192,14 +192,18 @@ export function useArtists(limit = 50) {
       if (!isConfigured) return mockArtists.map(normalizeArtist).slice(0, limit)
       const { data, error } = await supabase
         .from('artists')
-        .select('*')
+        .select('*, songs(play_count)')
         .order('play_count', { ascending: false })
         .limit(limit)
 
       if (error || !data || data.length === 0) {
         return mockArtists.map(normalizeArtist).slice(0, limit)
       }
-      return data.map(normalizeArtist)
+      return data.map((artist: any) => {
+        const songsPlays = (artist.songs || []).reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
+        const totalPlays = Math.max(Number(artist.play_count) || 0, songsPlays);
+        return normalizeArtist({ ...artist, play_count: totalPlays });
+      })
     },
   })
 }
@@ -211,14 +215,18 @@ export function useFeaturedArtists(limit = 10) {
       if (!isConfigured) return mockArtists.filter(a => a.featured || a.is_featured).map(normalizeArtist).slice(0, limit)
       const { data, error } = await supabase
         .from('artists')
-        .select('*')
+        .select('*, songs(play_count)')
         .order('play_count', { ascending: false })
         .limit(limit)
 
       if (error || !data || data.length === 0) {
         return mockArtists.map(normalizeArtist).slice(0, limit)
       }
-      return data.map(normalizeArtist)
+      return data.map((artist: any) => {
+        const songsPlays = (artist.songs || []).reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
+        const totalPlays = Math.max(Number(artist.play_count) || 0, songsPlays);
+        return normalizeArtist({ ...artist, play_count: totalPlays });
+      })
     },
   })
 }
@@ -233,7 +241,7 @@ export function useArtist(id: string) {
       }
       const { data, error } = await supabase
         .from('artists')
-        .select('*')
+        .select('*, songs(play_count)')
         .eq('id', id)
         .single()
 
@@ -241,7 +249,9 @@ export function useArtist(id: string) {
         const found = mockArtists.find(a => a.id === id) || mockArtists[0]
         return normalizeArtist(found)
       }
-      return normalizeArtist(data)
+      const songsPlays = (data.songs || []).reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
+      const totalPlays = Math.max(Number(data.play_count) || 0, songsPlays);
+      return normalizeArtist({ ...data, play_count: totalPlays })
     },
     enabled: !!id,
   })

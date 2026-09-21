@@ -129,12 +129,12 @@ export default function HomePage() {
         {artists.map(artist => (
           <Link key={artist.id} to={`/artist/${artist.id}`} className="text-center group block">
             <div className="h-20 w-20 md:h-28 md:w-28 rounded-full overflow-hidden mx-auto mb-2 bg-muted border-2 border-border group-hover:border-primary group-hover:scale-105 transition-all duration-200">
-              {artist.avatar_url || artist.cover_url
-                ? <img src={artist.avatar_url || artist.cover_url} alt={artist.name} className="w-full h-full object-cover" />
-                : <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground/40">{artist.name ? artist.name[0] : 'A'}</div>
+              {(artist.avatar_url || artist.cover_image_url || artist.cover_url)
+                ? <img src={artist.avatar_url || artist.cover_image_url || artist.cover_url} alt={artist.stage_name || artist.name || 'Artist'} className="w-full h-full object-cover" />
+                : <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground/40">{(artist.stage_name || artist.name || 'Artist')[0]}</div>
               }
             </div>
-            <p className="text-xs font-semibold truncate text-foreground group-hover:text-primary transition-colors">{artist.name}</p>
+            <p className="text-xs font-semibold truncate text-foreground group-hover:text-primary transition-colors">{artist.stage_name || artist.name || 'Artist'}</p>
             <p className="text-[10px] text-muted-foreground">{(artist.play_count || 0).toLocaleString()} plays</p>
           </Link>
         ))}

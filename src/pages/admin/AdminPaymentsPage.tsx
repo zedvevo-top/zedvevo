@@ -122,79 +122,98 @@ export default function AdminPaymentsPage() {
                 </td>
                 <td className="py-2.5 px-3 whitespace-nowrap text-muted-foreground text-[10px] font-mono">{p.lipila_transaction_id || '—'}</td>
                 <td className="py-2.5 px-3 whitespace-nowrap">
-                  {p.status !== 'successful' && (
-                    <Button size="sm" variant="default" className="h-6 text-[10px] bg-accent text-accent-foreground hover:bg-accent/90" onClick={async () => {
-                      if (!confirm(`Are you sure you want to approve this ${p.payment_type} payment for ${formatCurrency(p.amount)}? This will apply votes/status to the database.`)) return;
-                      try {
-                        const { supabase } = await import('@/db/supabase');
-                        const { error } = await supabase.from('payments').update({
-                          status: 'successful',
-                          updated_at: new Date().toISOString(),
-                        }).eq('id', p.id);
-                        if (error) throw error;
-                        
-                        // 1. If it's a vote payment, insert the votes and increment nominee total_votes
-                        if (p.payment_type === 'vote' && p.metadata?.nominee_id) {
-                          const nomineeId = p.metadata.nominee_id;
-                          const voteCount = p.metadata.vote_count || Math.max(1, Math.floor(p.amount / 5));
+                  <div className="flex gap-1.5">
+                    {p.status !== 'successful' && (
+                      <Button size="sm" variant="default" className="h-6 text-[10px] bg-accent text-accent-foreground hover:bg-accent/90" onClick={async () => {
+                        if (!confirm(`Are you sure you want to approve this ${p.payment_type} payment for ${formatCurrency(p.amount)}? This will apply votes/status to the database.`)) return;
+                        try {
+                          const { supabase } = await import('@/db/supabase');
+                          const { error } = await supabase.from('payments').update({
+                            status: 'successful',
+                            updated_at: new Date().toISOString(),
+                          }).eq('id', p.id);
+                          if (error) throw error;
                           
-                          const { data: existingVote } = await supabase
-                            .from('votes')
-                            .select('id')
-                            .eq('payment_id', p.id)
-                            .maybeSingle();
-
-                          if (!existingVote) {
-                            await supabase.from('votes').insert({
-                              nominee_id: nomineeId,
-                              user_id: p.user_id || null,
-                              payment_id: p.id,
-                              vote_count: voteCount,
-                            });
-
-                            const { data: nom } = await supabase
-                              .from('nominees')
-                              .select('total_votes')
-                              .eq('id', nomineeId)
-                              .single();
+                          // 1. If it's a vote payment, insert the votes and increment nominee total_votes
+                          if (p.payment_type === 'vote' && p.metadata?.nominee_id) {
+                            const nomineeId = p.metadata.nominee_id;
+                            const voteCount = p.metadata.vote_count || Math.max(1, Math.floor(p.amount / 5));
                             
-                            const newTotal = (nom?.total_votes || 0) + voteCount;
-                            await supabase
-                              .from('nominees')
-                              .update({ total_votes: newTotal })
-                              .eq('id', nomineeId);
+                            const { data: existingVote } = await supabase
+                              .from('votes')
+                              .select('id')
+                              .eq('payment_id', p.id)
+                              .maybeSingle();
+
+                            if (!existingVote) {
+                              await supabase.from('votes').insert({
+                                nominee_id: nomineeId,
+                                user_id: p.user_id || null,
+                                payment_id: p.id,
+                                vote_count: voteCount,
+                              });
+
+                              const { data: nom } = await supabase
+                                .from('nominees')
+                                .select('total_votes')
+                                .eq('id', nomineeId)
+                                .single();
+                              
+                              const newTotal = (nom?.total_votes || 0) + voteCount;
+                              await supabase
+                                .from('nominees')
+                                .update({ total_votes: newTotal })
+                                .eq('id', nomineeId);
+                            }
+                            import('sonner').then(m => m.toast.success(`Payment approved and ${voteCount} votes added to nominee!`));
+                          } 
+                          // 2. If it's nominee registration, approve the nominee
+                          else if (p.payment_type === 'nominee_registration' && p.metadata?.nominee_id) {
+                            await supabase.from('nominees').update({
+                              registration_status: 'completed',
+                              nomination_status: 'approved',
+                            }).eq('id', p.metadata.nominee_id);
+                            import('sonner').then(m => m.toast.success('Payment approved and nominee registration confirmed!'));
                           }
-                          import('sonner').then(m => m.toast.success(`Payment approved and ${voteCount} votes added to nominee!`));
-                        } 
-                        // 2. If it's nominee registration, approve the nominee
-                        else if (p.payment_type === 'nominee_registration' && p.metadata?.nominee_id) {
-                          await supabase.from('nominees').update({
-                            registration_status: 'completed',
-                            nomination_status: 'approved',
-                          }).eq('id', p.metadata.nominee_id);
-                          import('sonner').then(m => m.toast.success('Payment approved and nominee registration confirmed!'));
+                          // 3. If it's a subscription, activate user subscription
+                          else if (p.payment_type === 'subscription' && p.user_id && p.metadata?.plan_id) {
+                            const now = new Date();
+                            const endDate = new Date(now.setDate(now.getDate() + 30)).toISOString();
+                            await supabase.from('user_subscriptions').upsert({
+                              user_id: p.user_id,
+                              plan_id: p.metadata.plan_id,
+                              status: 'active',
+                              current_period_end: endDate,
+                            });
+                            import('sonner').then(m => m.toast.success('Payment approved and subscription activated!'));
+                          } else {
+                            import('sonner').then(m => m.toast.success('Payment successfully marked as approved'));
+                          }
+                          
+                          setPayments(prev => prev.map(pay => pay.id === p.id ? { ...pay, status: 'successful' } : pay));
+                        } catch (err: any) {
+                          import('sonner').then(m => m.toast.error(err.message || 'Failed to approve'));
                         }
-                        // 3. If it's a subscription, activate user subscription
-                        else if (p.payment_type === 'subscription' && p.user_id && p.metadata?.plan_id) {
-                          const now = new Date();
-                          const endDate = new Date(now.setDate(now.getDate() + 30)).toISOString();
-                          await supabase.from('user_subscriptions').upsert({
-                            user_id: p.user_id,
-                            plan_id: p.metadata.plan_id,
-                            status: 'active',
-                            current_period_end: endDate,
-                          });
-                          import('sonner').then(m => m.toast.success('Payment approved and subscription activated!'));
-                        } else {
-                          import('sonner').then(m => m.toast.success('Payment successfully marked as approved'));
+                      }}>Approve</Button>
+                    )}
+                    {p.status === 'pending' && (
+                      <Button size="sm" variant="destructive" className="h-6 text-[10px]" onClick={async () => {
+                        if (!confirm(`Are you sure you want to reject this payment for ${formatCurrency(p.amount)}?`)) return;
+                        try {
+                          const { supabase } = await import('@/db/supabase');
+                          const { error } = await supabase.from('payments').update({
+                            status: 'failed',
+                            updated_at: new Date().toISOString(),
+                          }).eq('id', p.id);
+                          if (error) throw error;
+                          import('sonner').then(m => m.toast.success('Payment rejected/marked as failed'));
+                          setPayments(prev => prev.map(pay => pay.id === p.id ? { ...pay, status: 'failed' } : pay));
+                        } catch (err: any) {
+                          import('sonner').then(m => m.toast.error(err.message || 'Failed to reject'));
                         }
-                        
-                        setPayments(prev => prev.map(pay => pay.id === p.id ? { ...pay, status: 'successful' } : pay));
-                      } catch (err: any) {
-                        import('sonner').then(m => m.toast.error(err.message || 'Failed to approve'));
-                      }
-                    }}>Approve</Button>
-                  )}
+                      }}>Reject</Button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

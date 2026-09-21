@@ -62,6 +62,16 @@ export default function SharedItemPage() {
 
         setData(item);
 
+        if (type === 'song') {
+          // Automatically play the shared song in the global player
+          setTimeout(() => {
+            playSong(item as Song, [item as Song]);
+          }, 100);
+        } else if (type === 'video') {
+          // Automatically mount/open the video player modal
+          setIsPlayingVideo(true);
+        }
+
         if (type === 'nominee' && item.category_id) {
           const { data: cat } = await supabase
             .from('award_categories')

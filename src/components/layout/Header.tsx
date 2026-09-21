@@ -31,11 +31,21 @@ export default function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [donateOpen, setDonateOpen] = useState(false);
+  const [siteName, setSiteName] = useState((window as any).ZED_SITE_NAME || 'ZedVevo');
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
     window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
+    
+    const handleBrandChanged = (e: any) => {
+      if (e.detail) setSiteName(e.detail);
+    };
+    window.addEventListener('site_name_changed', handleBrandChanged);
+
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('site_name_changed', handleBrandChanged);
+    };
   }, []);
 
   const isActive = (to: string) => location.pathname === to;
@@ -51,7 +61,7 @@ export default function Header() {
           {/* Brand */}
           <Link to="/" className="flex items-center gap-2 shrink-0">
             <CDLogo size={40} spinning />
-            <span className="text-lg font-bold tracking-tight hidden sm:block">ZedVevo</span>
+            <span className="text-lg font-bold tracking-tight hidden sm:block">{siteName}</span>
           </Link>
 
           {/* Desktop Nav */}

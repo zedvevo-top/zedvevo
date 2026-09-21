@@ -216,20 +216,51 @@ export async function deleteBanner(id: string) {
 // ARTISTS
 // ============================================================
 export async function getFeaturedArtists(limit = 8): Promise<Artist[]> {
-  // Order by newest first so fresh artists always surface at the top.
-  // Falls back to all artists (not just is_featured) to always populate the row.
+  // Select artists and join their songs to aggregate the true plays
   const { data, error } = await supabase
-    .from('artists').select('*')
+    .from('artists')
+    .select('*, songs(play_count)')
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  
+  const list = Array.isArray(data) ? data : [];
+  return list.map((artist: any) => {
+    const songsPlays = (artist.songs || []).reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
+    const totalPlays = Math.max(Number(artist.play_count) || 0, songsPlays);
+    const displayName = artist.stage_name || artist.name || 'Artist';
+    const avatar = artist.avatar_url || artist.cover_image_url || artist.cover_url || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400';
+    return {
+      ...artist,
+      name: displayName,
+      stage_name: displayName,
+      avatar_url: avatar,
+      play_count: totalPlays,
+    };
+  });
 }
 
 export async function getAllArtists(): Promise<Artist[]> {
-  const { data, error } = await supabase.from('artists').select('*').order('name');
+  const { data, error } = await supabase
+    .from('artists')
+    .select('*, songs(play_count)')
+    .order('name');
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  
+  const list = Array.isArray(data) ? data : [];
+  return list.map((artist: any) => {
+    const songsPlays = (artist.songs || []).reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
+    const totalPlays = Math.max(Number(artist.play_count) || 0, songsPlays);
+    const displayName = artist.stage_name || artist.name || 'Artist';
+    const avatar = artist.avatar_url || artist.cover_image_url || artist.cover_url || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400';
+    return {
+      ...artist,
+      name: displayName,
+      stage_name: displayName,
+      avatar_url: avatar,
+      play_count: totalPlays,
+    };
+  });
 }
 
 // ============================================================
