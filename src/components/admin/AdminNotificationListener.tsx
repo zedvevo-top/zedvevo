@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { isAdminEmail } from '@/lib/authHelpers';
 import { startAdminNotificationMonitor } from '@/services/adminNotificationService';
@@ -12,7 +12,7 @@ export function AdminNotificationListener() {
     (user && (user.role === 'admin' || user.role === 'super_admin' || (user.email && isAdminEmail(user.email))))
   );
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (!isAdmin) return;
 
     // Start background monitor for songs, nominees, and votes

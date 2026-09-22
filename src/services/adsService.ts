@@ -48,7 +48,7 @@ const DEFAULT_REAL_ADS: Advertisement[] = [
     headline: 'Instant mobile payments and bundles across Zambia',
     image_url: 'https://images.unsplash.com/photo-1512428559087-560fa5ceab42?w=1200&h=300&fit=crop',
     target_url: 'https://www.airtel.co.zm',
-    cta_text: 'Dial *778#',
+    cta_text: 'Dial *115#',
     is_active: true,
     display_order: 2,
     impressions: 310,

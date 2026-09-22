@@ -5,14 +5,26 @@ import type { Profile } from '@/types/index';
 import { toast } from 'sonner';
 
 export async function getProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', userId)
     .maybeSingle();
 
   if (error) {
-    console.error('Failed to fetch profile:', error);
+    if (error.code === 'PGRST303' || error.message?.includes('JWT issued at future')) {
+      // Wait 1s for server time synchronization and retry
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const retry = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+      if (!retry.error) {
+        return retry.data;
+      }
+    }
+    console.warn('Failed to fetch profile:', error.message || error);
     return null;
   }
   return data;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Navigate as NavRedirect } from 'react-router-dom';
 import IntersectObserver from '@/components/common/IntersectObserver';
 import ScrollToTop from '@/components/common/ScrollToTop';
 import { Toaster } from '@/components/ui/sonner';
@@ -20,10 +20,10 @@ import AdminDownloadsPage from '@/pages/admin/AdminDownloadsPage';
 import AdminNotificationsPage from '@/pages/admin/AdminNotificationsPage';
 import AdminSponsorsPage from '@/pages/admin/AdminSponsorsPage';
 import AdminPaymentGatewayPage from '@/pages/admin/AdminPaymentGatewayPage';
-import { Navigate as NavRedirect } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { routes } from './routes';
 import { AdminNotificationListener } from '@/components/admin/AdminNotificationListener';
+import { analytics } from '@/lib/analytics';
 
 // Guard for admin routes — only admin/super_admin can access
 function AdminGuard({ children }: { children: React.ReactNode }) {
@@ -187,9 +187,6 @@ const GlobalScriptsAndTheme: React.FC = () => {
 };
 
 // Lightweight analytics route listener
-import { useLocation } from 'react-router-dom';
-import { analytics } from '@/lib/analytics';
-
 const NavigationAnalytics: React.FC = () => {
   const location = useLocation();
   React.useEffect(() => {

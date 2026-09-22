@@ -49,7 +49,7 @@ SELECT
   'https://images.unsplash.com/photo-1563986768609-322da13575f3?w=200',
   'https://images.unsplash.com/photo-1512428559087-560fa5ceab42?w=1200&h=300&fit=crop',
   'https://www.airtel.co.zm',
-  'Dial *778#',
+  'Dial *115#',
   'gold',
   2,
   true,

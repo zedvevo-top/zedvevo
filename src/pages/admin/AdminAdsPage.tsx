@@ -402,7 +402,7 @@ export default function AdminAdsPage() {
                   <div>
                     <Label className="text-xs font-semibold">Button Text</Label>
                     <Input
-                      placeholder="e.g. Learn More, Dial *778#"
+                      placeholder="e.g. Learn More, Dial *115#"
                       value={ctaText}
                       onChange={e => setCtaText(e.target.value)}
                       className="mt-1"

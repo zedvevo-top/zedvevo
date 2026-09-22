@@ -102,11 +102,23 @@ export const useAuthStore = create<AuthState>()(
           }
 
           if (supabaseUser) {
-            const { data: profile } = await supabase
+            let { data: profile, error: profileErr } = await supabase
               .from('profiles')
               .select('*')
               .eq('id', supabaseUser.id)
-              .single()
+              .maybeSingle()
+
+            if (profileErr && (profileErr.code === 'PGRST303' || profileErr.message?.includes('JWT issued at future'))) {
+              await new Promise((res) => setTimeout(res, 1000))
+              const retry = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', supabaseUser.id)
+                .maybeSingle()
+              if (!retry.error) {
+                profile = retry.data
+              }
+            }
 
             if (profile && profile.role === 'user') {
               const { data: existingSuperAdmin } = await supabase

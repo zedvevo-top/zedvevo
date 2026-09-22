@@ -17,10 +17,12 @@ if (typeof window !== "undefined") {
       typeof reason === "string" &&
       (reason.includes("Invalid Refresh Token") ||
         reason.includes("Refresh Token Not Found") ||
+        reason.includes("JWT issued at future") ||
+        reason.includes("PGRST303") ||
         reason.includes("JWT expired"))
     ) {
       event.preventDefault();
-      console.warn("Cleared invalid refresh token session.");
+      console.warn("Handled auth / clock skew token notice gracefully:", reason);
     }
   });
 }

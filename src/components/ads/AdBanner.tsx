@@ -30,7 +30,7 @@ const FALLBACK_ADS: Sponsor[] = [
     logo_url: 'https://images.unsplash.com/photo-1563986768609-322da13575f3?w=200',
     banner_url: 'https://images.unsplash.com/photo-1512428559087-560fa5ceab42?w=1200&h=300&fit=crop',
     website_url: 'https://www.airtel.co.zm',
-    cta_text: 'Dial *778#',
+    cta_text: 'Dial *115#',
     cta_url: 'https://www.airtel.co.zm',
     tier: 'gold',
     display_order: 2,
@@ -61,14 +61,15 @@ function ProfitablerateCpmContainer() {
 
   useEffect(() => {
     try {
-      // Ensure the script is present in the document
-      const scriptId = 'profitablerate-cpm-script';
-      if (!document.getElementById(scriptId)) {
-        const script = document.createElement('script');
-        script.id = scriptId;
-        script.async = true;
-        script.setAttribute('data-cfasync', 'false');
-        script.src = 'https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js';
+      // Force instant script execution (0.2s / immediate) on mount
+      const script = document.createElement('script');
+      script.async = true;
+      script.setAttribute('data-cfasync', 'false');
+      script.src = 'https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js';
+      
+      if (containerRef.current) {
+        containerRef.current.appendChild(script);
+      } else {
         document.head.appendChild(script);
       }
     } catch (e) {
