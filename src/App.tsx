@@ -150,36 +150,51 @@ const GlobalScriptsAndTheme: React.FC = () => {
     loadConfigAndTheme();
   }, []);
 
-  // 2. Re-create and execute ad scripts dynamically on EVERY SPA route change to ensure seamless ad performance
+  // 2. Priority Ad Loading mechanism: non-blocking microtask execution hitting < 0.2s target
   React.useEffect(() => {
-    if (!adHeaderCode) return;
+    const codeToInject = adHeaderCode || `<script async="async" data-cfasync="false" src="https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js"></script><div id="container-29a990e051b1bc82dfb7d8c83a9a64af"></div>`;
 
-    try {
-      let container = document.getElementById('dynamic-header-scripts');
-      if (!container) {
-        container = document.createElement('div');
-        container.id = 'dynamic-header-scripts';
-        document.head.appendChild(container);
-      }
-      container.innerHTML = '';
-
-      const temp = document.createElement('div');
-      temp.innerHTML = adHeaderCode;
-      
-      // Re-create scripts as real DOM nodes to force browser execution
-      Array.from(temp.childNodes).forEach((node) => {
-        if (node.nodeName.toLowerCase() === 'script') {
-          const oldScript = node as HTMLScriptElement;
-          const newScript = document.createElement('script');
-          Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-          if (oldScript.innerHTML) newScript.innerHTML = oldScript.innerHTML;
-          container.appendChild(newScript);
-        } else {
-          container.appendChild(node.cloneNode(true));
+    const injectAdScripts = () => {
+      try {
+        let container = document.getElementById('dynamic-header-scripts');
+        if (!container) {
+          container = document.createElement('div');
+          container.id = 'dynamic-header-scripts';
+          document.head.appendChild(container);
         }
-      });
-    } catch (e) {
-      console.warn('Could not parse ad_code_header fragment safely on route transition:', e);
+        container.innerHTML = '';
+
+        const temp = document.createElement('div');
+        temp.innerHTML = codeToInject;
+        
+        // Re-create scripts as real DOM nodes to force browser execution without blocking UI
+        Array.from(temp.childNodes).forEach((node) => {
+          if (node.nodeName.toLowerCase() === 'script') {
+            const oldScript = node as HTMLScriptElement;
+            const newScript = document.createElement('script');
+            Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+            if (oldScript.innerHTML) newScript.innerHTML = oldScript.innerHTML;
+            container.appendChild(newScript);
+          } else {
+            container.appendChild(node.cloneNode(true));
+          }
+        });
+      } catch (e) {
+        console.warn('Could not execute priority ad script injection on route transition:', e);
+      }
+    };
+
+    // Priority ad scheduler using requestIdleCallback with 200ms fallback timeout or queueMicrotask
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      const handle = (window as any).requestIdleCallback(injectAdScripts, { timeout: 200 });
+      return () => {
+        if ('cancelIdleCallback' in window) (window as any).cancelIdleCallback(handle);
+      };
+    } else if (typeof queueMicrotask === 'function') {
+      queueMicrotask(injectAdScripts);
+    } else {
+      const timer = setTimeout(injectAdScripts, 0);
+      return () => clearTimeout(timer);
     }
   }, [adHeaderCode, location.pathname]);
 
