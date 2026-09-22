@@ -18,6 +18,12 @@
   ],
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "installCommand": "npm install --legacy-peer-deps",
-  "framework": "vite"
+  "installCommand": "NPM_CONFIG_PRODUCTION=false npm install --legacy-peer-deps",
+  "framework": "vite",
+  "engines": {
+    "node": "20.x"
+  },
+  "env": {
+    "NPM_CONFIG_PRODUCTION": "false"
+  }
 }
