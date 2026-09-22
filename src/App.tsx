@@ -51,42 +51,19 @@ function SuperAdminGuard({ children }: { children: React.ReactNode }) {
 
 // Dynamic head script injection & dynamic platform theme loader from Supabase & Settings
 const GlobalScriptsAndTheme: React.FC = () => {
+  const location = useLocation();
+  const [adHeaderCode, setAdHeaderCode] = React.useState<string | null>(null);
+
+  // 1. Fetch config and apply theme/branding settings ONCE on mount
   React.useEffect(() => {
     async function loadConfigAndTheme() {
       try {
         const { getSettings } = await import('@/lib/api');
         const settings = await getSettings();
 
-        // 1. Paste global header ad scripts (popunders, push, Monetag, Adsterra, AdSense, etc.)
         const adHeader = settings['ad_code_header'];
         if (adHeader) {
-          try {
-            let container = document.getElementById('dynamic-header-scripts');
-            if (!container) {
-              container = document.createElement('div');
-              container.id = 'dynamic-header-scripts';
-              document.head.appendChild(container);
-            }
-            container.innerHTML = '';
-
-            const temp = document.createElement('div');
-            temp.innerHTML = adHeader;
-            
-            // Re-create scripts as real DOM nodes to force browser execution
-            Array.from(temp.childNodes).forEach((node) => {
-              if (node.nodeName.toLowerCase() === 'script') {
-                const oldScript = node as HTMLScriptElement;
-                const newScript = document.createElement('script');
-                Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-                if (oldScript.innerHTML) newScript.innerHTML = oldScript.innerHTML;
-                container.appendChild(newScript);
-              } else {
-                container.appendChild(node.cloneNode(true));
-              }
-            });
-          } catch (e) {
-            console.warn('Could not parse ad_code_header fragment safely:', e);
-          }
+          setAdHeaderCode(adHeader);
         }
 
         // 2. Set dynamic branding & favicon
@@ -172,6 +149,40 @@ const GlobalScriptsAndTheme: React.FC = () => {
     }
     loadConfigAndTheme();
   }, []);
+
+  // 2. Re-create and execute ad scripts dynamically on EVERY SPA route change to ensure seamless ad performance
+  React.useEffect(() => {
+    if (!adHeaderCode) return;
+
+    try {
+      let container = document.getElementById('dynamic-header-scripts');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'dynamic-header-scripts';
+        document.head.appendChild(container);
+      }
+      container.innerHTML = '';
+
+      const temp = document.createElement('div');
+      temp.innerHTML = adHeaderCode;
+      
+      // Re-create scripts as real DOM nodes to force browser execution
+      Array.from(temp.childNodes).forEach((node) => {
+        if (node.nodeName.toLowerCase() === 'script') {
+          const oldScript = node as HTMLScriptElement;
+          const newScript = document.createElement('script');
+          Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+          if (oldScript.innerHTML) newScript.innerHTML = oldScript.innerHTML;
+          container.appendChild(newScript);
+        } else {
+          container.appendChild(node.cloneNode(true));
+        }
+      });
+    } catch (e) {
+      console.warn('Could not parse ad_code_header fragment safely on route transition:', e);
+    }
+  }, [adHeaderCode, location.pathname]);
+
   return null;
 };
 
