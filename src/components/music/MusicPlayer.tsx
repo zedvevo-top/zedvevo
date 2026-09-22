@@ -20,8 +20,8 @@ export default function MusicPlayer() {
 
   if (!song) return null;
 
-  const shareUrl = `${window.location.origin}/music?id=${song.id}`;
-  const shareText = `Listen to ${song.title} by ${song.artist_name} on ZedVevo`;
+  const shareUrl = `${window.location.origin}/song/${song.id}`;
+  const shareText = `Listen to "${song.title}" by ${song.artist_name} on ZedVevo — ${window.location.origin}/song/${song.id}`;
 
   const handleSeek = (val: number[]) => seek(val[0]);
 

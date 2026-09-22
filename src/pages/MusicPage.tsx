@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Song } from '@/types/index';
 import { getSongs } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import MusicCard from '@/components/music/MusicCard';
 import BackToHome from '@/components/common/BackToHome';
 import { usePlayer } from '@/contexts/PlayerContext';
@@ -12,6 +14,7 @@ import { usePlayer } from '@/contexts/PlayerContext';
 const GENRES = ['All', 'Afrobeats', 'Hip-Hop', 'R&B', 'Gospel', 'Traditional', 'Pop', 'Dance'];
 
 export default function MusicPage() {
+  const [searchParams] = useSearchParams();
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -34,6 +37,32 @@ export default function MusicPage() {
   };
 
   useEffect(() => { setOffset(0); load(true); }, []);
+
+  // Listen to ?id= search parameter to immediately play the shared song
+  useEffect(() => {
+    const targetId = searchParams.get('id');
+    if (!targetId) return;
+
+    const existing = songs.find(s => s.id === targetId);
+    if (existing) {
+      playSong(existing, [existing]);
+    } else {
+      (async () => {
+        try {
+          const { data, error } = await supabase
+            .from('songs')
+            .select('*')
+            .eq('id', targetId)
+            .maybeSingle();
+          if (!error && data) {
+            playSong(data as Song, [data as Song]);
+          }
+        } catch (e) {
+          console.error('Failed to load shared song by id:', e);
+        }
+      })();
+    }
+  }, [searchParams, songs]);
 
   const filtered = songs.filter(s => {
     const matchSearch = !search || s.title.toLowerCase().includes(search.toLowerCase()) || s.artist_name.toLowerCase().includes(search.toLowerCase());

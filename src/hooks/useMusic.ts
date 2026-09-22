@@ -116,14 +116,37 @@ export function useArtistSongs(artistId: string) {
     queryKey: ['songs', 'artist', artistId],
     queryFn: async () => {
       if (!isConfigured) return mockSongs.filter(s => s.artist_id === artistId)
-      const { data, error } = await supabase
+
+      // Fetch the artist record to know user_id and stage/artist name
+      const { data: artist } = await supabase
+        .from('artists')
+        .select('*')
+        .eq('id', artistId)
+        .maybeSingle();
+
+      const { data: allSongs, error } = await supabase
         .from('songs')
         .select('*')
-        .eq('artist_id', artistId)
-        .order('created_at', { ascending: false })
+        .eq('status', 'approved')
+        .order('created_at', { ascending: false });
 
-      if (error || !data || data.length === 0) return mockSongs.filter(s => s.artist_id === artistId)
-      return data as Song[]
+      if (error || !allSongs) return [];
+
+      const clean = (str: string) => (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+      const artistName = clean(artist?.name || '');
+      const artistStageName = clean(artist?.stage_name || '');
+      const artistUserId = artist?.user_id;
+
+      const matched = allSongs.filter((song: any) => {
+        if (song.artist_id && song.artist_id === artistId) return true;
+        if (song.user_id && artistUserId && song.user_id === artistUserId) return true;
+        const songArtistClean = clean(song.artist_name);
+        if (songArtistClean && artistName && (songArtistClean === artistName || artistName.includes(songArtistClean) || songArtistClean.includes(artistName))) return true;
+        if (songArtistClean && artistStageName && (songArtistClean === artistStageName || artistStageName.includes(songArtistClean) || songArtistClean.includes(artistStageName))) return true;
+        return false;
+      });
+
+      return matched as Song[];
     },
     enabled: !!artistId,
   })

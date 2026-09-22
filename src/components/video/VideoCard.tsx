@@ -21,8 +21,8 @@ export default function VideoCard({ video, onPlay, active = false }: VideoCardPr
   const [downloading, setDownloading] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
-  const shareUrl = `${window.location.origin}/videos?id=${video.id}`;
-  const shareText = `Watch "${video.title}" by ${video.artist_name} on ZedVevo — ${window.location.origin}/videos?id=${video.id}`;
+  const shareUrl = `${window.location.origin}/video/${video.id}`;
+  const shareText = `Watch "${video.title}" by ${video.artist_name} on ZedVevo — ${window.location.origin}/video/${video.id}`;
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();

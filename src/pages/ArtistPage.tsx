@@ -150,9 +150,15 @@ export default function ArtistPage() {
                 )}
 
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 text-xs md:text-sm text-muted-foreground">
-                  <span>{formatNumber(artist.total_followers || Math.floor((artist.play_count || 1000) / 3))} followers</span>
+                  <span>{formatNumber(artist.total_followers || 0)} followers</span>
                   <span>•</span>
-                  <span>{formatNumber(artist.play_count || 0)} total plays</span>
+                  <span>
+                    {formatNumber(
+                      (songs && songs.length > 0)
+                        ? songs.reduce((sum, s) => sum + (Number(s.play_count) || 0), 0)
+                        : (Number(artist.play_count) || 0)
+                    )} total plays
+                  </span>
                   {artist.genre && (
                     <>
                       <span>•</span>
