@@ -60,26 +60,29 @@ function ProfitablerateCpmContainer() {
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!containerRef.current) return;
+    containerRef.current.innerHTML = '';
+
     try {
-      // Force instant script execution (0.2s / immediate) on mount
+      const targetDiv = document.createElement('div');
+      targetDiv.id = 'container-29a990e051b1bc82dfb7d8c83a9a64af';
+      targetDiv.className = 'w-full min-h-[60px] flex justify-center items-center text-center';
+
       const script = document.createElement('script');
       script.async = true;
       script.setAttribute('data-cfasync', 'false');
       script.src = 'https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js';
-      
-      if (containerRef.current) {
-        containerRef.current.appendChild(script);
-      } else {
-        document.head.appendChild(script);
-      }
+
+      containerRef.current.appendChild(targetDiv);
+      containerRef.current.appendChild(script);
     } catch (e) {
-      console.warn('CPM script initialization:', e);
+      console.warn('CPM script initialization error:', e);
     }
   }, []);
 
   return (
-    <div className="w-full flex justify-center items-center overflow-hidden my-1">
-      <div id="container-29a990e051b1bc82dfb7d8c83a9a64af" ref={containerRef} className="min-h-[50px] w-full flex justify-center items-center text-center" />
+    <div className="w-full flex justify-center items-center overflow-visible my-2 min-h-[60px]">
+      <div ref={containerRef} className="w-full min-h-[60px] flex justify-center items-center text-center" />
     </div>
   );
 }

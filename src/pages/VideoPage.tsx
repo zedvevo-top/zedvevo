@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { UserAvatar } from '@/components/ui/avatar'
 import { formatDuration, formatNumber, formatDate } from '@/utils'
 import { Link } from 'react-router-dom'
+import AdBanner from '@/components/ads/AdBanner'
 
 export default function VideoPage() {
   const { slug } = useParams<{ slug: string }>()
@@ -107,6 +108,8 @@ export default function VideoPage() {
               </Button>
             </div>
           </div>
+
+          <AdBanner position="videos" format="leaderboard" />
 
           {/* Artist Info */}
           <Card className="mb-8">

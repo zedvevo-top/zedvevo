@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { UserAvatar } from '@/components/ui/avatar'
 import { formatDuration, formatNumber, formatDate } from '@/utils'
 import { useToast } from '@/components/ui/use-toast'
+import AdBanner from '@/components/ads/AdBanner'
 
 export default function SongPage() {
   const { slug } = useParams<{ slug: string }>()
@@ -198,6 +199,8 @@ export default function SongPage() {
 
       {/* Content */}
       <div className="container px-4 py-8">
+        <AdBanner position="music" format="leaderboard" />
+
         {/* Lyrics */}
         {song.lyrics && (
           <section className="mb-12">
