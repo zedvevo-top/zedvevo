@@ -56,11 +56,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     supabase.auth.getSession()
-      .then(({ data: { session } }) => {
+      .then(({ data: { session }, error }) => {
+        if (error) {
+          if (error.message?.toLowerCase().includes('refresh token') || error.message?.toLowerCase().includes('not found')) {
+            supabase.auth.signOut().catch(() => {});
+          }
+          setUser(null);
+          setProfile(null);
+          return;
+        }
         setUser(session?.user ?? null);
         if (session?.user) getProfile(session.user.id).then(setProfile);
       })
-      .catch(error => toast.error(`Session error: ${error.message}`))
+      .catch(error => {
+        if (error?.message?.toLowerCase().includes('refresh token') || error?.message?.toLowerCase().includes('not found')) {
+          supabase.auth.signOut().catch(() => {});
+        } else if (error?.message) {
+          toast.error(`Session error: ${error.message}`);
+        }
+      })
       .finally(() => setLoading(false));
 
     // Do NOT use await inside onAuthStateChange – use .then() to avoid deadlocks.

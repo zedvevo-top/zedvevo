@@ -84,7 +84,22 @@ export const useAuthStore = create<AuthState>()(
         try {
           const {
             data: { user: supabaseUser },
+            error: userError,
           } = await supabase.auth.getUser()
+
+          if (userError) {
+            if (userError.message?.toLowerCase().includes('refresh token') || userError.message?.toLowerCase().includes('not found')) {
+              await supabase.auth.signOut().catch(() => {})
+            }
+            set({
+              user: null,
+              isAuthenticated: false,
+              isAdmin: false,
+              isSuperAdmin: false,
+              isArtist: false,
+            })
+            return
+          }
 
           if (supabaseUser) {
             const { data: profile } = await supabase
