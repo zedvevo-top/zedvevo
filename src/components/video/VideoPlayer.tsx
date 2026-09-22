@@ -85,9 +85,12 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
     const onCanPlay  = () => { setBuffering(false); v.playbackRate = playbackRate; };
     const onError    = () => { setError('Unable to play this video.'); setPlaying(false); };
     const onProgress = () => {
-      if (v.currentTime >= 10 && !countedRef.current) {
+      if (v.currentTime >= 2 && !countedRef.current) {
         countedRef.current = true;
         incrementViewCount(video.id).catch(() => {});
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('zedvevo:video-viewed', { detail: { videoId: video.id } }));
+        }
       }
     };
     const onFsChange = () => setFullscreen(!!document.fullscreenElement);

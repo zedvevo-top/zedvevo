@@ -96,9 +96,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (audioRef.current) audioRef.current.volume = muted ? 0 : volume;
   }, [volume, muted]);
 
-  // Count play at 10 seconds of active playback
+  // Count play reliably after 2 seconds of active playback
   useEffect(() => {
-    if (currentTime >= 10 && currentSong && countedRef.current !== currentSong.id) {
+    if (currentTime >= 2 && currentSong && countedRef.current !== currentSong.id) {
       countedRef.current = currentSong.id;
       incrementPlayCount(currentSong.id);
       setCurrentSong((prev) => (prev && prev.id === currentSong.id ? { ...prev, play_count: (Number(prev.play_count) || 0) + 1 } : prev));

@@ -10,6 +10,7 @@ export function normalizeArtist(a: any): Artist {
   const firstSongCover = (a.songs || []).find((s: any) => s.cover_url)?.cover_url;
   const avatar = resolveArtistAvatar(a, firstSongCover);
   const cover = a.cover_url || a.cover_image_url || avatar
+  const realPlays = Number(a.play_count) || 0;
   return {
     ...a,
     id: a.id,
@@ -24,10 +25,10 @@ export function normalizeArtist(a: any): Artist {
     is_featured: a.is_featured ?? a.featured ?? false,
     featured: a.is_featured ?? a.featured ?? false,
     verified: a.verified ?? true,
-    play_count: Number(a.play_count) || 0,
-    monthly_listeners: a.monthly_listeners !== undefined && a.monthly_listeners !== null ? Number(a.monthly_listeners) : (Number(a.play_count) || 0),
-    total_followers: a.total_followers !== undefined && a.total_followers !== null ? Number(a.total_followers) : Math.max(0, Math.floor((Number(a.play_count) || 0) * 0.3)),
-    total_streams: Number(a.play_count) || Number(a.total_streams) || 0,
+    play_count: realPlays,
+    monthly_listeners: a.monthly_listeners !== undefined && a.monthly_listeners !== null ? Number(a.monthly_listeners) : realPlays,
+    total_followers: a.total_followers !== undefined && a.total_followers !== null ? Number(a.total_followers) : 0,
+    total_streams: Number(a.total_streams) || realPlays,
     website: a.website || null,
     social_links: a.social_links || {},
     created_at: a.created_at || new Date().toISOString(),
@@ -117,32 +118,51 @@ export function useArtistSongs(artistId: string) {
     queryFn: async () => {
       if (!isConfigured) return mockSongs.filter(s => s.artist_id === artistId)
 
-      // Fetch the artist record to know user_id and stage/artist name
-      const { data: artist } = await supabase
-        .from('artists')
-        .select('*')
-        .eq('id', artistId)
-        .maybeSingle();
+      // 1. Fetch the artist record to know user_id and stage/artist name
+      let artist: any = null;
+      try {
+        const { data } = await supabase
+          .from('artists')
+          .select('*')
+          .or(`id.eq.${artistId},user_id.eq.${artistId}`)
+          .maybeSingle();
+        artist = data;
+      } catch {}
 
+      // 2. Fetch all approved songs from Supabase
       const { data: allSongs, error } = await supabase
         .from('songs')
         .select('*')
         .eq('status', 'approved')
-        .order('created_at', { ascending: false });
+        .order('play_count', { ascending: false });
 
       if (error || !allSongs) return [];
 
       const clean = (str: string) => (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+      const rawIdClean = clean(artistId.replace(/^artist-/, ''));
       const artistName = clean(artist?.name || '');
       const artistStageName = clean(artist?.stage_name || '');
       const artistUserId = artist?.user_id;
 
       const matched = allSongs.filter((song: any) => {
-        if (song.artist_id && song.artist_id === artistId) return true;
-        if (song.user_id && artistUserId && song.user_id === artistUserId) return true;
-        const songArtistClean = clean(song.artist_name);
-        if (songArtistClean && artistName && (songArtistClean === artistName || artistName.includes(songArtistClean) || songArtistClean.includes(artistName))) return true;
-        if (songArtistClean && artistStageName && (songArtistClean === artistStageName || artistStageName.includes(songArtistClean) || songArtistClean.includes(artistStageName))) return true;
+        if (song.artist_id && (song.artist_id === artistId || (rawIdClean && song.artist_id === rawIdClean))) return true;
+        if (song.user_id && (song.user_id === artistId || (artistUserId && song.user_id === artistUserId))) return true;
+        
+        const songArtistClean = clean(song.artist_name || '');
+        if (!songArtistClean) return false;
+
+        if (artistStageName && songArtistClean === artistStageName) return true;
+        if (artistName && songArtistClean === artistName) return true;
+        if (rawIdClean && rawIdClean.length >= 3 && songArtistClean === rawIdClean) return true;
+        
+        // Multi-artist collaboration tracks (e.g., "A & B", "A ft. B")
+        const rawSongArtist = (song.artist_name || '').toLowerCase();
+        if (rawSongArtist.includes('ft.') || rawSongArtist.includes('feat.') || rawSongArtist.includes('&') || rawSongArtist.includes(',')) {
+          const parts = rawSongArtist.split(/(?:ft\.?|feat\.?|&|,|\/|\bx\b)/i).map(p => clean(p)).filter(p => p.length >= 3);
+          if (artistStageName && artistStageName.length >= 3 && parts.includes(artistStageName)) return true;
+          if (artistName && artistName.length >= 3 && parts.includes(artistName)) return true;
+        }
+
         return false;
       });
 
@@ -394,45 +414,111 @@ export function useArtist(id: string) {
         const found = mockArtists.find(a => a.id === id) || mockArtists[0]
         return normalizeArtist(found)
       }
-      const { data: artist, error } = await supabase
-        .from('artists')
-        .select('*')
-        .eq('id', id)
-        .single()
 
-      if (error || !artist) {
-        const found = mockArtists.find(a => a.id === id) || mockArtists[0]
-        return normalizeArtist(found)
+      const clean = (str: string) => (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+      const rawIdClean = clean(id.replace(/^artist-/, ''));
+
+      // 1. Try finding artist in artists table
+      let artist: any = null;
+      try {
+        const { data } = await supabase
+          .from('artists')
+          .select('*')
+          .or(`id.eq.${id},user_id.eq.${id},name.ilike.%${rawIdClean}%`)
+          .limit(1)
+          .maybeSingle();
+        artist = data;
+      } catch {}
+
+      // 2. Try finding user profile if artist row not found
+      if (!artist) {
+        try {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('*')
+            .or(`id.eq.${id},username.eq.${rawIdClean},display_name.ilike.%${rawIdClean}%`)
+            .limit(1)
+            .maybeSingle();
+          if (prof) {
+            artist = {
+              id: prof.id,
+              user_id: prof.id,
+              name: prof.display_name || prof.username || 'Artist',
+              stage_name: prof.display_name || prof.username || 'Artist',
+              avatar_url: prof.avatar_url,
+              bio: prof.bio || 'Official ZedVevo Artist',
+              genre: 'Zambian Music',
+              verified: true,
+              play_count: 0,
+            };
+          }
+        } catch {}
       }
 
+      // 3. Fetch all approved songs from Supabase to match this artist and sum exact real plays
       const { data: songs } = await supabase
         .from('songs')
         .select('id, play_count, cover_url, artist_name, user_id, artist_id')
-        .eq('status', 'approved')
+        .eq('status', 'approved');
 
-      const clean = (str: string) => (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
       const allSongs = Array.isArray(songs) ? songs : [];
 
-      const artistId = artist.id;
-      const artistUserId = artist.user_id;
-      const artistName = clean(artist.name);
-      const artistStageName = clean(artist.stage_name);
+      const artistId = artist?.id || id;
+      const artistUserId = artist?.user_id || id;
+      const artistName = clean(artist?.name || rawIdClean);
+      const artistStageName = clean(artist?.stage_name || rawIdClean);
 
       const matchedSongs = allSongs.filter(song => {
-        if (song.artist_id && song.artist_id === artistId) return true;
-        if (song.user_id && artistUserId && song.user_id === artistUserId) return true;
-        const songArtistClean = clean(song.artist_name);
-        if (songArtistClean && (songArtistClean === artistName || songArtistClean === artistStageName)) return true;
-        if (songArtistClean && (artistName.includes(songArtistClean) || songArtistClean.includes(artistName) || 
-            artistStageName.includes(songArtistClean) || songArtistClean.includes(artistStageName))) {
-          return true;
+        if (song.artist_id && (song.artist_id === artistId || (rawIdClean && song.artist_id === rawIdClean))) return true;
+        if (song.user_id && (song.user_id === artistUserId || song.user_id === id)) return true;
+        
+        const songArtistClean = clean(song.artist_name || '');
+        if (!songArtistClean) return false;
+
+        if (artistStageName && songArtistClean === artistStageName) return true;
+        if (artistName && songArtistClean === artistName) return true;
+        if (rawIdClean && rawIdClean.length >= 3 && songArtistClean === rawIdClean) return true;
+        
+        // Multi-artist collaboration tracks (e.g. "A & B", "A ft. B")
+        const rawSongArtist = (song.artist_name || '').toLowerCase();
+        if (rawSongArtist.includes('ft.') || rawSongArtist.includes('feat.') || rawSongArtist.includes('&') || rawSongArtist.includes(',')) {
+          const parts = rawSongArtist.split(/(?:ft\.?|feat\.?|&|,|\/|\bx\b)/i).map(p => clean(p)).filter(p => p.length >= 3);
+          if (artistStageName && artistStageName.length >= 3 && parts.includes(artistStageName)) return true;
+          if (artistName && artistName.length >= 3 && parts.includes(artistName)) return true;
         }
+        
         return false;
       });
 
       const songsPlays = matchedSongs.reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
-      const totalPlays = matchedSongs.length > 0 ? songsPlays : (Number(artist.play_count) || 0);
-      return normalizeArtist({ ...artist, songs: matchedSongs, play_count: totalPlays })
+      const baseArtistPlays = Number(artist?.play_count) || 0;
+      const totalPlays = songsPlays > 0 ? songsPlays : baseArtistPlays;
+
+      if (!artist) {
+        // Construct artist from matched songs or ID
+        const displayName = matchedSongs[0]?.artist_name || id.replace(/^artist-/, '').replace(/-/g, ' ');
+        const firstCover = matchedSongs.find(s => s.cover_url)?.cover_url;
+        artist = {
+          id: id,
+          user_id: matchedSongs[0]?.user_id || id,
+          name: displayName,
+          stage_name: displayName,
+          avatar_url: firstCover || null,
+          cover_url: firstCover || null,
+          bio: 'Official ZedVevo Artist',
+          genre: 'Zambian Music',
+          verified: true,
+          play_count: totalPlays,
+        };
+      }
+
+      return normalizeArtist({
+        ...artist,
+        songs: matchedSongs,
+        play_count: totalPlays,
+        monthly_listeners: totalPlays,
+        total_streams: totalPlays,
+      });
     },
     enabled: !!id,
   })

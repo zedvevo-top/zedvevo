@@ -95,9 +95,18 @@ export default function ArtistPage() {
     <>
       <Helmet>
         <title>{displayName} — ZedVevo</title>
-        <meta property="og:title" content={`${displayName} on ZedVevo`} />
-        <meta property="og:description" content={artist.bio || `Listen to ${displayName} on ZedVevo`} />
-        {avatarSrc && <meta property="og:image" content={avatarSrc} />}
+        <meta name="description" content={artist.bio || `Stream and download songs and watch official videos by ${displayName} on ZedVevo.`} />
+        <meta property="og:site_name" content="ZedVevo" />
+        <meta property="og:type" content="profile" />
+        <meta property="og:title" content={`${displayName} — ZedVevo`} />
+        <meta property="og:description" content={artist.bio || `Stream authentic Zambian music and watch official videos by ${displayName} on ZedVevo.`} />
+        <meta property="og:image" content={avatarSrc || `${typeof window !== 'undefined' ? window.location.origin : ''}/og-image.png`} />
+        <meta property="og:image:secure_url" content={avatarSrc || `${typeof window !== 'undefined' ? window.location.origin : ''}/og-image.png`} />
+        <meta property="og:url" content={typeof window !== 'undefined' ? window.location.href : ''} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={`${displayName} — ZedVevo`} />
+        <meta name="twitter:description" content={artist.bio || `Listen to ${displayName} on ZedVevo`} />
+        <meta name="twitter:image" content={avatarSrc || `${typeof window !== 'undefined' ? window.location.origin : ''}/og-image.png`} />
       </Helmet>
 
       <div className="min-h-screen pb-24">
@@ -123,11 +132,16 @@ export default function ArtistPage() {
                     src={avatarSrc}
                     alt={displayName}
                     className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = '/app-icon.png';
+                    }}
                   />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-4xl font-extrabold text-muted-foreground/50">
-                    {displayName[0]?.toUpperCase() || 'A'}
-                  </div>
+                  <img
+                    src="/app-icon.png"
+                    alt={displayName}
+                    className="w-full h-full object-cover"
+                  />
                 )}
               </div>
 

@@ -14,7 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { getAllSponsors, createSponsor, updateSponsor, deleteSponsor, getAllAwards } from '@/lib/api';
+import { getAllSponsors, createSponsor, updateSponsor, deleteSponsor, getAllAwards, uploadFile } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import type { Sponsor, Award } from '@/types/index';
 
@@ -28,6 +28,7 @@ export default function AdminSponsorsPage() {
   const [dlg, setDlg] = useState<{ open: boolean; sponsor?: Sponsor }>({ open: false });
   const [name, setName] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [website, setWebsite] = useState('');
   const [tier, setTier] = useState<SponsorTier>('bronze');
   const [displayOrder, setDisplayOrder] = useState('0');
@@ -57,10 +58,15 @@ export default function AdminSponsorsPage() {
     if (!name.trim()) { toast.error('Name is required'); return; }
     setSaving(true);
     try {
+      let finalLogoUrl = logoUrl.trim();
+      if (logoFile) {
+        finalLogoUrl = await uploadFile('thumbnails', `sponsor_${Date.now()}.${logoFile.name.split('.').pop()}`, logoFile);
+      }
+
       const payload = {
         name: name.trim(),
-        logo_url: logoUrl || undefined,
-        website_url: website || undefined,
+        logo_url: finalLogoUrl || undefined,
+        website_url: website.trim() || undefined,
         tier,
         display_order: parseInt(displayOrder) || 0,
         is_active: isActive,
@@ -216,6 +222,7 @@ export default function AdminSponsorsPage() {
           <div className="space-y-3 py-1">
             <div><Label>Name *</Label><Input className="mt-1" value={name} onChange={e => setName(e.target.value)} placeholder="Sponsor name" /></div>
             <div><Label>Logo URL</Label><Input className="mt-1" value={logoUrl} onChange={e => setLogoUrl(e.target.value)} placeholder="https://..." /></div>
+            <div><Label>Or Upload Logo</Label><Input type="file" accept="image/*" className="mt-1 text-xs" onChange={e => setLogoFile(e.target.files?.[0] || null)} /></div>
             <div><Label>Website URL</Label><Input className="mt-1" value={website} onChange={e => setWebsite(e.target.value)} placeholder="https://..." /></div>
             <div>
               <Label>Tier</Label>

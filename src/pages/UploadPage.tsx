@@ -81,44 +81,143 @@ export default function UploadPage() {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Generate thumbnail from a video file by seeking to 1 second and snapshotting
+  // Create a stylized graphic cover if thumbnail extraction fails or user has no cover image
+  const generateDefaultCover = useCallback((itemTitle: string, itemArtist: string, type: 'song' | 'video'): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = type === 'song' ? 600 : 800;
+    canvas.height = type === 'song' ? 600 : 450;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+
+    // Gradient background
+    const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    if (type === 'video') {
+      grad.addColorStop(0, '#0f172a');
+      grad.addColorStop(0.5, '#1e1b4b');
+      grad.addColorStop(1, '#0f766e');
+    } else {
+      grad.addColorStop(0, '#18181b');
+      grad.addColorStop(0.5, '#312e81');
+      grad.addColorStop(1, '#0284c7');
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Decorative circle
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, canvas.height / 2 - 30, type === 'song' ? 100 : 80, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fill();
+
+    // Brand badge
+    ctx.fillStyle = '#06b6d4';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('ZEDVEVO', canvas.width / 2, 60);
+
+    // Track/Video Title
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 32px sans-serif';
+    ctx.textAlign = 'center';
+    const displayTitle = itemTitle || (type === 'video' ? 'Music Video' : 'New Single');
+    ctx.fillText(displayTitle.length > 25 ? displayTitle.slice(0, 25) + '...' : displayTitle, canvas.width / 2, canvas.height / 2 + 50);
+
+    // Artist name
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '500 22px sans-serif';
+    const displayArtist = itemArtist || 'ZedVevo Artist';
+    ctx.fillText(displayArtist.length > 30 ? displayArtist.slice(0, 30) + '...' : displayArtist, canvas.width / 2, canvas.height / 2 + 90);
+
+    return canvas.toDataURL('image/jpeg', 0.85);
+  }, []);
+
+  // Robust video thumbnail generator with seeked listener, metadata checks, and fallback
   const generateVideoThumbnail = useCallback((videoFile: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
+      let resolved = false;
       const url = URL.createObjectURL(videoFile);
       const vid = document.createElement('video');
-      vid.preload = 'metadata';
+      vid.preload = 'auto';
       vid.muted = true;
       vid.playsInline = true;
-      vid.src = url;
-      vid.currentTime = 1;
-      vid.onloadeddata = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = vid.videoWidth || 640;
-        canvas.height = vid.videoHeight || 360;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { URL.revokeObjectURL(url); reject(new Error('Canvas not available')); return; }
-        ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        URL.revokeObjectURL(url);
-        resolve(dataUrl);
+      vid.crossOrigin = 'anonymous';
+
+      const cleanup = () => {
+        try { URL.revokeObjectURL(url); } catch {}
       };
-      vid.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Video load error')); };
+
+      const captureFrame = () => {
+        if (resolved) return;
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = vid.videoWidth || 640;
+          canvas.height = vid.videoHeight || 360;
+          const ctx = canvas.getContext('2d');
+          if (ctx && vid.videoWidth > 0 && vid.videoHeight > 0) {
+            ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            resolved = true;
+            cleanup();
+            resolve(dataUrl);
+            return;
+          }
+        } catch (e) {
+          console.warn('Could not snapshot canvas frame:', e);
+        }
+
+        // Fallback to stylized cover
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          resolve(generateDefaultCover(title || videoFile.name.replace(/\.[^/.]+$/, ''), artistName, 'video'));
+        }
+      };
+
+      vid.onloadedmetadata = () => {
+        const seekTime = Math.min(1.0, (vid.duration || 1) / 2);
+        vid.currentTime = seekTime;
+      };
+
+      vid.onseeked = captureFrame;
+      vid.onloadeddata = () => {
+        if (!resolved && vid.currentTime > 0) captureFrame();
+      };
+
+      vid.onerror = () => {
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          resolve(generateDefaultCover(title || videoFile.name.replace(/\.[^/.]+$/, ''), artistName, 'video'));
+        }
+      };
+
+      // Timeout fallback after 3.5 seconds
+      setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          resolve(generateDefaultCover(title || videoFile.name.replace(/\.[^/.]+$/, ''), artistName, 'video'));
+        }
+      }, 3500);
+
+      vid.src = url;
+      vid.load();
     });
-  }, []);
+  }, [artistName, generateDefaultCover, title]);
 
   const handleVideoFileChange = async (selectedFile: File) => {
     setFile(selectedFile);
     setAutoThumb(null);
     try {
       const thumb = await generateVideoThumbnail(selectedFile);
-      setAutoThumb(thumb);
-    } catch { /* silently ignore — user can add manual cover */ }
+      if (thumb) setAutoThumb(thumb);
+    } catch { /* safely fallback */ }
   };
 
   // Convert base64 dataURL to a Blob/File for upload
   const dataUrlToFile = (dataUrl: string, filename: string): File => {
     const arr = dataUrl.split(',');
-    const mime = arr[0].match(/:(.*?);/)![1];
+    const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
     const bstr = atob(arr[1]);
     let n = bstr.length;
     const u8arr = new Uint8Array(n);
@@ -278,6 +377,14 @@ export default function UploadPage() {
           const retryThumb = await generateVideoThumbnail(file);
           const thumbFile = dataUrlToFile(retryThumb, `thumb_retry_${Date.now()}.jpg`);
           coverUrl = await uploadFile('thumbnails', `${user.id}/thumb_${Date.now()}.jpg`, thumbFile);
+        } catch { /* best-effort */ }
+      } else if (uploadType === 'song' && !coverUrl) {
+        try {
+          const defaultSongCover = generateDefaultCover(title, artistName, 'song');
+          if (defaultSongCover) {
+            const thumbFile = dataUrlToFile(defaultSongCover, `cover_${Date.now()}.jpg`);
+            coverUrl = await uploadFile('thumbnails', `${user.id}/cover_${Date.now()}.jpg`, thumbFile);
+          }
         } catch { /* best-effort */ }
       }
       setUploadProgress(80);

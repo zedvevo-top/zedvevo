@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import VideoCard from '@/components/video/VideoCard';
 import VideoPlayer from '@/components/video/VideoPlayer';
 import BackToHome from '@/components/common/BackToHome';
+import AdBanner from '@/components/ads/AdBanner';
 
 const GENRES = ['All', 'Music Video', 'Live', 'Lyric', 'Behind the Scenes', 'Documentary'];
 
@@ -117,6 +118,9 @@ export default function VideosPage() {
             ))}
           </div>
         </div>
+
+        {/* Native Sponsor Ad Banner */}
+        <AdBanner position="videos" format="leaderboard" />
 
         {loading && videos.length === 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">

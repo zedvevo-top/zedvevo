@@ -93,53 +93,118 @@ export default defineConfig({
       name: "dynamic-og-metadata",
       async transformIndexHtml(html, ctx) {
         const rawUrl = ctx.originalUrl || ctx.path || "";
-        const cleanUrl = rawUrl.split("?")[0];
+        const cleanPath = rawUrl.split("?")[0] || "";
+        let queryId: string | null = null;
+        try {
+          const parsedUrl = new URL(rawUrl, "http://localhost");
+          queryId = parsedUrl.searchParams.get("id") || parsedUrl.searchParams.get("nomineeId");
+        } catch {
+          // ignore url parse error
+        }
 
-        // Song details injection
-        const songMatch = cleanUrl.match(/\/(?:song|songs|shared\/song)\/([a-zA-Z0-9_-]+)/);
-        if (songMatch && songMatch[1]) {
-          const songId = songMatch[1];
-          const song = await fetchSupabaseRecord(`songs?id=eq.${songId}&select=id,title,artist_name,cover_url,album`);
-          if (song && song.title) {
-            const artistName = song.artist_name || "ZedVevo Artist";
-            const title = `${escapeHtml(song.title)} by ${escapeHtml(artistName)} — ZedVevo`;
-            const desc = `Stream and download "${escapeHtml(song.title)}" by ${escapeHtml(artistName)} on ZedVevo.${song.album ? ` Album: ${escapeHtml(song.album)}` : ""}`;
-            const img = song.cover_url || "/og-image.png";
+        function replaceOrInsertMeta(h: string, attr: "name" | "property", key: string, content: string): string {
+          const regex = new RegExp("<meta\\s+" + attr + "=\"" + key + "\"\\s+content=\"[^\"]*\"\\s*\\/?>", "i");
+          const newTag = `<meta ${attr}="${key}" content="${escapeHtml(content)}" />`;
+          if (regex.test(h)) {
+            return h.replace(regex, newTag);
+          }
+          return h.replace("</head>", `    ${newTag}\n  </head>`);
+        }
 
-            let transformed = html;
-            transformed = transformed.replace(/<title>.*?<\/title>/, `<title>${title}</title>`);
-            transformed = transformed.replace(/<meta name="description" content=".*?" \/>/, `<meta name="description" content="${desc}" />`);
-            transformed = transformed.replace(/<meta property="og:title" content=".*?" \/>/, `<meta property="og:title" content="${title}" />`);
-            transformed = transformed.replace(/<meta property="og:description" content=".*?" \/>/, `<meta property="og:description" content="${desc}" />`);
-            transformed = transformed.replace(/<meta property="og:image" content=".*?" \/>/, `<meta property="og:image" content="${img}" />`);
-            transformed = transformed.replace(/<meta name="twitter:title" content=".*?" \/>/, `<meta name="twitter:title" content="${title}" />`);
-            transformed = transformed.replace(/<meta name="twitter:description" content=".*?" \/>/, `<meta name="twitter:description" content="${desc}" />`);
-            transformed = transformed.replace(/<meta name="twitter:image" content=".*?" \/>/, `<meta name="twitter:image" content="${img}" />`);
-            return transformed;
+        function applyMeta(h: string, {
+          title,
+          description,
+          imageUrl,
+          pageUrl,
+          type = "website",
+        }: {
+          title: string;
+          description: string;
+          imageUrl: string;
+          pageUrl: string;
+          type?: string;
+        }): string {
+          let updated = h;
+          updated = updated.replace(/<title>.*?<\/title>/i, `<title>${escapeHtml(title)}</title>`);
+          updated = replaceOrInsertMeta(updated, "name", "description", description);
+          updated = replaceOrInsertMeta(updated, "property", "og:title", title);
+          updated = replaceOrInsertMeta(updated, "property", "og:description", description);
+          updated = replaceOrInsertMeta(updated, "property", "og:image", imageUrl);
+          updated = replaceOrInsertMeta(updated, "property", "og:image:secure_url", imageUrl);
+          updated = replaceOrInsertMeta(updated, "property", "og:url", pageUrl);
+          updated = replaceOrInsertMeta(updated, "property", "og:type", type);
+          updated = replaceOrInsertMeta(updated, "name", "twitter:card", "summary_large_image");
+          updated = replaceOrInsertMeta(updated, "name", "twitter:title", title);
+          updated = replaceOrInsertMeta(updated, "name", "twitter:description", description);
+          updated = replaceOrInsertMeta(updated, "name", "twitter:image", imageUrl);
+          return updated;
+        }
+
+        // 1. Video matching (paths /video/:id, /videos/:id, /shared/video/:id or /videos?id=..., /video?id=...)
+        const videoPathMatch = cleanPath.match(/\/(?:video|videos|shared\/video)\/([a-zA-Z0-9_-]+)/);
+        const videoId = videoPathMatch ? videoPathMatch[1] : (cleanPath.startsWith("/video") || cleanPath.startsWith("/videos") ? queryId : null);
+
+        if (videoId) {
+          const video = await fetchSupabaseRecord(`videos?id=eq.${videoId}&select=id,title,artist_name,featured_artists,thumbnail_url,genre`);
+          if (video && video.title) {
+            const artistName = video.artist_name || "ZedVevo Artist";
+            const feats = video.featured_artists ? ` ft. ${video.featured_artists}` : "";
+            const title = `${video.title} by ${artistName}${feats} — ZedVevo`;
+            const desc = `Watch the official music video for "${video.title}" by ${artistName}${feats} on ZedVevo. Stream authentic Zambian music.`;
+            const img = video.thumbnail_url || "https://www.zedvevo.xyz/og-image.png";
+            const url = `https://www.zedvevo.xyz/video/${video.id}`;
+            return applyMeta(html, { title, description: desc, imageUrl: img, pageUrl: url, type: "video.other" });
           }
         }
 
-        // Nominee details injection
-        const nomineeMatch = cleanUrl.match(/\/(?:nominee|shared\/nominee)\/([a-zA-Z0-9_-]+)/);
-        if (nomineeMatch && nomineeMatch[1]) {
-          const nomineeId = nomineeMatch[1];
-          const nominee = await fetchSupabaseRecord(`nominees?id=eq.${nomineeId}&select=id,name,song_title,photo_url,avatar_url`);
-          if (nominee && nominee.name) {
-            const title = `Vote for ${escapeHtml(nominee.name)} | ZedVevo Music Awards`;
-            const desc = nominee.song_title
-              ? `Vote for ${escapeHtml(nominee.name)} nominated for "${escapeHtml(nominee.song_title)}". Every vote counts!`
-              : `Vote for ${escapeHtml(nominee.name)} in the ZedVevo Awards.`;
-            const img = nominee.photo_url || nominee.avatar_url || "/og-image.png";
+        // 2. Song matching (paths /song/:id, /songs/:id, /shared/song/:id or /music?id=..., /song?id=...)
+        const songPathMatch = cleanPath.match(/\/(?:song|songs|shared\/song)\/([a-zA-Z0-9_-]+)/);
+        const songId = songPathMatch ? songPathMatch[1] : (cleanPath.startsWith("/song") || cleanPath.startsWith("/songs") || cleanPath.startsWith("/music") ? queryId : null);
 
-            let transformed = html;
-            transformed = transformed.replace(/<title>.*?<\/title>/, `<title>${title}</title>`);
-            transformed = transformed.replace(/<meta property="og:title" content=".*?" \/>/, `<meta property="og:title" content="${title}" />`);
-            transformed = transformed.replace(/<meta property="og:description" content=".*?" \/>/, `<meta property="og:description" content="${desc}" />`);
-            transformed = transformed.replace(/<meta property="og:image" content=".*?" \/>/, `<meta property="og:image" content="${img}" />`);
-            transformed = transformed.replace(/<meta name="twitter:title" content=".*?" \/>/, `<meta name="twitter:title" content="${title}" />`);
-            transformed = transformed.replace(/<meta name="twitter:description" content=".*?" \/>/, `<meta name="twitter:description" content="${desc}" />`);
-            transformed = transformed.replace(/<meta name="twitter:image" content=".*?" \/>/, `<meta name="twitter:image" content="${img}" />`);
-            return transformed;
+        if (songId) {
+          const song = await fetchSupabaseRecord(`songs?id=eq.${songId}&select=id,title,artist_name,cover_url,album,genre`);
+          if (song && song.title) {
+            const artistName = song.artist_name || "ZedVevo Artist";
+            const title = `${song.title} by ${artistName} — ZedVevo`;
+            const desc = `Stream and download "${song.title}" by ${artistName} on ZedVevo.${song.album ? ` Album: ${song.album}.` : ""} Authentic Zambian Music.`;
+            const img = song.cover_url || "https://www.zedvevo.xyz/og-image.png";
+            const url = `https://www.zedvevo.xyz/song/${song.id}`;
+            return applyMeta(html, { title, description: desc, imageUrl: img, pageUrl: url, type: "music.song" });
+          }
+        }
+
+        // 3. Nominee matching (paths /nominee/:id, /nominees/:id, /shared/nominee/:id or /nominee?id=..., /nominees?id=..., /awards?nomineeId=...)
+        const nomineePathMatch = cleanPath.match(/\/(?:nominee|nominees|shared\/nominee)\/([a-zA-Z0-9_-]+)/);
+        const nomineeId = nomineePathMatch ? nomineePathMatch[1] : (cleanPath.startsWith("/nominee") || cleanPath.startsWith("/nominees") || cleanPath.startsWith("/awards") ? queryId : null);
+
+        if (nomineeId) {
+          const nominee = await fetchSupabaseRecord(`nominees?id=eq.${nomineeId}&select=id,name,song_title,photo_url`);
+          if (nominee && nominee.name) {
+            const title = `Vote for ${nominee.name} | ZedVevo Music Awards`;
+            const desc = nominee.song_title
+              ? `Vote for ${nominee.name} nominated for "${nominee.song_title}" on ZedVevo Awards. Support authentic Zambian talent!`
+              : `Vote for ${nominee.name} in the ZedVevo Music Awards. Every vote counts!`;
+            const img = nominee.photo_url || "https://www.zedvevo.xyz/og-image.png";
+            const url = `https://www.zedvevo.xyz/nominee/${nominee.id}`;
+            return applyMeta(html, { title, description: desc, imageUrl: img, pageUrl: url, type: "website" });
+          }
+        }
+
+        // 4. Artist matching (paths /artist/:id, /artists/:id or /artist?id=...)
+        const artistPathMatch = cleanPath.match(/\/(?:artist|artists)\/([a-zA-Z0-9_-]+)/);
+        const artistId = artistPathMatch ? artistPathMatch[1] : (cleanPath.startsWith("/artist") || cleanPath.startsWith("/artists") ? queryId : null);
+
+        if (artistId) {
+          const artist = await fetchSupabaseRecord(`artists?id=eq.${artistId}&select=id,name,stage_name,bio,avatar_url,cover_url,genre`);
+          if (artist && (artist.name || artist.stage_name)) {
+            const displayName = artist.stage_name || artist.name;
+            const title = `${displayName} — Stream Music & Videos on ZedVevo`;
+            const desc = artist.bio
+              ? `${artist.bio.slice(0, 160)}... Listen to ${displayName} on ZedVevo.`
+              : `Listen to top songs, albums, and watch official music videos by ${displayName} on ZedVevo.`;
+            const img = artist.avatar_url || artist.cover_url || "https://www.zedvevo.xyz/og-image.png";
+            const url = `https://www.zedvevo.xyz/artist/${artist.id}`;
+            return applyMeta(html, { title, description: desc, imageUrl: img, pageUrl: url, type: "profile" });
           }
         }
 

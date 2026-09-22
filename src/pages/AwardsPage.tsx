@@ -18,6 +18,7 @@ import { supabase } from '@/db/supabase';
 import { generateIdempotencyKey, formatCurrency } from '@/lib/utils';
 import VoteDialog from '@/components/awards/VoteDialog';
 import ShareSheet from '@/components/common/ShareSheet';
+import AdBanner from '@/components/ads/AdBanner';
 
 export default function AwardsPage() {
   const { user } = useAuth();
@@ -233,6 +234,9 @@ export default function AwardsPage() {
                     </Button>
                   </div>
                 </div>
+
+                {/* Native Sponsor Ad */}
+                <AdBanner position="awards" format="leaderboard" />
 
                 {/* Categories */}
                 <div className="space-y-8">

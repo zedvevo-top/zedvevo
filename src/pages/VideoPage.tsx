@@ -37,26 +37,26 @@ export default function VideoPage() {
 
   if (!video) return null
 
+  const rawThumb = video.thumbnail_url || ''
+  const absoluteThumbUrl = rawThumb.startsWith('http://') || rawThumb.startsWith('https://')
+    ? rawThumb
+    : (rawThumb ? `${typeof window !== 'undefined' ? window.location.origin : ''}${rawThumb.startsWith('/') ? '' : '/'}${rawThumb}` : `${typeof window !== 'undefined' ? window.location.origin : ''}/og-image.png`)
+
   return (
     <>
       <Helmet>
-        <title>{video.title} by {video.artist?.stage_name} — ZedVevo</title>
-        <meta property="og:title" content={`${video.title} by ${video.artist?.stage_name}`} />
-        <meta property="og:description" content={video.description ? video.description.slice(0, 160) : `Watch ${video.title} on ZedVevo`} />
-        <meta property="og:image" content={video.thumbnail_url ? `${window.location.origin}${video.thumbnail_url}` : `${window.location.origin}/placeholder.jpg`} />
+        <title>{video.title} by {video.artist?.stage_name || (video as any).artist_name || 'ZedVevo'} — ZedVevo</title>
+        <meta property="og:site_name" content="ZedVevo" />
+        <meta property="og:title" content={`${video.title} by ${video.artist?.stage_name || (video as any).artist_name || 'ZedVevo'} (Official Video)`} />
+        <meta property="og:description" content={video.description ? video.description.slice(0, 160) : `Watch the official music video for "${video.title}" on ZedVevo.`} />
+        <meta property="og:image" content={absoluteThumbUrl} />
+        <meta property="og:image:secure_url" content={absoluteThumbUrl} />
         <meta property="og:type" content="video.other" />
-        <meta property="og:url" content={window.location.href} />
-        <meta property="og:video" content={video.video_url} />
-        <meta property="og:video:type" content="video/mp4" />
-        <meta property="og:video:width" content="1280" />
-        <meta property="og:video:height" content="720" />
-        <meta name="twitter:card" content="player" />
-        <meta name="twitter:title" content={`${video.title} by ${video.artist?.stage_name}`} />
-        <meta name="twitter:description" content={video.description ? video.description.slice(0, 160) : `Watch ${video.title} on ZedVevo`} />
-        <meta name="twitter:image" content={video.thumbnail_url || '/placeholder.jpg'} />
-        <meta name="twitter:player" content={window.location.href} />
-        <meta name="twitter:player:width" content="1280" />
-        <meta name="twitter:player:height" content="720" />
+        <meta property="og:url" content={typeof window !== 'undefined' ? window.location.href : ''} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={`${video.title} by ${video.artist?.stage_name || (video as any).artist_name || 'ZedVevo'}`} />
+        <meta name="twitter:description" content={video.description ? video.description.slice(0, 160) : `Watch "${video.title}" on ZedVevo.`} />
+        <meta name="twitter:image" content={absoluteThumbUrl} />
       </Helmet>
       <div className="min-h-screen">
       {/* Video Player */}

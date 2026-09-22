@@ -9,6 +9,7 @@ import { getSongs } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import MusicCard from '@/components/music/MusicCard';
 import BackToHome from '@/components/common/BackToHome';
+import AdBanner from '@/components/ads/AdBanner';
 import { usePlayer } from '@/contexts/PlayerContext';
 
 const GENRES = ['All', 'Afrobeats', 'Hip-Hop', 'R&B', 'Gospel', 'Traditional', 'Pop', 'Dance'];
@@ -107,6 +108,9 @@ export default function MusicPage() {
             ))}
           </div>
         </div>
+
+        {/* Native Sponsor Ad Banner */}
+        <AdBanner position="music" format="leaderboard" />
 
         {/* Grid */}
         {loading && songs.length === 0 ? (

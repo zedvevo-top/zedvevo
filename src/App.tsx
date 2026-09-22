@@ -49,43 +49,94 @@ function SuperAdminGuard({ children }: { children: React.ReactNode }) {
   return <AdminLayout>{children}</AdminLayout>;
 }
 
-// Dynamic head script injection & dynamic platform theme loader from Supabase
+// Dynamic head script injection & dynamic platform theme loader from Supabase & Settings
 const GlobalScriptsAndTheme: React.FC = () => {
   React.useEffect(() => {
     async function loadConfigAndTheme() {
       try {
-        const { supabase } = await import('@/lib/supabase');
-        const { data: settings } = await supabase
-          .from('app_settings')
-          .select('key, value');
-        
-        if (!settings) return;
+        const { getSettings } = await import('@/lib/api');
+        const settings = await getSettings();
 
-        // 1. Paste global header ad scripts (popunders, push, etc.)
-        const adHeader = settings.find(s => s.key === 'ad_code_header')?.value;
+        // 1. Paste global header ad scripts (popunders, push, Monetag, Adsterra, AdSense, etc.)
+        const adHeader = settings['ad_code_header'];
         if (adHeader) {
           try {
-            const range = document.createRange();
-            const fragment = range.createContextualFragment(adHeader);
-            document.head.appendChild(fragment);
+            let container = document.getElementById('dynamic-header-scripts');
+            if (!container) {
+              container = document.createElement('div');
+              container.id = 'dynamic-header-scripts';
+              document.head.appendChild(container);
+            }
+            container.innerHTML = '';
+
+            const temp = document.createElement('div');
+            temp.innerHTML = adHeader;
+            
+            // Re-create scripts as real DOM nodes to force browser execution
+            Array.from(temp.childNodes).forEach((node) => {
+              if (node.nodeName.toLowerCase() === 'script') {
+                const oldScript = node as HTMLScriptElement;
+                const newScript = document.createElement('script');
+                Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+                if (oldScript.innerHTML) newScript.innerHTML = oldScript.innerHTML;
+                container.appendChild(newScript);
+              } else {
+                container.appendChild(node.cloneNode(true));
+              }
+            });
           } catch (e) {
             console.warn('Could not parse ad_code_header fragment safely:', e);
           }
         }
 
-        // 2. Set dynamic branding
-        const siteName = settings.find(s => s.key === 'site_name')?.value;
+        // 2. Set dynamic branding & favicon
+        const siteName = settings['site_name'];
         if (siteName) {
           (window as any).ZED_SITE_NAME = siteName;
           document.title = document.title.replace('ZedVevo', siteName);
           window.dispatchEvent(new CustomEvent('site_name_changed', { detail: siteName }));
         }
 
+        const updateFavicon = (url: string) => {
+          if (!url) return;
+          let icon = document.getElementById('dynamic-favicon') as HTMLLinkElement;
+          if (!icon) {
+            icon = document.createElement('link');
+            icon.id = 'dynamic-favicon';
+            icon.rel = 'icon';
+            icon.type = 'image/png';
+            document.head.appendChild(icon);
+          }
+          icon.href = url;
+
+          let appleIcon = document.getElementById('dynamic-apple-favicon') as HTMLLinkElement;
+          if (!appleIcon) {
+            appleIcon = document.createElement('link');
+            appleIcon.id = 'dynamic-apple-favicon';
+            appleIcon.rel = 'apple-touch-icon';
+            document.head.appendChild(appleIcon);
+          }
+          appleIcon.href = url;
+        };
+
+        const faviconUrl = settings['app_favicon_url'] || settings['favicon_url'];
+        if (faviconUrl) {
+          updateFavicon(faviconUrl);
+        }
+
+        const onFaviconChanged = (e: Event) => {
+          const customEvent = e as CustomEvent<string>;
+          if (customEvent.detail) {
+            updateFavicon(customEvent.detail);
+          }
+        };
+        window.addEventListener('favicon_changed', onFaviconChanged);
+
         // 3. Set dynamic theme attributes (primary color, accent highlight, and radius)
-        const primaryColor = settings.find(s => s.key === 'theme_primary_color')?.value;
-        const accentColor = settings.find(s => s.key === 'theme_accent_color')?.value;
-        const borderRadius = settings.find(s => s.key === 'theme_border_radius')?.value;
-        const themeMode = settings.find(s => s.key === 'theme_mode')?.value;
+        const primaryColor = settings['theme_primary_color'];
+        const accentColor = settings['theme_accent_color'];
+        const borderRadius = settings['theme_border_radius'];
+        const themeMode = settings['theme_mode'];
 
         let styleRules = '';
         if (primaryColor || accentColor || borderRadius) {

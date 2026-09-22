@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Plus, Pencil, Trash2, Loader2, Bell, Download } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { Plus, Pencil, Trash2, Loader2, Bell, Download, Globe, Search, Share2, Sparkles, CheckCircle2, Copy, Image as ImageIcon, Upload, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -160,6 +160,94 @@ export default function AdminSettingsPage() {
     finally { setNotifSending(false); }
   };
 
+  // Favicon & Branding state
+  const [faviconUploading, setFaviconUploading] = useState(false);
+  const [faviconUrlInput, setFaviconUrlInput] = useState('');
+  const faviconFileRef = useRef<HTMLInputElement>(null);
+  const logoFileRef = useRef<HTMLInputElement>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoUrlInput, setLogoUrlInput] = useState('');
+
+  const currentFavicon = settings['app_favicon_url'] || settings['favicon_url'] || '/app-icon.png';
+  const currentLogo = settings['app_logo_url'] || settings['logo_url'] || '/app-icon.png';
+
+  const applyFaviconLive = (url: string) => {
+    const icon = document.getElementById('dynamic-favicon') as HTMLLinkElement;
+    if (icon) icon.href = url;
+    const appleIcon = document.getElementById('dynamic-apple-favicon') as HTMLLinkElement;
+    if (appleIcon) appleIcon.href = url;
+    window.dispatchEvent(new CustomEvent('favicon_changed', { detail: url }));
+  };
+
+  const handleSaveFavicon = async (urlToSave: string) => {
+    if (!urlToSave.trim()) return;
+    try {
+      await saveSetting('app_favicon_url', urlToSave.trim());
+      await saveSetting('favicon_url', urlToSave.trim());
+      applyFaviconLive(urlToSave.trim());
+      toast.success('App favicon updated and applied live instantly!');
+    } catch (err: any) {
+      toast.error('Failed to update favicon: ' + (err.message || 'Unknown error'));
+    }
+  };
+
+  const handleFaviconFileUpload = async (file: File) => {
+    setFaviconUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'png';
+      const path = `branding/favicon-${Date.now()}.${ext}`;
+      let publicUrl = '';
+      try {
+        publicUrl = await uploadFile('covers', path, file);
+      } catch {
+        const reader = new FileReader();
+        publicUrl = await new Promise<string>((resolve) => {
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsDataURL(file);
+        });
+      }
+      setFaviconUrlInput(publicUrl);
+      await handleSaveFavicon(publicUrl);
+    } catch (err: any) {
+      toast.error('Could not upload favicon: ' + (err.message || 'Unknown error'));
+    } finally {
+      setFaviconUploading(false);
+    }
+  };
+
+  const handleLogoFileUpload = async (file: File) => {
+    setLogoUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'png';
+      const path = `branding/logo-${Date.now()}.${ext}`;
+      let publicUrl = '';
+      try {
+        publicUrl = await uploadFile('covers', path, file);
+      } catch {
+        const reader = new FileReader();
+        publicUrl = await new Promise<string>((resolve) => {
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsDataURL(file);
+        });
+      }
+      setLogoUrlInput(publicUrl);
+      await saveSetting('app_logo_url', publicUrl);
+      await saveSetting('logo_url', publicUrl);
+      toast.success('App logo updated successfully!');
+    } catch (err: any) {
+      toast.error('Could not upload logo: ' + (err.message || 'Unknown error'));
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  const FAVICON_PRESETS = [
+    { label: 'Gold Shield', url: '/app-icon.png', color: 'from-amber-500 to-yellow-600' },
+    { label: 'Neon Soundwave', url: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=64&h=64&fit=crop&crop=faces', color: 'from-primary to-accent' },
+    { label: 'Emerald Vinyl', url: 'https://images.unsplash.com/photo-1539185441755-769473a23570?w=64&h=64&fit=crop&crop=faces', color: 'from-emerald-500 to-teal-600' },
+    { label: 'Zambian Flame', url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=64&h=64&fit=crop&crop=faces', color: 'from-red-500 to-orange-500' },
+  ];
+
   const exportDownloads = () => {
     const rows = [
       ['Date', 'Title', 'Artist', 'Type', 'User ID'],
@@ -184,6 +272,14 @@ export default function AdminSettingsPage() {
           <TabsTrigger value="notifications" className="text-xs">Notifications</TabsTrigger>
           <TabsTrigger value="downloads" className="text-xs">Downloads</TabsTrigger>
           <TabsTrigger value="app"      className="text-xs">App Config</TabsTrigger>
+          <TabsTrigger value="branding" className="text-xs flex items-center gap-1.5">
+            <Sparkles className="h-3 w-3 text-amber-400" />
+            Branding & Favicon
+          </TabsTrigger>
+          <TabsTrigger value="seo"      className="text-xs flex items-center gap-1.5">
+            <Globe className="h-3 w-3 text-accent" />
+            SEO & Google Search
+          </TabsTrigger>
         </TabsList>
 
         {/* Plans */}
@@ -399,6 +495,341 @@ export default function AdminSettingsPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </TabsContent>
+
+        {/* Branding & Favicon Tab */}
+        <TabsContent value="branding" className="mt-4 space-y-5">
+          {/* Live Browser Tab Simulator */}
+          <Card className="border-amber-500/30 bg-card/60">
+            <CardContent className="p-4 sm:p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-amber-400" />
+                  <h3 className="text-sm font-semibold">Live Browser Tab & Favicon Simulator</h3>
+                </div>
+                <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/40">
+                  Real-time Preview
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                This is how your application's favicon and title appear inside browser tabs, bookmarks, and mobile home screens.
+              </p>
+
+              {/* Browser mockup */}
+              <div className="rounded-xl border border-border bg-muted/60 p-2 sm:p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1.5 px-1">
+                    <div className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/80" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-green-500/80" />
+                  </div>
+                  {/* Active Browser Tab */}
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-t-lg bg-background border-t border-x border-border shadow-sm max-w-xs text-xs font-medium text-foreground">
+                    <img
+                      src={currentFavicon}
+                      alt="Favicon"
+                      className="w-4 h-4 rounded-sm object-cover shrink-0"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/app-icon.png'; }}
+                    />
+                    <span className="truncate">{settings['site_title'] || 'ZedVevo — Zambian Music & Videos'}</span>
+                    <span className="text-[10px] text-muted-foreground ml-auto">✕</span>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Favicon Settings */}
+            <Card>
+              <CardContent className="p-4 sm:p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ImageIcon className="h-4 w-4 text-primary" />
+                    <h4 className="text-sm font-semibold">App Favicon (Tab Icon)</h4>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px]">
+                    16x16 / 32x32 / SVG
+                  </Badge>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-xl border border-border bg-muted/50 p-2 flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
+                    <img
+                      src={currentFavicon}
+                      alt="App Favicon"
+                      className="w-full h-full object-contain"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/app-icon.png'; }}
+                    />
+                  </div>
+                  <div className="space-y-2 flex-1 min-w-0">
+                    <input
+                      ref={faviconFileRef}
+                      type="file"
+                      accept="image/*,.ico,.svg,.png"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void handleFaviconFileUpload(file);
+                      }}
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs gap-1.5"
+                        onClick={() => faviconFileRef.current?.click()}
+                        disabled={faviconUploading}
+                      >
+                        {faviconUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                        Upload Custom Favicon
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-xs gap-1 text-muted-foreground"
+                        onClick={() => void handleSaveFavicon('/app-icon.png')}
+                      >
+                        <RefreshCw className="h-3 w-3" /> Reset
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Supports PNG, SVG, ICO or WebP formats.</p>
+                  </div>
+                </div>
+
+                {/* Direct URL Input */}
+                <div className="space-y-1.5 pt-2 border-t border-border/60">
+                  <Label className="text-xs">Favicon Image URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      className="h-8 text-xs font-mono"
+                      placeholder="https://.../favicon.png"
+                      value={faviconUrlInput || currentFavicon}
+                      onChange={(e) => setFaviconUrlInput(e.target.value)}
+                    />
+                    <Button
+                      size="sm"
+                      className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground shrink-0"
+                      onClick={() => void handleSaveFavicon(faviconUrlInput || currentFavicon)}
+                    >
+                      Apply URL
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="space-y-2 pt-2 border-t border-border/60">
+                  <Label className="text-xs text-muted-foreground">Quick Presets</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {FAVICON_PRESETS.map((preset) => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => void handleSaveFavicon(preset.url)}
+                        className={`flex items-center gap-2 p-2 rounded-lg border text-left text-xs transition-all hover:border-primary/60 bg-card ${
+                          currentFavicon === preset.url ? 'border-primary ring-1 ring-primary' : 'border-border/60'
+                        }`}
+                      >
+                        <img
+                          src={preset.url}
+                          alt={preset.label}
+                          className="w-5 h-5 rounded object-cover shrink-0"
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/app-icon.png'; }}
+                        />
+                        <span className="truncate font-medium">{preset.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* App Logo & Brand Settings */}
+            <Card>
+              <CardContent className="p-4 sm:p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-accent" />
+                    <h4 className="text-sm font-semibold">Brand Identity & App Logo</h4>
+                  </div>
+                  <Badge variant="secondary" className="text-[10px]">
+                    Main Header & PWA
+                  </Badge>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-xl border border-border bg-muted/50 p-2 flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
+                    <img
+                      src={currentLogo}
+                      alt="App Logo"
+                      className="w-full h-full object-contain"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/app-icon.png'; }}
+                    />
+                  </div>
+                  <div className="space-y-2 flex-1 min-w-0">
+                    <input
+                      ref={logoFileRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void handleLogoFileUpload(file);
+                      }}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs gap-1.5"
+                      onClick={() => logoFileRef.current?.click()}
+                      disabled={logoUploading}
+                    >
+                      {logoUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                      Upload Header Logo
+                    </Button>
+                    <p className="text-[11px] text-muted-foreground">Used on navigation headers and mobile install banners.</p>
+                  </div>
+                </div>
+
+                {/* Direct Logo URL */}
+                <div className="space-y-1.5 pt-2 border-t border-border/60">
+                  <Label className="text-xs">Logo Image URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      className="h-8 text-xs font-mono"
+                      placeholder="https://.../logo.png"
+                      value={logoUrlInput || currentLogo}
+                      onChange={(e) => setLogoUrlInput(e.target.value)}
+                    />
+                    <Button
+                      size="sm"
+                      className="h-8 text-xs bg-primary hover:bg-primary/90 text-primary-foreground shrink-0"
+                      onClick={async () => {
+                        const targetUrl = logoUrlInput || currentLogo;
+                        await saveSetting('app_logo_url', targetUrl);
+                        await saveSetting('logo_url', targetUrl);
+                        toast.success('App logo updated!');
+                      }}
+                    >
+                      Apply Logo
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Site Brand Name */}
+                <div className="pt-2 border-t border-border/60">
+                  <SettingRow
+                    label="Platform Brand Display Name"
+                    type="text"
+                    value={settings['site_name'] || 'ZedVevo'}
+                    saving={!!settingSaving['site_name']}
+                    onSave={v => saveSetting('site_name', v)}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* SEO & Google Search Discoverability Tab */}
+        <TabsContent value="seo" className="mt-4 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Google Search Listing */}
+            <Card className="md:col-span-2 border-accent/30 bg-card/60">
+              <CardContent className="p-4 sm:p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Search className="h-4 w-4 text-accent" />
+                    <h3 className="text-sm font-semibold">Google Search Engine Discoverability (YouTube-like Indexing)</h3>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] text-accent border-accent/40">
+                    Live Search Snippet
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Configure search keywords, Google verification, and canonical tags so ZedVevo songs, videos, and artists rank prominently on Google search.
+                </p>
+
+                {/* Google Search Live Preview Simulator */}
+                <div className="p-3.5 rounded-lg bg-background border border-border/80 space-y-1">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="font-semibold text-foreground">ZedVevo</span>
+                    <span>›</span>
+                    <span className="truncate">{settings['site_url'] || 'https://zedvevo.com'}</span>
+                  </div>
+                  <p className="text-base sm:text-lg font-medium text-blue-400 hover:underline cursor-pointer truncate">
+                    {settings['site_title'] || 'ZedVevo — Zambia’s Premier Music, Videos & Entertainment Platform'}
+                  </p>
+                  <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                    {settings['site_description'] || 'Stream, listen, watch and download the latest Zambian music, official music videos, and artist profiles on ZedVevo. Free MP3 downloads and streaming.'}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Core Metadata Fields */}
+            <Card>
+              <CardContent className="p-4 space-y-3.5">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Primary Meta Tags</h4>
+                <SettingRow
+                  label="Search Engine Title (Google Title)"
+                  type="text"
+                  value={settings['site_title'] || 'ZedVevo — Zambia’s #1 Music & Entertainment Platform'}
+                  saving={!!settingSaving['site_title']}
+                  onSave={v => saveSetting('site_title', v)}
+                />
+                <SettingRow
+                  label="Meta Description (Search Snippet)"
+                  type="textarea"
+                  value={settings['site_description'] || 'Stream, watch and download latest Zambian music and high definition videos on ZedVevo.'}
+                  saving={!!settingSaving['site_description']}
+                  onSave={v => saveSetting('site_description', v)}
+                />
+                <SettingRow
+                  label="Google Search Keywords (comma-separated)"
+                  type="text"
+                  value={settings['site_keywords'] || 'zed music, zambian music, zedvevo, download mp3 zambia, zambian artists, zed videos'}
+                  saving={!!settingSaving['site_keywords']}
+                  onSave={v => saveSetting('site_keywords', v)}
+                />
+              </CardContent>
+            </Card>
+
+            {/* Verification & Social Share Preview */}
+            <Card>
+              <CardContent className="p-4 space-y-3.5">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Google Verification & Social Sharing</h4>
+                <SettingRow
+                  label="Google Search Console Verification Tag"
+                  type="text"
+                  value={settings['google_site_verification'] || ''}
+                  saving={!!settingSaving['google_site_verification']}
+                  onSave={v => saveSetting('google_site_verification', v)}
+                />
+                <SettingRow
+                  label="Default Social Share Image (OpenGraph Image URL)"
+                  type="text"
+                  value={settings['og_image'] || 'https://zedvevo.com/icon-512.png'}
+                  saving={!!settingSaving['og_image']}
+                  onSave={v => saveSetting('og_image', v)}
+                />
+                <SettingRow
+                  label="Canonical Base URL"
+                  type="text"
+                  value={settings['site_url'] || 'https://zedvevo.com'}
+                  saving={!!settingSaving['site_url']}
+                  onSave={v => saveSetting('site_url', v)}
+                />
+                <SettingRow
+                  label="Twitter / X Creator Handle"
+                  type="text"
+                  value={settings['twitter_handle'] || '@ZedVevo'}
+                  saving={!!settingSaving['twitter_handle']}
+                  onSave={v => saveSetting('twitter_handle', v)}
+                />
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
       </Tabs>

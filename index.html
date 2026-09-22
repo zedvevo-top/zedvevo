@@ -2,14 +2,30 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/app-icon.png" />
-    <link rel="apple-touch-icon" href="/app-icon.png" />
+    <link id="dynamic-favicon" rel="icon" type="image/png" href="/app-icon.png" />
+    <link id="dynamic-apple-favicon" rel="apple-touch-icon" href="/app-icon.png" />
+    <script>
+      (function() {
+        try {
+          var fav = localStorage.getItem('zed_setting_app_favicon_url') || localStorage.getItem('zed_setting_favicon_url');
+          if (fav) {
+            var icon = document.getElementById('dynamic-favicon');
+            var appleIcon = document.getElementById('dynamic-apple-favicon');
+            if (icon) icon.href = fav;
+            if (appleIcon) appleIcon.href = fav;
+          }
+        } catch(e) {}
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>ZedVevo — Zambian Music &amp; Video Streaming</title>
     <meta name="description" content="Stream, discover, and download authentic Zambian music, official music videos, and charts on ZedVevo." />
     <meta name="theme-color" content="#09090b" />
     <meta name="application-name" content="ZedVevo" />
     <meta name="apple-mobile-web-app-title" content="ZedVevo" />
+
+    <!-- Profitablerate CPM Ad Network Global Integration -->
+    <script async="async" data-cfasync="false" src="https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js"></script>
 
     <!-- OpenGraph / Facebook / WhatsApp -->
     <meta property="og:site_name" content="ZedVevo" />

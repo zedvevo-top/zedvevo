@@ -14,6 +14,7 @@ import SearchBar from '@/components/search/SearchBar';
 import NotificationBell from '@/components/notifications/NotificationBell';
 import DonationDialog from '@/components/donation/DonationDialog';
 import InstallAppButton from '@/components/layout/InstallAppButton';
+import ThemeSelector from '@/components/common/ThemeSelector';
 
 const navLinks = [
   { to: '/', label: 'Home' },
@@ -127,6 +128,9 @@ export default function Header() {
             <div className="sm:hidden">
               <InstallAppButton variant="header-icon" />
             </div>
+
+            {/* Theme switcher */}
+            <ThemeSelector />
 
             {/* Notification bell */}
             <NotificationBell />

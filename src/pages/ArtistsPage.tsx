@@ -105,14 +105,15 @@ export default function ArtistsPage() {
                                   alt={displayName}
                                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                   onError={(e) => {
-                                    // Fallback to initial
-                                    (e.target as HTMLElement).style.display = 'none';
+                                    (e.currentTarget as HTMLImageElement).src = '/app-icon.png';
                                   }}
                                 />
                               ) : (
-                                <div className="w-full h-full flex items-center justify-center text-2xl font-bold text-muted-foreground/60 bg-muted">
-                                  {displayName[0]?.toUpperCase() || 'A'}
-                                </div>
+                                <img
+                                  src="/app-icon.png"
+                                  alt={displayName}
+                                  className="w-full h-full object-cover"
+                                />
                               )}
                             </div>
                             {artist.verified && (

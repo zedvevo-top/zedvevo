@@ -55,6 +55,34 @@ const FALLBACK_ADS: Sponsor[] = [
   }
 ];
 
+// Profitablerate CPM Ad Network Container & Invoker
+function ProfitablerateCpmContainer() {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      // Ensure the script is present in the document
+      const scriptId = 'profitablerate-cpm-script';
+      if (!document.getElementById(scriptId)) {
+        const script = document.createElement('script');
+        script.id = scriptId;
+        script.async = true;
+        script.setAttribute('data-cfasync', 'false');
+        script.src = 'https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js';
+        document.head.appendChild(script);
+      }
+    } catch (e) {
+      console.warn('CPM script initialization:', e);
+    }
+  }, []);
+
+  return (
+    <div className="w-full flex justify-center items-center overflow-hidden my-1">
+      <div id="container-29a990e051b1bc82dfb7d8c83a9a64af" ref={containerRef} className="min-h-[50px] w-full flex justify-center items-center text-center" />
+    </div>
+  );
+}
+
 // Dynamic script injection wrapper to parse and execute <script> tags inside pasted ad codes
 function ScriptHtmlContainer({ code }: { code: string }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -86,7 +114,7 @@ export default function AdBanner({
   className = '',
   adSlot,
 }: AdBannerProps) {
-  const [activeAd, setActiveAd] = useState<Sponsor | null>(null);
+  const [activeAd, setActiveAd] = useState<Sponsor | null>(FALLBACK_ADS[0]);
   const [adsenseClientId, setAdsenseClientId] = useState<string | null>(null);
   const [adsEnabled, setAdsEnabled] = useState<boolean>(true);
   const [customLeaderboardCode, setCustomLeaderboardCode] = useState<string | null>(null);
@@ -266,39 +294,42 @@ export default function AdBanner({
 
   if (format === 'feed') {
     return (
-      <div className={`w-full rounded-2xl border border-border/70 bg-gradient-to-r from-card via-card to-primary/5 overflow-hidden shadow-md my-6 ${className}`}>
-        <div className="flex items-center justify-between px-4 py-1.5 bg-muted/40 border-b border-border/30 text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">
-          <span className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3 h-3 text-primary" /> Official Sponsor
-          </span>
-          <span className="capitalize">{activeAd.tier} Partner</span>
-        </div>
-        <div className="p-4 sm:p-5 flex flex-col sm:flex-row items-center gap-4 justify-between">
-          <div className="flex items-center gap-4 min-w-0">
-            {activeAd.logo_url && (
-              <div className="w-14 h-14 rounded-xl overflow-hidden bg-background border border-border/80 p-1 shrink-0 flex items-center justify-center shadow-sm">
-                <img
-                  src={activeAd.logo_url}
-                  alt={activeAd.name}
-                  className="w-full h-full object-contain"
-                />
-              </div>
-            )}
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="font-bold text-base text-foreground truncate">{activeAd.name}</h3>
-                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 uppercase">Ad</Badge>
-              </div>
-              <p className="text-sm text-muted-foreground line-clamp-2">
-                {activeAd.headline || 'Support the artists you love with our trusted official partners.'}
-              </p>
-            </div>
+      <div className="space-y-2">
+        <ProfitablerateCpmContainer />
+        <div className={`w-full rounded-2xl border border-border/70 bg-gradient-to-r from-card via-card to-primary/5 overflow-hidden shadow-md my-4 ${className}`}>
+          <div className="flex items-center justify-between px-4 py-1.5 bg-muted/40 border-b border-border/30 text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">
+            <span className="flex items-center gap-1.5">
+              <ShieldCheck className="w-3 h-3 text-primary" /> Official Sponsor
+            </span>
+            <span className="capitalize">{activeAd.tier} Partner</span>
           </div>
-          <Button asChild className="shrink-0 w-full sm:w-auto gap-2 bg-primary hover:bg-primary/90 text-primary-foreground shadow" onClick={handleAdClick}>
-            <a href={targetUrl} target={targetUrl.startsWith('http') ? '_blank' : '_self'} rel="noopener noreferrer">
-              {ctaLabel} <ExternalLink className="w-4 h-4" />
-            </a>
-          </Button>
+          <div className="p-4 sm:p-5 flex flex-col sm:flex-row items-center gap-4 justify-between">
+            <div className="flex items-center gap-4 min-w-0">
+              {activeAd.logo_url && (
+                <div className="w-14 h-14 rounded-xl overflow-hidden bg-background border border-border/80 p-1 shrink-0 flex items-center justify-center shadow-sm">
+                  <img
+                    src={activeAd.logo_url}
+                    alt={activeAd.name}
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="font-bold text-base text-foreground truncate">{activeAd.name}</h3>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 uppercase">Ad</Badge>
+                </div>
+                <p className="text-sm text-muted-foreground line-clamp-2">
+                  {activeAd.headline || 'Support the artists you love with our trusted official partners.'}
+                </p>
+              </div>
+            </div>
+            <Button asChild className="shrink-0 w-full sm:w-auto gap-2 bg-primary hover:bg-primary/90 text-primary-foreground shadow" onClick={handleAdClick}>
+              <a href={targetUrl} target={targetUrl.startsWith('http') ? '_blank' : '_self'} rel="noopener noreferrer">
+                {ctaLabel} <ExternalLink className="w-4 h-4" />
+              </a>
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -306,48 +337,51 @@ export default function AdBanner({
 
   // Default: 'leaderboard'
   return (
-    <div className={`w-full rounded-2xl border border-border/70 bg-card overflow-hidden shadow-sm my-6 transition-all hover:border-primary/40 ${className}`}>
-      <div className="flex items-center justify-between px-4 py-1.5 bg-muted/50 border-b border-border/30 text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-        <span className="flex items-center gap-1.5">
-          <Sparkles className="w-3 h-3 text-primary" /> Featured Partner
-        </span>
-        <span>Sponsored</span>
-      </div>
+    <div className="space-y-2">
+      <ProfitablerateCpmContainer />
+      <div className={`w-full rounded-2xl border border-border/70 bg-card overflow-hidden shadow-sm my-4 transition-all hover:border-primary/40 ${className}`}>
+        <div className="flex items-center justify-between px-4 py-1.5 bg-muted/50 border-b border-border/30 text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+          <span className="flex items-center gap-1.5">
+            <Sparkles className="w-3 h-3 text-primary" /> Featured Partner
+          </span>
+          <span>Sponsored</span>
+        </div>
 
-      <div className="relative overflow-hidden">
-        {activeAd.banner_url && (
-          <div
-            className="absolute inset-0 bg-cover bg-center opacity-20 filter blur-sm"
-            style={{ backgroundImage: `url(${activeAd.banner_url})` }}
-          />
-        )}
-        <div className="relative z-10 p-4 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-4 text-center md:text-left flex-1 min-w-0">
-            {activeAd.logo_url && (
-              <div className="w-12 h-12 md:w-16 md:h-16 rounded-xl overflow-hidden bg-background border border-border p-1 shrink-0 flex items-center justify-center shadow-md">
-                <img
-                  src={activeAd.logo_url}
-                  alt={activeAd.name}
-                  className="w-full h-full object-contain"
-                />
+        <div className="relative overflow-hidden">
+          {activeAd.banner_url && (
+            <div
+              className="absolute inset-0 bg-cover bg-center opacity-20 filter blur-sm"
+              style={{ backgroundImage: `url(${activeAd.banner_url})` }}
+            />
+          )}
+          <div className="relative z-10 p-4 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-4 text-center md:text-left flex-1 min-w-0">
+              {activeAd.logo_url && (
+                <div className="w-12 h-12 md:w-16 md:h-16 rounded-xl overflow-hidden bg-background border border-border p-1 shrink-0 flex items-center justify-center shadow-md">
+                  <img
+                    src={activeAd.logo_url}
+                    alt={activeAd.name}
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+              )}
+              <div className="min-w-0">
+                <h3 className="font-bold text-base md:text-lg text-foreground truncate">
+                  {activeAd.name}
+                </h3>
+                <p className="text-xs md:text-sm text-muted-foreground mt-0.5 line-clamp-2 max-w-2xl">
+                  {activeAd.headline || 'Proud sponsor of ZedVevo music and culture.'}
+                </p>
               </div>
-            )}
-            <div className="min-w-0">
-              <h3 className="font-bold text-base md:text-lg text-foreground truncate">
-                {activeAd.name}
-              </h3>
-              <p className="text-xs md:text-sm text-muted-foreground mt-0.5 line-clamp-2 max-w-2xl">
-                {activeAd.headline || 'Proud sponsor of ZedVevo music and culture.'}
-              </p>
             </div>
-          </div>
 
-          <div className="shrink-0 flex items-center gap-3 w-full md:w-auto">
-            <Button asChild className="w-full md:w-auto gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-md" onClick={handleAdClick}>
-              <a href={targetUrl} target={targetUrl.startsWith('http') ? '_blank' : '_self'} rel="noopener noreferrer">
-                {ctaLabel} <ExternalLink className="w-4 h-4" />
-              </a>
-            </Button>
+            <div className="shrink-0 flex items-center gap-3 w-full md:w-auto">
+              <Button asChild className="w-full md:w-auto gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-md" onClick={handleAdClick}>
+                <a href={targetUrl} target={targetUrl.startsWith('http') ? '_blank' : '_self'} rel="noopener noreferrer">
+                  {ctaLabel} <ExternalLink className="w-4 h-4" />
+                </a>
+              </Button>
+            </div>
           </div>
         </div>
       </div>
