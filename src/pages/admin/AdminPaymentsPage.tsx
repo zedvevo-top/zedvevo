@@ -125,7 +125,6 @@ export default function AdminPaymentsPage() {
                   <div className="flex gap-1.5">
                     {p.status !== 'successful' && (
                       <Button size="sm" variant="default" className="h-6 text-[10px] bg-accent text-accent-foreground hover:bg-accent/90" onClick={async () => {
-                        if (!confirm(`Are you sure you want to approve this ${p.payment_type} payment for ${formatCurrency(p.amount)}? This will apply votes/status to the database.`)) return;
                         try {
                           const { supabase } = await import('@/db/supabase');
                           const { error } = await supabase.from('payments').update({
@@ -198,7 +197,6 @@ export default function AdminPaymentsPage() {
                     )}
                     {p.status === 'pending' && (
                       <Button size="sm" variant="destructive" className="h-6 text-[10px]" onClick={async () => {
-                        if (!confirm(`Are you sure you want to reject this payment for ${formatCurrency(p.amount)}?`)) return;
                         try {
                           const { supabase } = await import('@/db/supabase');
                           const { error } = await supabase.from('payments').update({

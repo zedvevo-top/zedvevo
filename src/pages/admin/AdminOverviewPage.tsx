@@ -15,6 +15,8 @@ import {
 } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import type { Payment } from '@/types/index';
+import { analytics } from '@/lib/analytics';
+import { AdminNotificationControl } from '@/components/admin/AdminNotificationControl';
 
 const ACCENT = 'hsl(var(--accent))';
 const MUTED  = 'hsl(var(--muted-foreground))';
@@ -53,6 +55,7 @@ export default function AdminOverviewPage() {
   const [payments, setPayments]   = useState<Payment[]>([]);
   const [downloads, setDownloads] = useState(0);
   const [visitors, setVisitors]   = useState(0);
+  const [analyticsStats, setAnalyticsStats] = useState(() => analytics.getStats());
 
   useEffect(() => {
     Promise.all([
@@ -66,6 +69,14 @@ export default function AdminOverviewPage() {
     incrementVisitorCount()
       .then(count => setVisitors(count))
       .catch(() => getVisitorCount().then(setVisitors).catch(console.error));
+  }, []);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setAnalyticsStats(analytics.getStats());
+    };
+    window.addEventListener('zed_analytics_updated', handleUpdate);
+    return () => window.removeEventListener('zed_analytics_updated', handleUpdate);
   }, []);
 
   const successPayments = payments.filter(p => p.status === 'successful');
@@ -92,6 +103,9 @@ export default function AdminOverviewPage() {
         <h1 className="text-xl font-bold">Overview</h1>
         <p className="text-sm text-muted-foreground">Platform snapshot at a glance</p>
       </div>
+
+      {/* Real-time background OS pop-up alert controls for admin */}
+      <AdminNotificationControl />
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -192,6 +206,94 @@ export default function AdminOverviewPage() {
           })()}
         </CardContent>
       </Card>
+
+      {/* Dynamic Player & Route Navigation Analytics Tracker */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Statistics & Activity Summary */}
+        <Card className="lg:col-span-1">
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-sm font-semibold flex items-center justify-between">
+              <span>Player & Analytics Summary</span>
+              <button onClick={() => { analytics.clear(); }} className="text-xs text-muted-foreground hover:text-destructive transition-colors">
+                Clear
+              </button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-5 pb-4 space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-muted/40 rounded-lg p-3 text-center">
+                <span className="block text-xl font-bold text-accent">{analyticsStats.plays}</span>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Total Plays</span>
+              </div>
+              <div className="bg-muted/40 rounded-lg p-3 text-center">
+                <span className="block text-xl font-bold text-purple-500">{analyticsStats.pauses}</span>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Total Pauses</span>
+              </div>
+              <div className="bg-muted/40 rounded-lg p-3 text-center">
+                <span className="block text-xl font-bold text-orange-500">{analyticsStats.skips}</span>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Song Skips</span>
+              </div>
+              <div className="bg-muted/40 rounded-lg p-3 text-center">
+                <span className="block text-xl font-bold text-cyan-500">{analyticsStats.totalEvents}</span>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Total Logs</span>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-semibold text-muted-foreground mb-2">Top Navigation Patterns</h3>
+              {analyticsStats.topPages.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">No page traffic recorded yet.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {analyticsStats.topPages.map((p, idx) => (
+                    <div key={idx} className="flex justify-between items-center text-xs bg-muted/20 px-2 py-1.5 rounded">
+                      <span className="font-mono truncate max-w-[180px]">{p.page}</span>
+                      <span className="bg-accent/10 text-accent px-1.5 py-0.5 rounded-full font-bold text-[10px]">{p.count} views</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Real-time Interaction Event Log */}
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-sm font-semibold">Live User Interaction Event Feed</CardTitle>
+          </CardHeader>
+          <CardContent className="px-5 pb-4">
+            {analyticsStats.recentLogs.length === 0 ? (
+              <div className="text-center py-8 text-xs text-muted-foreground italic">
+                Awaiting user interactions... Use the player or navigate the app to stream real logs here.
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                {analyticsStats.recentLogs.map((evt) => (
+                  <div key={evt.id} className="flex items-start justify-between text-xs border-b border-border/40 pb-2 last:border-0 last:pb-0">
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded-full ${
+                          evt.type === 'pageview' ? 'bg-cyan-500/10 text-cyan-500' :
+                          evt.type === 'player' ? 'bg-accent/10 text-accent' :
+                          'bg-purple-500/10 text-purple-500'
+                        }`}>
+                          {evt.type}
+                        </span>
+                        <span className="font-medium text-foreground">{evt.action}</span>
+                      </div>
+                      <p className="text-muted-foreground mt-0.5 font-mono text-[11px] break-all">{evt.label}</p>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground whitespace-nowrap ml-2">
+                      {new Date(evt.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

@@ -17,6 +17,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/db/supabase';
 import { generateIdempotencyKey, formatCurrency, formatDate, snakeCaseFileName } from '@/lib/utils';
 import { Navigate, useNavigate } from 'react-router-dom';
+import CardPaymentForm from '@/components/payment/CardPaymentForm';
+import FreshTunesPortalModal from '@/components/distribution/FreshTunesPortalModal';
 
 type PayMethod = 'mobile_money' | 'card';
 
@@ -35,6 +37,7 @@ export default function UploadPage() {
   const [payLoading, setPayLoading] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [showFreshTunesModal, setShowFreshTunesModal] = useState(false);
 
   // Upload form
   const [uploadType, setUploadType] = useState<'song' | 'video'>('song');
@@ -137,7 +140,18 @@ export default function UploadPage() {
             const sub = await getUserActiveSubscription(user!.id);
             setSubscription(sub);
             setPayDialog(false);
-            toast.success('Payment verified! You can now upload content.');
+            
+            const isAllPlatforms = selectedPlan?.plan_type === 'k30_all_platforms' ||
+              selectedPlan?.name?.toLowerCase().includes('streaming') ||
+              selectedPlan?.name?.toLowerCase().includes('fresh');
+
+            if (isAllPlatforms) {
+              window.open('https://www.freshtunes.com', '_blank', 'noopener,noreferrer');
+              setShowFreshTunesModal(true);
+              toast.success('All Streaming Platforms plan activated! Opening www.freshtunes.com...');
+            } else {
+              toast.success('Payment verified! You can now upload content.');
+            }
           } else if (data.status === 'insufficient_funds') {
             toast.error('Insufficient funds. Please top up and try again.');
           } else {
@@ -214,8 +228,15 @@ export default function UploadPage() {
         if (data.payment_url) setPaymentUrl(data.payment_url);
         setPaymentStatus('pending');
         pollPayment(data.payment_id);
-        if (data.payment_url) window.open(data.payment_url, '_blank');
-        else toast.info('Request sent! Check your phone for the Mobile Money PIN prompt.');
+        if (data.payment_url) {
+          try {
+            window.location.href = data.payment_url;
+          } catch {
+            window.open(data.payment_url, '_blank');
+          }
+        } else {
+          toast.info('Request sent! Check your phone for the Mobile Money PIN prompt.');
+        }
       } else {
         toast.error('No payment ID returned. Please try again.');
         setPaymentStatus('failed');
@@ -613,66 +634,106 @@ export default function UploadPage() {
                   >
                     <CreditCard className="h-4 w-4 shrink-0" />
                     <span>Card</span>
-                    <Badge className="absolute -top-2 -right-2 text-[9px] px-1.5 py-0 bg-muted text-muted-foreground border border-border">
-                      Soon
+                    <Badge className="absolute -top-2 -right-2 text-[9px] px-1.5 py-0 bg-accent text-accent-foreground border border-accent animate-pulse">
+                      Visa/MC
                     </Badge>
                   </button>
                 </div>
               </div>
 
-              {/* Card coming soon notice */}
-              {payMethod === 'card' && (
-                <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3">
-                  <AlertCircle className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium">Card payments coming soon</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Card payments are not yet available. Please use Mobile Money to complete your purchase.
-                    </p>
-                  </div>
-                </div>
-              )}
+              {payMethod === 'card' ? (
+                <div className="pt-2 border-t border-border/50">
+                  <CardPaymentForm
+                    amount={selectedPlan?.price || 0}
+                    paymentType="plan"
+                    metadata={{
+                      user_id: user!.id,
+                      plan_id: selectedPlan?.id,
+                      plan_type: selectedPlan?.plan_type,
+                    }}
+                    onSuccess={async (paymentId) => {
+                      setPaymentStatus('successful');
+                      setPayDialog(false);
 
-              {/* Mobile money phone input */}
-              {payMethod === 'mobile_money' && (
-                <div>
-                  <Label>Phone Number *</Label>
-                  <Input
-                    className="mt-1"
-                    value={phone}
-                    onChange={e => setPhone(e.target.value)}
-                    placeholder="e.g. 0977123456"
-                    type="tel"
+                      const isAllPlatforms = selectedPlan?.plan_type === 'k30_all_platforms' ||
+                        selectedPlan?.name?.toLowerCase().includes('streaming') ||
+                        selectedPlan?.name?.toLowerCase().includes('fresh');
+
+                      if (user?.id) {
+                        try {
+                          const sub = await getUserActiveSubscription(user.id);
+                          setSubscription(sub);
+                        } catch {
+                          // Ignore fetch error
+                        }
+                      }
+
+                      if (isAllPlatforms) {
+                        window.open('https://www.freshtunes.com', '_blank', 'noopener,noreferrer');
+                        setShowFreshTunesModal(true);
+                        toast.success('All Streaming Platforms Plan Activated! Opening www.freshtunes.com...');
+                      } else {
+                        toast.success('Your plan is now active! You can start uploading right now.');
+                      }
+                    }}
+                    onCancel={() => setPayDialog(false)}
+                    buttonLabel={`Pay ${selectedPlan ? formatCurrency(selectedPlan.price) : ''} & Activate`}
                   />
                 </div>
+              ) : (
+                <>
+                  {/* Mobile money phone input */}
+                  {payMethod === 'mobile_money' && (
+                    <div>
+                      <Label>Phone Number *</Label>
+                      <Input
+                        className="mt-1"
+                        value={phone}
+                        onChange={e => setPhone(e.target.value)}
+                        placeholder="e.g. 0977123456"
+                        type="tel"
+                      />
+                    </div>
+                  )}
+
+                  {/* Security note */}
+                  <div className="flex items-start gap-2 bg-muted/40 rounded-lg p-3 text-xs text-muted-foreground">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0 text-accent mt-0.5" />
+                    Your plan activates only after Lipila verifies your payment server-side.
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2 pt-1">
+                    <Button variant="outline" className="flex-1" onClick={() => setPayDialog(false)} disabled={payLoading}>
+                      Cancel
+                    </Button>
+                    <Button
+                      className="flex-1 bg-accent hover:bg-accent/90 text-accent-foreground"
+                      onClick={handlePayment}
+                      disabled={payLoading}
+                    >
+                      {payLoading
+                        ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Processing…</>
+                        : `Pay ${selectedPlan ? formatCurrency(selectedPlan.price) : ''}`
+                      }
+                    </Button>
+                  </div>
+                </>
               )}
-
-              {/* Security note */}
-              <div className="flex items-start gap-2 bg-muted/40 rounded-lg p-3 text-xs text-muted-foreground">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0 text-accent mt-0.5" />
-                Your plan activates only after Lipila verifies your payment server-side.
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-2 pt-1">
-                <Button variant="outline" className="flex-1" onClick={() => setPayDialog(false)} disabled={payLoading}>
-                  Cancel
-                </Button>
-                <Button
-                  className="flex-1 bg-accent hover:bg-accent/90 text-accent-foreground"
-                  onClick={handlePayment}
-                  disabled={payLoading || payMethod === 'card'}
-                >
-                  {payLoading
-                    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Processing…</>
-                    : `Pay ${selectedPlan ? formatCurrency(selectedPlan.price) : ''}`
-                  }
-                </Button>
-              </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* FreshTunes Distribution Portal Modal (Opens Real Web with App Theme) */}
+      <FreshTunesPortalModal
+        open={showFreshTunesModal}
+        onOpenChange={setShowFreshTunesModal}
+        onProceedToUpload={() => {
+          setShowFreshTunesModal(false);
+          window.scrollTo({ top: 300, behavior: 'smooth' });
+        }}
+      />
     </div>
   );
 }

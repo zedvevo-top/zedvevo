@@ -16,7 +16,9 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/db/supabase';
+import { applyPaymentBenefits } from '@/lib/api';
 import { generateIdempotencyKey, formatCurrency } from '@/lib/utils';
+import CardPaymentForm from '@/components/payment/CardPaymentForm';
 import type { Nominee } from '@/types/index';
 
 interface VoteDialogProps {
@@ -135,11 +137,16 @@ export default function VoteDialog({
 
       // If Lipila returned a redirect URL (e.g. Card), open it
       if (data.payment_url) {
-        window.open(data.payment_url, '_blank');
+        try {
+          window.location.href = data.payment_url;
+        } catch {
+          window.open(data.payment_url, '_blank');
+        }
       }
 
       // If 0-amount or instant completed
-      if (data.status === 'completed') {
+      if (data.status === 'completed' || data.status === 'successful') {
+        await applyPaymentBenefits(paymentId).catch(console.error);
         setFlowState('successful');
         setStatusMessage('Payment successful — votes confirmed.');
         toast.success(`Thank you! ${voteCount} vote(s) confirmed.`);
@@ -169,16 +176,18 @@ export default function VoteDialog({
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'payments', filter: `id=eq.${paymentId}` },
-        (payload) => {
+        async (payload) => {
           const updated = payload.new as { status: string };
-          if (updated.status === 'completed') {
+          if (updated.status === 'completed' || updated.status === 'successful') {
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+            await applyPaymentBenefits(paymentId).catch(console.error);
             setFlowState('successful');
             setStatusMessage('Payment successful — votes confirmed.');
             toast.success('Payment verified! Your votes are counted.');
             onVoteSuccess?.();
           } else if (['failed', 'cancelled', 'insufficient_funds'].includes(updated.status)) {
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+            await applyPaymentBenefits(paymentId).catch(console.error);
             setFlowState('failed');
             setStatusMessage('Payment failed — no votes were added.');
           }
@@ -197,9 +206,10 @@ export default function VoteDialog({
           .maybeSingle();
 
         if (!error && data) {
-          if (data.status === 'completed') {
+          if (data.status === 'completed' || data.status === 'successful') {
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
             supabase.removeChannel(channel);
+            await applyPaymentBenefits(paymentId).catch(console.error);
             setFlowState('successful');
             setStatusMessage('Payment successful — votes confirmed.');
             toast.success(`Success! ${voteCount} vote(s) recorded.`);
@@ -210,6 +220,7 @@ export default function VoteDialog({
           if (['failed', 'cancelled', 'insufficient_funds'].includes(data.status)) {
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
             supabase.removeChannel(channel);
+            await applyPaymentBenefits(paymentId).catch(console.error);
             setFlowState('failed');
             setStatusMessage(
               data.failure_reason
@@ -350,27 +361,50 @@ export default function VoteDialog({
               </Select>
             </div>
 
-            {/* Phone number */}
-            {payMethod === 'mobile_money' && (
-              <div>
-                <Label className="text-xs font-medium text-muted-foreground">Mobile Money Number *</Label>
-                <Input
-                  type="tel"
-                  placeholder="e.g. 0977123456 or 260977123456"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="mt-1 text-sm h-9"
+            {payMethod === 'card' ? (
+              <div className="pt-2 border-t border-border/50">
+                <CardPaymentForm
+                  amount={totalAmount}
+                  paymentType="vote"
+                  metadata={{
+                    nominee_id: nominee.id,
+                    category_id: nominee.category_id,
+                    vote_count: voteCount,
+                    user_id: user?.id || null,
+                  }}
+                  onSuccess={(paymentId) => {
+                    setFlowState('successful');
+                    onVoteSuccess?.();
+                  }}
+                  onCancel={handleClose}
+                  buttonLabel={`Secure Pay ${formatCurrency(totalAmount)} & Cast ${voteCount} ${voteCount === 1 ? 'Vote' : 'Votes'}`}
                 />
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  You will receive an MNO push prompt on this device to authorize payment.
-                </p>
               </div>
-            )}
+            ) : (
+              <>
+                {/* Phone number */}
+                {payMethod === 'mobile_money' && (
+                  <div>
+                    <Label className="text-xs font-medium text-muted-foreground">Mobile Money Number *</Label>
+                    <Input
+                      type="tel"
+                      placeholder="e.g. 0977123456 or 260977123456"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="mt-1 text-sm h-9"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      You will receive an MNO push prompt on this device to authorize payment.
+                    </p>
+                  </div>
+                )}
 
-            <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/40 text-[11px] text-muted-foreground">
-              <ShieldCheck className="h-4 w-4 text-accent shrink-0" />
-              <span>Only backend verification of a successful Lipila payment creates valid votes.</span>
-            </div>
+                <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/40 text-[11px] text-muted-foreground">
+                  <ShieldCheck className="h-4 w-4 text-accent shrink-0" />
+                  <span>Only backend verification of a successful Lipila payment creates valid votes.</span>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -434,7 +468,7 @@ export default function VoteDialog({
         )}
 
         <DialogFooter className="gap-2 sm:gap-0">
-          {flowState === 'idle' && (
+          {flowState === 'idle' && payMethod === 'mobile_money' && (
             <>
               <Button variant="outline" size="sm" onClick={handleClose}>
                 Cancel

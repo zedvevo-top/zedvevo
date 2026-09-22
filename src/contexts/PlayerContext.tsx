@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
 import type { Song } from '@/types/index';
 import { incrementPlayCount } from '@/lib/api';
+import { analytics } from '@/lib/analytics';
 
 interface PlayerContextValue {
   currentSong: Song | null;
@@ -61,7 +62,25 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     audio.addEventListener('loadedmetadata', onMeta);
     audio.addEventListener('ended', onEnded);
 
-    audio.play().then(() => setPlaying(true)).catch(console.error);
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => setPlaying(true))
+        .catch(err => {
+          console.warn('Autoplay blocked, binding to first user interaction:', err);
+          const resumeOnInteraction = () => {
+            if (audioRef.current === audio) {
+              audio.play()
+                .then(() => setPlaying(true))
+                .catch(console.error);
+            }
+            document.removeEventListener('click', resumeOnInteraction);
+            document.removeEventListener('keydown', resumeOnInteraction);
+          };
+          document.addEventListener('click', resumeOnInteraction);
+          document.addEventListener('keydown', resumeOnInteraction);
+        });
+    }
 
     return () => {
       audio.removeEventListener('timeupdate', onTime);
@@ -77,11 +96,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (audioRef.current) audioRef.current.volume = muted ? 0 : volume;
   }, [volume, muted]);
 
-  // Count play at 30 s
+  // Count play at 10 seconds of active playback
   useEffect(() => {
-    if (currentTime >= 30 && currentSong && countedRef.current !== currentSong.id) {
+    if (currentTime >= 10 && currentSong && countedRef.current !== currentSong.id) {
       countedRef.current = currentSong.id;
       incrementPlayCount(currentSong.id);
+      setCurrentSong((prev) => (prev && prev.id === currentSong.id ? { ...prev, play_count: (Number(prev.play_count) || 0) + 1 } : prev));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zedvevo:song-played', { detail: { songId: currentSong.id } }));
+      }
     }
   }, [currentTime, currentSong]);
 
@@ -91,13 +114,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const next = useCallback(() => {
     if (!currentSong || !queue.length) return;
     const idx = queue.findIndex(s => s.id === currentSong.id);
-    if (idx >= 0 && idx < queue.length - 1) setCurrentSong(queue[idx + 1]);
+    if (idx >= 0 && idx < queue.length - 1) {
+      const nextSong = queue[idx + 1];
+      analytics.trackPlayerEvent('skip', nextSong.title, nextSong.artist_name || 'Unknown');
+      setCurrentSong(nextSong);
+    }
   }, [currentSong, queue]);
 
   const prev = useCallback(() => {
     if (!currentSong || !queue.length) return;
     const idx = queue.findIndex(s => s.id === currentSong.id);
-    if (idx > 0) setCurrentSong(queue[idx - 1]);
+    if (idx > 0) {
+      const prevSong = queue[idx - 1];
+      analytics.trackPlayerEvent('prev', prevSong.title, prevSong.artist_name || 'Unknown');
+      setCurrentSong(prevSong);
+    }
   }, [currentSong, queue]);
 
   useEffect(() => { nextRef.current = next; }, [next]);
@@ -105,6 +136,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const playSong = useCallback((song: Song, q: Song[] = []) => {
     setQueue(q);
     setCurrentSong(song);
+    analytics.trackPlayerEvent('play', song.title, song.artist_name || 'Unknown');
   }, []);
 
   const closeSong = useCallback(() => {
@@ -115,9 +147,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (playing) { audio.pause(); setPlaying(false); }
-    else { audio.play().then(() => setPlaying(true)).catch(console.error); }
-  }, [playing]);
+    if (playing) {
+      audio.pause();
+      setPlaying(false);
+      analytics.trackPlayerEvent('pause', currentSong?.title || 'Unknown', currentSong?.artist_name || 'Unknown');
+    }
+    else {
+      audio.play().then(() => {
+        setPlaying(true);
+        analytics.trackPlayerEvent('play', currentSong?.title || 'Unknown', currentSong?.artist_name || 'Unknown');
+      }).catch(console.error);
+    }
+  }, [playing, currentSong]);
 
   const seek = useCallback((time: number) => {
     if (audioRef.current) { audioRef.current.currentTime = time; setCurrentTime(time); }

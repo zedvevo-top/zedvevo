@@ -9,7 +9,7 @@ export type UserRole = 'user' | 'artist' | 'admin' | 'super_admin' | 'judge';
 export type ContentStatus = 'pending' | 'approved' | 'rejected';
 export type PaymentStatus = 'pending' | 'successful' | 'failed' | 'cancelled' | 'insufficient_funds' | 'invalid_transaction';
 export type PaymentMethod = 'mobile_money' | 'card';
-export type PlanType = 'k10_single' | 'k100_weekly' | 'k300_yearly';
+export type PlanType = 'k10_single' | 'k100_weekly' | 'k300_yearly' | 'k30_all_platforms' | string;
 export type PaymentType = 'vote' | 'nominee_registration' | 'plan' | 'subscription';
 
 export interface Profile {

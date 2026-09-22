@@ -77,19 +77,31 @@ export default function SongPage() {
 
   if (!song) return null
 
+  const artistName = (song.artist as any)?.stage_name || (song as any).artist_name || 'ZedVevo Artist';
+  const pageTitle = `${song.title} by ${artistName} — ZedVevo`;
+  const pageDescription = `Stream and download "${song.title}" by ${artistName} on ZedVevo.${song.album ? ` From the album ${song.album.title}.` : ''}`;
+  const rawCover = song.cover_url || '';
+  const absoluteCoverUrl = rawCover.startsWith('http://') || rawCover.startsWith('https://')
+    ? rawCover
+    : (rawCover ? `${typeof window !== 'undefined' ? window.location.origin : ''}${rawCover.startsWith('/') ? '' : '/'}${rawCover}` : `${typeof window !== 'undefined' ? window.location.origin : ''}/og-image.png`);
+
   return (
     <>
       <Helmet>
-        <title>{song.title} by {song.artist?.stage_name} — ZedVevo</title>
-        <meta property="og:title" content={`${song.title} by ${song.artist?.stage_name}`} />
-        <meta property="og:description" content={`Listen to ${song.title} on ZedVevo${song.album ? ` from the album ${song.album.title}` : ''}.`} />
-        <meta property="og:image" content={song.cover_url ? `${window.location.origin}${song.cover_url}` : `${window.location.origin}/placeholder.jpg`} />
+        <title>{pageTitle}</title>
+        <meta name="description" content={pageDescription} />
+        <meta property="og:site_name" content="ZedVevo" />
         <meta property="og:type" content="music.song" />
-        <meta property="og:url" content={window.location.href} />
+        <meta property="og:title" content={pageTitle} />
+        <meta property="og:description" content={pageDescription} />
+        <meta property="og:image" content={absoluteCoverUrl} />
+        <meta property="og:image:secure_url" content={absoluteCoverUrl} />
+        <meta property="og:url" content={typeof window !== 'undefined' ? window.location.href : ''} />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content={`${song.title} by ${song.artist?.stage_name}`} />
-        <meta name="twitter:description" content={`Listen to ${song.title} on ZedVevo.`} />
-        <meta name="twitter:image" content={song.cover_url ? `${window.location.origin}${song.cover_url}` : `${window.location.origin}/placeholder.jpg`} />
+        <meta name="twitter:site" content="@ZedVevo" />
+        <meta name="twitter:title" content={pageTitle} />
+        <meta name="twitter:description" content={pageDescription} />
+        <meta name="twitter:image" content={absoluteCoverUrl} />
       </Helmet>
       <div className="min-h-screen">
       {/* Hero */}

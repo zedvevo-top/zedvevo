@@ -215,52 +215,435 @@ export async function deleteBanner(id: string) {
 // ============================================================
 // ARTISTS
 // ============================================================
-export async function getFeaturedArtists(limit = 8): Promise<Artist[]> {
-  // Select artists and join their songs to aggregate the true plays
-  const { data, error } = await supabase
-    .from('artists')
-    .select('*, songs(play_count)')
-    .order('created_at', { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  
-  const list = Array.isArray(data) ? data : [];
-  return list.map((artist: any) => {
-    const songsPlays = (artist.songs || []).reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
-    const totalPlays = Math.max(Number(artist.play_count) || 0, songsPlays);
-    const displayName = artist.stage_name || artist.name || 'Artist';
-    const avatar = artist.avatar_url || artist.cover_image_url || artist.cover_url || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400';
-    return {
-      ...artist,
-      name: displayName,
-      stage_name: displayName,
-      avatar_url: avatar,
-      play_count: totalPlays,
-    };
+// Helper to normalize and match songs to artists on the fly
+function getArtistMatchedSongs(artist: any, allSongs: any[]): any[] {
+  const clean = (str: string) => (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+  const artistId = artist.id;
+  const artistUserId = artist.user_id;
+  const artistName = clean(artist.name);
+  const artistStageName = clean(artist.stage_name);
+
+  return allSongs.filter(song => {
+    if (song.artist_id && song.artist_id === artistId) return true;
+    if (song.user_id && artistUserId && song.user_id === artistUserId) return true;
+    
+    const songArtistClean = clean(song.artist_name);
+    if (songArtistClean && (songArtistClean === artistName || songArtistClean === artistStageName)) return true;
+    
+    // Fuzzy sub-string match for cases like "Emy Gizy ZMAirForce" vs "Emy-Gizy-ZM-AirForce"
+    if (songArtistClean && (artistName.includes(songArtistClean) || songArtistClean.includes(artistName) || 
+        artistStageName.includes(songArtistClean) || songArtistClean.includes(artistStageName))) {
+      return true;
+    }
+    return false;
   });
 }
 
-export async function getAllArtists(): Promise<Artist[]> {
-  const { data, error } = await supabase
+// ============================================================
+// UNIFIED ARTIST IMAGE RESOLUTION
+// ============================================================
+export const ARTIST_PLACEHOLDER_CDN = 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&h=400&fit=crop&q=80';
+
+// Known genuine artist photos and artwork mapped directly to their user IDs and stage names
+export const KNOWN_USER_PHOTOS: Record<string, { avatar: string; cover?: string }> = {
+  'd2b5f31e-ed63-404f-a03d-b542883e5d02': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/d2b5f31e-ed63-404f-a03d-b542883e5d02/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/d2b5f31e-ed63-404f-a03d-b542883e5d02/cover_1788635927155.jpg',
+  },
+  'e8ea1c94-54ab-4fc4-83c0-0ec9af7d2c69': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/e8ea1c94-54ab-4fc4-83c0-0ec9af7d2c69/avatar.png',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/e8ea1c94-54ab-4fc4-83c0-0ec9af7d2c69/cover_1788684772767.jpg',
+  },
+  'b6fbada8-001b-42d0-8a3b-c101a56f1663': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/b6fbada8-001b-42d0-8a3b-c101a56f1663/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/b6fbada8-001b-42d0-8a3b-c101a56f1663/cover_1788846764213.jpg',
+  },
+  '745d0a93-71a1-4a9d-a3bf-f268e9bffedc': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/745d0a93-71a1-4a9d-a3bf-f268e9bffedc/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/745d0a93-71a1-4a9d-a3bf-f268e9bffedc/cover_1788772948440.jpg',
+  },
+  '8940b34c-bf9e-4a93-9cc4-4f862b518182': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/8940b34c-bf9e-4a93-9cc4-4f862b518182/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/8940b34c-bf9e-4a93-9cc4-4f862b518182/cover_1788063237368.png',
+  },
+  'acadc944-516d-4139-b74b-cfab12a0214e': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/acadc944-516d-4139-b74b-cfab12a0214e/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/acadc944-516d-4139-b74b-cfab12a0214e/cover_1786469993127.jpg',
+  },
+  '8882de59-5632-407c-bc74-822352ebafe7': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/8882de59-5632-407c-bc74-822352ebafe7/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/8882de59-5632-407c-bc74-822352ebafe7/cover_1787481362738.jpg',
+  },
+  '7eb58b89-69e8-4035-8bef-41f4a714e9fb': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/7eb58b89-69e8-4035-8bef-41f4a714e9fb/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/7eb58b89-69e8-4035-8bef-41f4a714e9fb/cover_1788507374998.jpg',
+  },
+  'dcff1ede-9a69-4a98-ad25-fb460dadf81d': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/dcff1ede-9a69-4a98-ad25-fb460dadf81d/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/dcff1ede-9a69-4a98-ad25-fb460dadf81d/cover_1788457181036.jpg',
+  },
+  '470d8f2e-891d-4fff-8abb-a54601137486': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/470d8f2e-891d-4fff-8abb-a54601137486/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/470d8f2e-891d-4fff-8abb-a54601137486/cover_1788623449541.jpg',
+  },
+  'ca7a147c-3fe1-4c1c-872b-cc70fe5bccce': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/ca7a147c-3fe1-4c1c-872b-cc70fe5bccce/cover_1788532096308.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/ca7a147c-3fe1-4c1c-872b-cc70fe5bccce/cover_1788532096308.jpg',
+  },
+  '5a0f8979-1d9f-479b-869d-eb047185b625': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/5a0f8979-1d9f-479b-869d-eb047185b625/cover_1786536183137.png',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/5a0f8979-1d9f-479b-869d-eb047185b625/cover_1786536183137.png',
+  },
+  'eb52f91a-4588-4660-accb-81a5f45af1d2': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/eb52f91a-4588-4660-accb-81a5f45af1d2/cover_1789069900200.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/eb52f91a-4588-4660-accb-81a5f45af1d2/cover_1789069900200.jpg',
+  },
+  'bfeb2644-5c02-4645-8378-b4a20c49e28c': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/bfeb2644-5c02-4645-8378-b4a20c49e28c/avatar.jpg',
+  },
+  'bd760f9b-bf74-4871-8a82-ec0b6e8cc62d': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/bd760f9b-bf74-4871-8a82-ec0b6e8cc62d/avatar.jpg',
+  },
+  'dba5f7ef-2aaa-4724-9da8-8244ec3e25d3': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/dba5f7ef-2aaa-4724-9da8-8244ec3e25d3/avatar.webp',
+  },
+  '8fb6e02f-8826-40e0-b569-e5e72e84acf0': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/8fb6e02f-8826-40e0-b569-e5e72e84acf0/avatar.jpg',
+  },
+  '2c3fde16-f342-49f5-bae5-bdb7b3ee141d': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/2c3fde16-f342-49f5-bae5-bdb7b3ee141d/avatar.jpg',
+  },
+  'deaebeb8-51c0-4453-92c9-9d77190013d6': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/deaebeb8-51c0-4453-92c9-9d77190013d6/avatar.jpg',
+  },
+};
+
+export const KNOWN_ARTIST_PHOTOS: Record<string, { avatar: string; cover?: string }> = {
+  'bigpaulo': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/d2b5f31e-ed63-404f-a03d-b542883e5d02/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/d2b5f31e-ed63-404f-a03d-b542883e5d02/cover_1788635927155.jpg',
+  },
+  'pcxernation': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/e8ea1c94-54ab-4fc4-83c0-0ec9af7d2c69/avatar.png',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/e8ea1c94-54ab-4fc4-83c0-0ec9af7d2c69/cover_1788684772767.jpg',
+  },
+  'emygizyzmairforce': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/b6fbada8-001b-42d0-8a3b-c101a56f1663/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/b6fbada8-001b-42d0-8a3b-c101a56f1663/cover_1788846764213.jpg',
+  },
+  'emygizy': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/b6fbada8-001b-42d0-8a3b-c101a56f1663/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/b6fbada8-001b-42d0-8a3b-c101a56f1663/cover_1788846764213.jpg',
+  },
+  'youngkingj': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/745d0a93-71a1-4a9d-a3bf-f268e9bffedc/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/745d0a93-71a1-4a9d-a3bf-f268e9bffedc/cover_1788772948440.jpg',
+  },
+  'geeollosix': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/8940b34c-bf9e-4a93-9cc4-4f862b518182/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/8940b34c-bf9e-4a93-9cc4-4f862b518182/cover_1788063237368.png',
+  },
+  'enzymestreet': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/acadc944-516d-4139-b74b-cfab12a0214e/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/acadc944-516d-4139-b74b-cfab12a0214e/cover_1786469993127.jpg',
+  },
+  'vocalboy': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/8882de59-5632-407c-bc74-822352ebafe7/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/8882de59-5632-407c-bc74-822352ebafe7/cover_1787481362738.jpg',
+  },
+  'gcentnewbeing': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/7eb58b89-69e8-4035-8bef-41f4a714e9fb/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/7eb58b89-69e8-4035-8bef-41f4a714e9fb/cover_1788507374998.jpg',
+  },
+  'jamgojames': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/dcff1ede-9a69-4a98-ad25-fb460dadf81d/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/dcff1ede-9a69-4a98-ad25-fb460dadf81d/cover_1788457181036.jpg',
+  },
+  'chichiicem': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/470d8f2e-891d-4fff-8abb-a54601137486/avatar.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/470d8f2e-891d-4fff-8abb-a54601137486/cover_1788623449541.jpg',
+  },
+  'frenchik': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/ca7a147c-3fe1-4c1c-872b-cc70fe5bccce/cover_1788532096308.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/ca7a147c-3fe1-4c1c-872b-cc70fe5bccce/cover_1788532096308.jpg',
+  },
+  'xenon': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/5a0f8979-1d9f-479b-869d-eb047185b625/cover_1786536183137.png',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/5a0f8979-1d9f-479b-869d-eb047185b625/cover_1786536183137.png',
+  },
+  'manjaro': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/eb52f91a-4588-4660-accb-81a5f45af1d2/cover_1789069900200.jpg',
+    cover: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/eb52f91a-4588-4660-accb-81a5f45af1d2/cover_1789069900200.jpg',
+  },
+  'nkayzofficial': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/bfeb2644-5c02-4645-8378-b4a20c49e28c/avatar.jpg',
+  },
+  'bk46zm': {
+    avatar: 'https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/avatars/bd760f9b-bf74-4871-8a82-ec0b6e8cc62d/avatar.jpg',
+  },
+};
+
+function normalizeKey(str: string | null | undefined): string {
+  if (!str) return '';
+  return str.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Validates 'avatar_url' against Supabase storage paths/buckets.
+ * If rawUrl is a relative path or storage reference (e.g. 'avatars/xxx.jpg' or 'profiles/xxx.jpg'),
+ * it resolves the public URL from Supabase storage and confirms it is well-formed.
+ */
+export async function validateArtistStorageAvatar(rawUrl: string | null | undefined): Promise<string | null> {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  const trimmed = rawUrl.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return null;
+
+  // If it's already an absolute URL
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+
+  // If it's a Supabase storage path
+  try {
+    const parts = trimmed.split('/');
+    const bucket = parts.length > 1 ? parts[0] : 'avatars';
+    const path = parts.length > 1 ? parts.slice(1).join('/') : trimmed;
+    const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+    if (data?.publicUrl) {
+      return data.publicUrl;
+    }
+  } catch (err) {
+    console.warn('[validateArtistStorageAvatar] Storage resolution error:', err);
+  }
+
+  return null;
+}
+
+/**
+ * Unified artist image resolver function.
+ * Validates 'avatar_url' (or 'profile_image_url') against Supabase storage,
+ * checks metadata / profile / songs fallback chain, and defaults to a reliable
+ * placeholder CDN (Unsplash studio portrait) for every render.
+ */
+export function resolveArtistAvatar(
+  artist: Partial<Artist> | any | null | undefined,
+  fallbackOverride?: string | null
+): string {
+  if (!artist) {
+    return fallbackOverride || ARTIST_PLACEHOLDER_CDN;
+  }
+
+  // 1. Check known verified photos by user_id first (genuine uploaded artist photo)
+  const userId = artist.user_id || artist.id || artist.user?.id;
+  if (userId && KNOWN_USER_PHOTOS[userId]?.avatar) {
+    return KNOWN_USER_PHOTOS[userId].avatar;
+  }
+
+  // 2. Check known verified photos by stage_name or name
+  const nameKey = normalizeKey(artist.stage_name || artist.name);
+  if (nameKey && KNOWN_ARTIST_PHOTOS[nameKey]?.avatar) {
+    return KNOWN_ARTIST_PHOTOS[nameKey].avatar;
+  }
+
+  // 3. Direct explicit avatar_url or profile_image_url
+  let candidate = artist.avatar_url || artist.profile_image_url || fallbackOverride;
+
+  // Check if candidate is a relative Supabase storage path
+  if (candidate && typeof candidate === 'string' && !candidate.startsWith('http://') && !candidate.startsWith('https://')) {
+    try {
+      const parts = candidate.split('/');
+      const bucket = parts.length > 1 ? parts[0] : 'avatars';
+      const path = parts.length > 1 ? parts.slice(1).join('/') : candidate;
+      const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+      if (data?.publicUrl) {
+        candidate = data.publicUrl;
+      }
+    } catch {
+      // keep candidate as is
+    }
+  }
+
+  // 4. Artist cover/image metadata
+  if (!candidate || typeof candidate !== 'string' || !candidate.trim() || candidate === 'null' || candidate === 'undefined') {
+    candidate = artist.cover_image_url || artist.cover_url;
+  }
+
+  // 5. Profile user avatar
+  if (!candidate || typeof candidate !== 'string' || !candidate.trim() || candidate === 'null' || candidate === 'undefined') {
+    if (artist.user?.avatar_url) {
+      candidate = artist.user.avatar_url;
+    }
+  }
+
+  // 6. Songs cover fallback if songs array is available on artist (their own song artwork!)
+  if (!candidate || typeof candidate !== 'string' || !candidate.trim() || candidate === 'null' || candidate === 'undefined') {
+    if (Array.isArray(artist.songs) && artist.songs.length > 0) {
+      const songCover = artist.songs.find((s: any) => s.cover_url)?.cover_url;
+      if (songCover) candidate = songCover;
+    }
+  }
+
+  // 7. Final fallback to reliable placeholder CDN (Unsplash source)
+  if (!candidate || typeof candidate !== 'string' || !candidate.trim() || candidate === 'null' || candidate === 'undefined') {
+    return ARTIST_PLACEHOLDER_CDN;
+  }
+
+  return candidate.trim();
+}
+
+/**
+ * Asynchronously validates avatar against Supabase storage and profiles database.
+ */
+export async function resolveArtistAvatarWithStorage(
+  artist: Partial<Artist> | any,
+  matchedSongs?: any[]
+): Promise<string> {
+  if (!artist) return ARTIST_PLACEHOLDER_CDN;
+
+  const avatar = artist.avatar_url || artist.profile_image_url;
+
+  // Validate avatar against storage if provided
+  if (avatar) {
+    const validated = await validateArtistStorageAvatar(avatar);
+    if (validated) return validated;
+  }
+
+  // Validate against user profiles table if user_id exists
+  if (!avatar && artist.user_id) {
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', artist.user_id)
+        .maybeSingle();
+
+      if (profile?.avatar_url) {
+        const validated = await validateArtistStorageAvatar(profile.avatar_url);
+        if (validated) return validated;
+      }
+    } catch (err) {
+      console.warn('[resolveArtistAvatarWithStorage] Profile fetch error:', err);
+    }
+  }
+
+  // Fallback to matched song cover
+  if (!avatar && matchedSongs && matchedSongs.length > 0) {
+    const songWithCover = matchedSongs.find((s: any) => s.cover_url);
+    if (songWithCover?.cover_url) {
+      const validated = await validateArtistStorageAvatar(songWithCover.cover_url);
+      if (validated) return validated;
+    }
+  }
+
+  return resolveArtistAvatar(artist);
+}
+
+export async function getFeaturedArtists(limit = 8): Promise<Artist[]> {
+  const { data: artistsData, error: artistsErr } = await supabase
     .from('artists')
-    .select('*, songs(play_count)')
-    .order('name');
-  if (error) throw error;
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (artistsErr) throw artistsErr;
+
+  const { data: songsData, error: songsErr } = await supabase
+    .from('songs')
+    .select('id, play_count, cover_url, artist_name, user_id, artist_id')
+    .eq('status', 'approved');
   
-  const list = Array.isArray(data) ? data : [];
-  return list.map((artist: any) => {
-    const songsPlays = (artist.songs || []).reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
+  const allSongs = Array.isArray(songsData) ? songsData : [];
+  const list = Array.isArray(artistsData) ? artistsData : [];
+
+  const mapped = list.map((artist: any) => {
+    const matchedSongs = getArtistMatchedSongs(artist, allSongs);
+    const songsPlays = matchedSongs.reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
     const totalPlays = Math.max(Number(artist.play_count) || 0, songsPlays);
     const displayName = artist.stage_name || artist.name || 'Artist';
-    const avatar = artist.avatar_url || artist.cover_image_url || artist.cover_url || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400';
+    
+    // Unified resolver validates against storage, matched songs, and CDN fallback
+    const avatar = resolveArtistAvatar({
+      ...artist,
+      songs: matchedSongs,
+    });
+
     return {
       ...artist,
       name: displayName,
       stage_name: displayName,
       avatar_url: avatar,
       play_count: totalPlays,
+      matchedSongsCount: matchedSongs.length,
     };
   });
+
+  // Prioritize real original registered artists (non-generic names and have matched songs)
+  mapped.sort((a, b) => {
+    const aIsGeneric = a.name.toLowerCase() === 'artist' || a.name.toLowerCase().includes('zedvevo artist') || a.name.toLowerCase() === 'top';
+    const bIsGeneric = b.name.toLowerCase() === 'artist' || b.name.toLowerCase().includes('zedvevo artist') || b.name.toLowerCase() === 'top';
+
+    if (aIsGeneric && !bIsGeneric) return 1;
+    if (!aIsGeneric && bIsGeneric) return -1;
+
+    if (a.matchedSongsCount > 0 && b.matchedSongsCount === 0) return -1;
+    if (a.matchedSongsCount === 0 && b.matchedSongsCount > 0) return 1;
+
+    return b.play_count - a.play_count;
+  });
+
+  return mapped.slice(0, limit);
+}
+
+export async function getAllArtists(): Promise<Artist[]> {
+  const { data: artistsData, error: artistsErr } = await supabase
+    .from('artists')
+    .select('*')
+    .order('name');
+  if (artistsErr) throw artistsErr;
+
+  const { data: songsData, error: songsErr } = await supabase
+    .from('songs')
+    .select('id, play_count, cover_url, artist_name, user_id, artist_id')
+    .eq('status', 'approved');
+  
+  const allSongs = Array.isArray(songsData) ? songsData : [];
+  const list = Array.isArray(artistsData) ? artistsData : [];
+
+  const mapped = list.map((artist: any) => {
+    const matchedSongs = getArtistMatchedSongs(artist, allSongs);
+    const songsPlays = matchedSongs.reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
+    const totalPlays = Math.max(Number(artist.play_count) || 0, songsPlays);
+    const displayName = artist.stage_name || artist.name || 'Artist';
+    
+    // Unified resolver validates against storage, matched songs, and CDN fallback
+    const avatar = resolveArtistAvatar({
+      ...artist,
+      songs: matchedSongs,
+    });
+
+    return {
+      ...artist,
+      name: displayName,
+      stage_name: displayName,
+      avatar_url: avatar,
+      play_count: totalPlays,
+      matchedSongsCount: matchedSongs.length,
+    };
+  });
+
+  // Prioritize real original registered artists (non-generic names and have matched songs)
+  mapped.sort((a, b) => {
+    const aIsGeneric = a.name.toLowerCase() === 'artist' || a.name.toLowerCase().includes('zedvevo artist') || a.name.toLowerCase() === 'top';
+    const bIsGeneric = b.name.toLowerCase() === 'artist' || b.name.toLowerCase().includes('zedvevo artist') || b.name.toLowerCase() === 'top';
+
+    if (aIsGeneric && !bIsGeneric) return 1;
+    if (!aIsGeneric && bIsGeneric) return -1;
+
+    if (a.matchedSongsCount > 0 && b.matchedSongsCount === 0) return -1;
+    if (a.matchedSongsCount === 0 && b.matchedSongsCount > 0) return 1;
+
+    return b.play_count - a.play_count;
+  });
+
+  return mapped;
 }
 
 // ============================================================
@@ -420,6 +803,129 @@ export async function autoApprovNominee(nomineeId: string, paymentId?: string) {
     .single();
   if (error) throw error;
   return data;
+}
+
+// Automatically apply payment benefits (votes, nominations, subscriptions) based on status
+export async function applyPaymentBenefits(paymentId: string) {
+  const { data: p, error: pError } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('id', paymentId)
+    .single();
+  
+  if (pError || !p) {
+    console.error('applyPaymentBenefits error fetching payment:', pError);
+    return;
+  }
+
+  if (p.status === 'successful' || p.status === 'completed') {
+    // 1. If it's a vote payment, insert the votes and increment nominee total_votes
+    if (p.payment_type === 'vote' && p.metadata?.nominee_id) {
+      const nomineeId = p.metadata.nominee_id;
+      const voteCount = p.metadata.vote_count || Math.max(1, Math.floor(p.amount / 5));
+      
+      const { data: existingVote } = await supabase
+        .from('votes')
+        .select('id')
+        .eq('payment_id', p.id)
+        .maybeSingle();
+
+      if (!existingVote) {
+        await supabase.from('votes').insert({
+          nominee_id: nomineeId,
+          user_id: p.user_id || null,
+          payment_id: p.id,
+          vote_count: voteCount,
+          payment_status: 'successful',
+        });
+
+        const { data: nom } = await supabase
+          .from('nominees')
+          .select('total_votes')
+          .eq('id', nomineeId)
+          .single();
+        
+        const newTotal = (nom?.total_votes || 0) + voteCount;
+        await supabase
+          .from('nominees')
+          .update({ total_votes: newTotal })
+          .eq('id', nomineeId);
+      }
+    } 
+    // 2. If it's nominee registration, approve the nominee
+    else if (p.payment_type === 'nominee_registration' && p.metadata?.nominee_id) {
+      await supabase.from('nominees').update({
+        registration_status: 'completed',
+        nomination_status: 'approved',
+      }).eq('id', p.metadata.nominee_id);
+    }
+    // 3. If it's a subscription or upload plan, activate user subscription
+    else if ((p.payment_type === 'subscription' || p.payment_type === 'plan') && p.user_id && (p.plan_id || p.metadata?.plan_id)) {
+      const planId = p.plan_id || p.metadata?.plan_id;
+      
+      // Fetch plan details from upload_plans
+      const { data: plan } = await supabase
+        .from('upload_plans')
+        .select('*')
+        .eq('id', planId)
+        .maybeSingle();
+
+      const validityDays = plan?.validity_days || (p.metadata?.plan_type === 'k300_yearly' ? 365 : p.metadata?.plan_type === 'k100_weekly' ? 7 : p.metadata?.plan_type === 'k30_all_platforms' ? 8 : 30);
+      const planType = plan?.plan_type || p.metadata?.plan_type || 'k10_single';
+      const uploadsAllowed = plan?.uploads_allowed !== undefined ? plan?.uploads_allowed : (planType === 'k10_single' || planType === 'k30_all_platforms' ? 1 : null);
+
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + validityDays * 24 * 60 * 60 * 1000).toISOString();
+
+      // Deactivate any existing active subscriptions for this user
+      await supabase
+        .from('user_subscriptions')
+        .update({ is_active: false })
+        .eq('user_id', p.user_id);
+
+      // Insert new active subscription
+      const { error: subInsertErr } = await supabase
+        .from('user_subscriptions')
+        .insert({
+          user_id: p.user_id,
+          plan_id: planId,
+          plan_type: planType,
+          uploads_used: 0,
+          uploads_allowed: uploadsAllowed,
+          activated_at: new Date().toISOString(),
+          expires_at: expiresAt,
+          is_active: true,
+        });
+
+      if (subInsertErr) {
+        console.warn('user_subscriptions insert fallback error:', subInsertErr);
+      }
+
+      // Also create an in-app notification for the user
+      try {
+        await supabase.from('notifications').insert({
+          user_id: p.user_id,
+          title: 'Plan Activated!',
+          message: `Your ${plan?.name || 'Upload'} plan is now active. You can start uploading content immediately.`,
+          type: 'success',
+          notification_type: 'subscription_activated',
+        });
+      } catch {
+        // ignore notification error
+      }
+    }
+  } else if (['failed', 'cancelled', 'insufficient_funds'].includes(p.status)) {
+    if (p.payment_type === 'vote') {
+      await supabase.from('votes').update({
+        payment_status: 'failed',
+      }).eq('id', p.id);
+    } else if (p.payment_type === 'nominee_registration' && p.metadata?.nominee_id) {
+      await supabase.from('nominees').update({
+        registration_status: 'failed',
+        nomination_status: 'rejected',
+      }).eq('id', p.metadata.nominee_id);
+    }
+  }
 }
 
 // Auto-create vote with 0.00 payment

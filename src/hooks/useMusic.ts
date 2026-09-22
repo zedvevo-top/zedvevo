@@ -2,11 +2,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, isConfigured, type Song, type Album, type Artist, type Playlist } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { mockSongs, mockAlbums, mockArtists } from '@/lib/mockData'
+import { resolveArtistAvatar } from '@/lib/api'
 
 // Helper to normalize artist objects across different schema variants
 export function normalizeArtist(a: any): Artist {
   const name = a.name || a.stage_name || 'Artist'
-  const avatar = a.avatar_url || a.cover_url || a.cover_image_url || a.user?.avatar_url || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400'
+  const firstSongCover = (a.songs || []).find((s: any) => s.cover_url)?.cover_url;
+  const avatar = resolveArtistAvatar(a, firstSongCover);
   const cover = a.cover_url || a.cover_image_url || avatar
   return {
     ...a,
@@ -22,10 +24,10 @@ export function normalizeArtist(a: any): Artist {
     is_featured: a.is_featured ?? a.featured ?? false,
     featured: a.is_featured ?? a.featured ?? false,
     verified: a.verified ?? true,
-    play_count: a.play_count ?? a.total_streams ?? 0,
-    monthly_listeners: a.monthly_listeners ?? a.play_count ?? 12500,
-    total_followers: a.total_followers ?? Math.floor((a.play_count || 1000) / 3),
-    total_streams: a.total_streams ?? a.play_count ?? 0,
+    play_count: Number(a.play_count) || 0,
+    monthly_listeners: a.monthly_listeners !== undefined && a.monthly_listeners !== null ? Number(a.monthly_listeners) : (Number(a.play_count) || 0),
+    total_followers: a.total_followers !== undefined && a.total_followers !== null ? Number(a.total_followers) : Math.max(0, Math.floor((Number(a.play_count) || 0) * 0.3)),
+    total_streams: Number(a.play_count) || Number(a.total_streams) || 0,
     website: a.website || null,
     social_links: a.social_links || {},
     created_at: a.created_at || new Date().toISOString(),
@@ -190,20 +192,85 @@ export function useArtists(limit = 50) {
     queryKey: ['artists', { limit }],
     queryFn: async () => {
       if (!isConfigured) return mockArtists.map(normalizeArtist).slice(0, limit)
-      const { data, error } = await supabase
+      const { data: artists, error } = await supabase
         .from('artists')
-        .select('*, songs(play_count)')
-        .order('play_count', { ascending: false })
-        .limit(limit)
+        .select('*')
 
-      if (error || !data || data.length === 0) {
+      if (error || !artists || artists.length === 0) {
         return mockArtists.map(normalizeArtist).slice(0, limit)
       }
-      return data.map((artist: any) => {
-        const songsPlays = (artist.songs || []).reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
-        const totalPlays = Math.max(Number(artist.play_count) || 0, songsPlays);
-        return normalizeArtist({ ...artist, play_count: totalPlays });
-      })
+
+      const { data: songs } = await supabase
+        .from('songs')
+        .select('id, play_count, cover_url, artist_name, user_id, artist_id')
+        .eq('status', 'approved')
+
+      const clean = (str: string) => (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+      const allSongs = Array.isArray(songs) ? songs : [];
+      const artistList = [...artists];
+      const existingNames = new Set(artistList.map((a: any) => clean(a.stage_name || a.name)));
+
+      allSongs.forEach((song) => {
+        if (!song.artist_name) return;
+        const cName = clean(song.artist_name);
+        if (cName && !existingNames.has(cName)) {
+          existingNames.add(cName);
+          artistList.push({
+            id: song.artist_id || song.user_id || `artist-${cName}`,
+            user_id: song.user_id,
+            name: song.artist_name,
+            stage_name: song.artist_name,
+            avatar_url: song.cover_url,
+            cover_url: song.cover_url,
+            verified: true,
+            bio: 'Official ZedVevo Artist',
+            created_at: new Date().toISOString(),
+          });
+        }
+      });
+
+      const mapped = artistList.map((artist: any) => {
+        const artistId = artist.id;
+        const artistUserId = artist.user_id;
+        const artistName = clean(artist.name);
+        const artistStageName = clean(artist.stage_name);
+
+        const matchedSongs = allSongs.filter(song => {
+          if (song.artist_id && song.artist_id === artistId) return true;
+          if (song.user_id && artistUserId && song.user_id === artistUserId) return true;
+          const songArtistClean = clean(song.artist_name);
+          if (songArtistClean && (songArtistClean === artistName || songArtistClean === artistStageName)) return true;
+          if (songArtistClean && (artistName.includes(songArtistClean) || songArtistClean.includes(artistName) || 
+              artistStageName.includes(songArtistClean) || songArtistClean.includes(artistStageName))) {
+            return true;
+          }
+          return false;
+        });
+
+        const songsPlays = matchedSongs.reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
+        const totalPlays = matchedSongs.length > 0 ? songsPlays : (Number(artist.play_count) || 0);
+        return normalizeArtist({ ...artist, songs: matchedSongs, play_count: totalPlays });
+      });
+
+      // Prioritize real active artists
+      mapped.sort((a: any, b: any) => {
+        const aName = a.name || '';
+        const bName = b.name || '';
+        const aIsGeneric = aName.toLowerCase() === 'artist' || aName.toLowerCase().includes('zedvevo artist') || aName.toLowerCase() === 'top';
+        const bIsGeneric = bName.toLowerCase() === 'artist' || bName.toLowerCase().includes('zedvevo artist') || bName.toLowerCase() === 'top';
+
+        if (aIsGeneric && !bIsGeneric) return 1;
+        if (!aIsGeneric && bIsGeneric) return -1;
+
+        const aSongs = (a.songs || []).length;
+        const bSongs = (b.songs || []).length;
+        if (aSongs > 0 && bSongs === 0) return -1;
+        if (aSongs === 0 && bSongs > 0) return 1;
+
+        return (b.play_count || 0) - (a.play_count || 0);
+      });
+
+      return mapped.slice(0, limit);
     },
   })
 }
@@ -213,20 +280,85 @@ export function useFeaturedArtists(limit = 10) {
     queryKey: ['artists', 'featured', limit],
     queryFn: async () => {
       if (!isConfigured) return mockArtists.filter(a => a.featured || a.is_featured).map(normalizeArtist).slice(0, limit)
-      const { data, error } = await supabase
+      const { data: artists, error } = await supabase
         .from('artists')
-        .select('*, songs(play_count)')
-        .order('play_count', { ascending: false })
-        .limit(limit)
+        .select('*')
 
-      if (error || !data || data.length === 0) {
+      if (error || !artists || artists.length === 0) {
         return mockArtists.map(normalizeArtist).slice(0, limit)
       }
-      return data.map((artist: any) => {
-        const songsPlays = (artist.songs || []).reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
-        const totalPlays = Math.max(Number(artist.play_count) || 0, songsPlays);
-        return normalizeArtist({ ...artist, play_count: totalPlays });
-      })
+
+      const { data: songs } = await supabase
+        .from('songs')
+        .select('id, play_count, cover_url, artist_name, user_id, artist_id')
+        .eq('status', 'approved')
+
+      const clean = (str: string) => (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+      const allSongs = Array.isArray(songs) ? songs : [];
+      const artistList = [...artists];
+      const existingNames = new Set(artistList.map((a: any) => clean(a.stage_name || a.name)));
+
+      allSongs.forEach((song) => {
+        if (!song.artist_name) return;
+        const cName = clean(song.artist_name);
+        if (cName && !existingNames.has(cName)) {
+          existingNames.add(cName);
+          artistList.push({
+            id: song.artist_id || song.user_id || `artist-${cName}`,
+            user_id: song.user_id,
+            name: song.artist_name,
+            stage_name: song.artist_name,
+            avatar_url: song.cover_url,
+            cover_url: song.cover_url,
+            verified: true,
+            bio: 'Official ZedVevo Artist',
+            created_at: new Date().toISOString(),
+          });
+        }
+      });
+
+      const mapped = artistList.map((artist: any) => {
+        const artistId = artist.id;
+        const artistUserId = artist.user_id;
+        const artistName = clean(artist.name);
+        const artistStageName = clean(artist.stage_name);
+
+        const matchedSongs = allSongs.filter(song => {
+          if (song.artist_id && song.artist_id === artistId) return true;
+          if (song.user_id && artistUserId && song.user_id === artistUserId) return true;
+          const songArtistClean = clean(song.artist_name);
+          if (songArtistClean && (songArtistClean === artistName || songArtistClean === artistStageName)) return true;
+          if (songArtistClean && (artistName.includes(songArtistClean) || songArtistClean.includes(artistName) || 
+              artistStageName.includes(songArtistClean) || songArtistClean.includes(artistStageName))) {
+            return true;
+          }
+          return false;
+        });
+
+        const songsPlays = matchedSongs.reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
+        const totalPlays = matchedSongs.length > 0 ? songsPlays : (Number(artist.play_count) || 0);
+        return normalizeArtist({ ...artist, songs: matchedSongs, play_count: totalPlays });
+      });
+
+      // Prioritize real active artists
+      mapped.sort((a: any, b: any) => {
+        const aName = a.name || '';
+        const bName = b.name || '';
+        const aIsGeneric = aName.toLowerCase() === 'artist' || aName.toLowerCase().includes('zedvevo artist') || aName.toLowerCase() === 'top';
+        const bIsGeneric = bName.toLowerCase() === 'artist' || bName.toLowerCase().includes('zedvevo artist') || bName.toLowerCase() === 'top';
+
+        if (aIsGeneric && !bIsGeneric) return 1;
+        if (!aIsGeneric && bIsGeneric) return -1;
+
+        const aSongs = (a.songs || []).length;
+        const bSongs = (b.songs || []).length;
+        if (aSongs > 0 && bSongs === 0) return -1;
+        if (aSongs === 0 && bSongs > 0) return 1;
+
+        return (b.play_count || 0) - (a.play_count || 0);
+      });
+
+      return mapped.slice(0, limit);
     },
   })
 }
@@ -239,19 +371,45 @@ export function useArtist(id: string) {
         const found = mockArtists.find(a => a.id === id) || mockArtists[0]
         return normalizeArtist(found)
       }
-      const { data, error } = await supabase
+      const { data: artist, error } = await supabase
         .from('artists')
-        .select('*, songs(play_count)')
+        .select('*')
         .eq('id', id)
         .single()
 
-      if (error || !data) {
+      if (error || !artist) {
         const found = mockArtists.find(a => a.id === id) || mockArtists[0]
         return normalizeArtist(found)
       }
-      const songsPlays = (data.songs || []).reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
-      const totalPlays = Math.max(Number(data.play_count) || 0, songsPlays);
-      return normalizeArtist({ ...data, play_count: totalPlays })
+
+      const { data: songs } = await supabase
+        .from('songs')
+        .select('id, play_count, cover_url, artist_name, user_id, artist_id')
+        .eq('status', 'approved')
+
+      const clean = (str: string) => (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+      const allSongs = Array.isArray(songs) ? songs : [];
+
+      const artistId = artist.id;
+      const artistUserId = artist.user_id;
+      const artistName = clean(artist.name);
+      const artistStageName = clean(artist.stage_name);
+
+      const matchedSongs = allSongs.filter(song => {
+        if (song.artist_id && song.artist_id === artistId) return true;
+        if (song.user_id && artistUserId && song.user_id === artistUserId) return true;
+        const songArtistClean = clean(song.artist_name);
+        if (songArtistClean && (songArtistClean === artistName || songArtistClean === artistStageName)) return true;
+        if (songArtistClean && (artistName.includes(songArtistClean) || songArtistClean.includes(artistName) || 
+            artistStageName.includes(songArtistClean) || songArtistClean.includes(artistStageName))) {
+          return true;
+        }
+        return false;
+      });
+
+      const songsPlays = matchedSongs.reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
+      const totalPlays = matchedSongs.length > 0 ? songsPlays : (Number(artist.play_count) || 0);
+      return normalizeArtist({ ...artist, songs: matchedSongs, play_count: totalPlays })
     },
     enabled: !!id,
   })

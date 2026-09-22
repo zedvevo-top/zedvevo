@@ -13,6 +13,7 @@ import CDLogo from '@/components/ui/CDLogo';
 import SearchBar from '@/components/search/SearchBar';
 import NotificationBell from '@/components/notifications/NotificationBell';
 import DonationDialog from '@/components/donation/DonationDialog';
+import InstallAppButton from '@/components/layout/InstallAppButton';
 
 const navLinks = [
   { to: '/', label: 'Home' },
@@ -119,6 +120,14 @@ export default function Header() {
               <Heart className="h-4 w-4 text-destructive fill-destructive" />
             </Button>
 
+            {/* APK Installer Button */}
+            <div className="hidden sm:block">
+              <InstallAppButton variant="header" />
+            </div>
+            <div className="sm:hidden">
+              <InstallAppButton variant="header-icon" />
+            </div>
+
             {/* Notification bell */}
             <NotificationBell />
 
@@ -187,6 +196,10 @@ export default function Header() {
                     <Heart className="h-4 w-4 shrink-0 text-destructive fill-destructive" />
                     Donate
                   </button>
+                  {/* Mobile Install APK Option */}
+                  <div onClick={() => setMobileOpen(false)}>
+                    <InstallAppButton variant="menu-item" />
+                  </div>
                   {navLinks.map(({ to, label, icon: Icon }) => (
                     <Link
                       key={to}

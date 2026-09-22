@@ -134,23 +134,27 @@ export default function SharedItemPage() {
   let description = 'Stream music, watch videos, and vote on ZedVevo';
   let imageUrl = '';
   const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
   if (type === 'song') {
     const artist = data.artist_name || data.artist || 'ZedVevo Artist';
     title = `${data.title} - ${artist} | ZedVevo`;
     description = `Stream and download "${data.title}" by ${artist} on ZedVevo.`;
-    imageUrl = data.cover_url || '';
+    const raw = data.cover_url || '';
+    imageUrl = raw.startsWith('http://') || raw.startsWith('https://') ? raw : (raw ? `${origin}${raw.startsWith('/') ? '' : '/'}${raw}` : `${origin}/og-image.png`);
   } else if (type === 'video') {
     const artist = data.artist_name || 'ZedVevo';
     title = `${data.title} - ${artist} (Official Video) | ZedVevo`;
     description = data.description || `Watch "${data.title}" by ${artist} on ZedVevo.`;
-    imageUrl = data.thumbnail_url || '';
+    const raw = data.thumbnail_url || '';
+    imageUrl = raw.startsWith('http://') || raw.startsWith('https://') ? raw : (raw ? `${origin}${raw.startsWith('/') ? '' : '/'}${raw}` : `${origin}/og-image.png`);
   } else if (type === 'nominee') {
     title = `Vote for ${data.name} | ZedVevo Awards`;
     description = data.song_title
       ? `Vote for ${data.name} nominated for "${data.song_title}". Every vote counts!`
       : `Vote for ${data.name} in the ZedVevo Awards. Every vote counts!`;
-    imageUrl = data.photo_url || '';
+    const raw = data.photo_url || data.avatar_url || '';
+    imageUrl = raw.startsWith('http://') || raw.startsWith('https://') ? raw : (raw ? `${origin}${raw.startsWith('/') ? '' : '/'}${raw}` : `${origin}/og-image.png`);
   }
 
   return (
@@ -158,14 +162,18 @@ export default function SharedItemPage() {
       <Helmet>
         <title>{title}</title>
         <meta name="description" content={description} />
+        <meta property="og:site_name" content="ZedVevo" />
+        <meta property="og:type" content={type === 'song' ? 'music.song' : type === 'video' ? 'video.other' : 'website'} />
         <meta property="og:title" content={title} />
         <meta property="og:description" content={description} />
-        {imageUrl && <meta property="og:image" content={imageUrl} />}
+        <meta property="og:image" content={imageUrl} />
+        <meta property="og:image:secure_url" content={imageUrl} />
         <meta property="og:url" content={currentUrl} />
         <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:site" content="@ZedVevo" />
         <meta name="twitter:title" content={title} />
         <meta name="twitter:description" content={description} />
-        {imageUrl && <meta name="twitter:image" content={imageUrl} />}
+        <meta name="twitter:image" content={imageUrl} />
       </Helmet>
 
       {/* Video Player Modal if video type is playing */}

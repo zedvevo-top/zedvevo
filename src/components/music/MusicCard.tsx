@@ -20,6 +20,7 @@ interface MusicCardProps {
 export default function MusicCard({ song, isPlaying, onPlay, compact = false }: MusicCardProps) {
   const { user } = useAuth();
   const [liked, setLiked] = useState(song.liked ?? false);
+  const [likeCount, setLikeCount] = useState(song.like_count || 0);
   const [saved, setSaved] = useState(song.saved ?? false);
   const [downloading, setDownloading] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -34,6 +35,7 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
     try {
       const result = await toggleLike(user.id, song.id, 'song');
       setLiked(result);
+      setLikeCount(prev => result ? prev + 1 : Math.max(0, prev - 1));
       toast.success(result ? 'Added to liked' : 'Removed from liked');
     } catch { toast.error('Failed to update like'); }
   };
@@ -159,8 +161,9 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
           <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
             <span className="text-xs text-muted-foreground">{song.play_count.toLocaleString()} plays</span>
             <div className="flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleLike}>
+              <Button variant="ghost" size="sm" className="h-7 px-1.5 gap-1 text-xs" onClick={handleLike} title={`${likeCount} Likes`}>
                 <Heart className={`h-3.5 w-3.5 ${liked ? 'fill-destructive text-destructive' : ''}`} />
+                <span>{likeCount.toLocaleString()}</span>
               </Button>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleSave}>
                 <BookmarkPlus className={`h-3.5 w-3.5 ${saved ? 'fill-accent text-accent' : ''}`} />
@@ -248,7 +251,7 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
                 </p>
               </div>
               <div className="bg-muted rounded-lg py-2 px-1">
-                <p className="text-sm font-bold">{song.like_count.toLocaleString()}</p>
+                <p className="text-sm font-bold">{likeCount.toLocaleString()}</p>
                 <p className="text-[10px] text-muted-foreground flex items-center justify-center gap-0.5 mt-0.5">
                   <Heart className="h-3 w-3" />Likes
                 </p>

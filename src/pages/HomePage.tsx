@@ -12,6 +12,7 @@ import VideoCard from '@/components/video/VideoCard';
 import VideoPlayer from '@/components/video/VideoPlayer';
 import { usePlayer } from '@/contexts/PlayerContext';
 import AdBanner from '@/components/ads/AdBanner';
+import ArtistProfilePreview from '@/components/artist/ArtistProfilePreview';
 
 export default function HomePage() {
   const [trendingSongs, setTrendingSongs] = useState<Song[]>([]);
@@ -22,6 +23,8 @@ export default function HomePage() {
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentVideo, setCurrentVideo] = useState<Video | null>(null);
+  const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
+  const [artistPreviewOpen, setArtistPreviewOpen] = useState(false);
   const { currentSong, playSong } = usePlayer();
   const playerRef = useRef<HTMLDivElement>(null);
 
@@ -127,7 +130,16 @@ export default function HomePage() {
       {/* Featured Artists — ordered by newest */}
       <SectionRow title="New Artists" viewAllLink="/artists" loading={loading} grid skeletonCount={6} skeletonClassName="aspect-square">
         {artists.map(artist => (
-          <Link key={artist.id} to={`/artist/${artist.id}`} className="text-center group block">
+          <button
+            key={artist.id}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              setSelectedArtist(artist);
+              setArtistPreviewOpen(true);
+            }}
+            className="text-center group block w-full focus:outline-none cursor-pointer"
+          >
             <div className="h-20 w-20 md:h-28 md:w-28 rounded-full overflow-hidden mx-auto mb-2 bg-muted border-2 border-border group-hover:border-primary group-hover:scale-105 transition-all duration-200">
               {(artist.avatar_url || artist.cover_image_url || artist.cover_url)
                 ? <img src={artist.avatar_url || artist.cover_image_url || artist.cover_url} alt={artist.stage_name || artist.name || 'Artist'} className="w-full h-full object-cover" />
@@ -136,7 +148,7 @@ export default function HomePage() {
             </div>
             <p className="text-xs font-semibold truncate text-foreground group-hover:text-primary transition-colors">{artist.stage_name || artist.name || 'Artist'}</p>
             <p className="text-[10px] text-muted-foreground">{(artist.play_count || 0).toLocaleString()} plays</p>
-          </Link>
+          </button>
         ))}
       </SectionRow>
 
@@ -176,6 +188,12 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      <ArtistProfilePreview
+        artist={selectedArtist}
+        open={artistPreviewOpen}
+        onClose={() => setArtistPreviewOpen(false)}
+      />
     </div>
   );
 }

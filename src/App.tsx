@@ -23,6 +23,7 @@ import AdminPaymentGatewayPage from '@/pages/admin/AdminPaymentGatewayPage';
 import { Navigate as NavRedirect } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { routes } from './routes';
+import { AdminNotificationListener } from '@/components/admin/AdminNotificationListener';
 
 // Guard for admin routes — only admin/super_admin can access
 function AdminGuard({ children }: { children: React.ReactNode }) {
@@ -123,6 +124,18 @@ const GlobalScriptsAndTheme: React.FC = () => {
   return null;
 };
 
+// Lightweight analytics route listener
+import { useLocation } from 'react-router-dom';
+import { analytics } from '@/lib/analytics';
+
+const NavigationAnalytics: React.FC = () => {
+  const location = useLocation();
+  React.useEffect(() => {
+    analytics.trackPageview(location.pathname, location.search);
+  }, [location]);
+  return null;
+};
+
 const App: React.FC = () => {
   return (
     <Router>
@@ -131,7 +144,9 @@ const App: React.FC = () => {
         <RouteGuard>
           <ScrollToTop />
           <GlobalScriptsAndTheme />
+          <NavigationAnalytics />
           <IntersectObserver />
+          <AdminNotificationListener />
           <Routes>
             {/* Admin sub-routes — full-screen layout, no Header/MobileNav */}
             <Route path="/admin" element={<AdminGuard><AdminOverviewPage /></AdminGuard>} />
