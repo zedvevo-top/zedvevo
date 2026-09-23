@@ -22,5 +22,10 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install --include=dev --legacy-peer-deps",
-  "framework": "vite"
+  "framework": "vite",
+  "functions": {
+    "api/*.js": {
+      "includeFiles": "dist/index.html"
+    }
+  }
 }
