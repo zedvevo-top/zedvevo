@@ -8,6 +8,7 @@ export interface PageMetaProps {
   image?: string;
   url?: string;
   type?: "website" | "music.song" | "video.other" | "profile" | "article";
+  schema?: Record<string, any>;
 }
 
 const PageMeta = ({
@@ -16,9 +17,10 @@ const PageMeta = ({
   image,
   url,
   type = "website",
+  schema,
 }: PageMetaProps) => {
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const currentUrl = url || (typeof window !== "undefined" ? window.location.href : "");
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://zedvevo.xyz";
+  const currentUrl = url || (typeof window !== "undefined" ? window.location.href : "https://zedvevo.xyz");
   
   // Format absolute image URL for OpenGraph compatibility
   let absoluteImage = image || `${origin}/og-image.png`;
@@ -42,6 +44,14 @@ const PageMeta = ({
       tag.setAttribute("content", content);
     };
 
+    let canonicalTag = document.querySelector('link[rel="canonical"]');
+    if (!canonicalTag) {
+      canonicalTag = document.createElement("link");
+      canonicalTag.setAttribute("rel", "canonical");
+      document.head.appendChild(canonicalTag);
+    }
+    canonicalTag.setAttribute("href", currentUrl);
+
     setMetaTag('meta[name="description"]', "name", "description", description);
     setMetaTag('meta[property="og:title"]', "property", "og:title", title);
     setMetaTag('meta[property="og:description"]', "property", "og:description", description);
@@ -61,6 +71,7 @@ const PageMeta = ({
     <Helmet>
       <title>{title}</title>
       <meta name="description" content={description} />
+      <link rel="canonical" href={currentUrl} />
       <meta property="og:site_name" content="ZedVevo" />
       <meta property="og:type" content={type} />
       <meta property="og:title" content={title} />
@@ -73,6 +84,11 @@ const PageMeta = ({
       <meta name="twitter:title" content={title} />
       <meta name="twitter:description" content={description} />
       <meta name="twitter:image" content={absoluteImage} />
+      {schema && (
+        <script type="application/ld+json">
+          {JSON.stringify(schema)}
+        </script>
+      )}
     </Helmet>
   );
 };

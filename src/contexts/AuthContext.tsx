@@ -1,10 +1,17 @@
 import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
-import { supabase } from '@/db/supabase';
+import { supabase, clearStaleAuthStorage } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
 import type { Profile } from '@/types/index';
 import { toast } from 'sonner';
 import { autoActivateAllSuccessfulArtistPlans } from '@/services/lipila';
 import { useAuthStore } from '@/store/authStore';
+
+function isRefreshTokenErr(err: any): boolean {
+  if (!err) return false;
+  const msg = typeof err === 'string' ? err : `${err.message || ''} ${err.error_description || ''} ${err.name || ''}`;
+  const lower = msg.toLowerCase();
+  return lower.includes('refresh token') || lower.includes('not found') || lower.includes('invalid_grant');
+}
 
 export async function getProfile(userId: string): Promise<Profile | null> {
   let { data, error } = await supabase
@@ -119,8 +126,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession()
       .then(({ data: { session }, error }) => {
         if (error) {
-          if (error.message?.toLowerCase().includes('refresh token') || error.message?.toLowerCase().includes('not found')) {
-            toast.warning('Your login session has expired. Please log in again.');
+          if (isRefreshTokenErr(error)) {
+            clearStaleAuthStorage();
             supabase.auth.signOut().catch(() => {});
           }
           setUser(null);
@@ -135,11 +142,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       })
       .catch(error => {
-        if (error?.message?.toLowerCase().includes('refresh token') || error?.message?.toLowerCase().includes('not found')) {
-          toast.warning('Your login session has expired. Please log in again.');
+        if (isRefreshTokenErr(error)) {
+          clearStaleAuthStorage();
           supabase.auth.signOut().catch(() => {});
         } else if (error?.message) {
-          toast.error(`Session error: ${error.message}`);
+          toast.error(`Session notice: ${error.message}`);
         }
       })
       .finally(() => {

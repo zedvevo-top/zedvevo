@@ -57,9 +57,54 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>ZedVevo — Zambian Music &amp; Video Streaming</title>
     <meta name="description" content="Stream, discover, and download authentic Zambian music, official music videos, and charts on ZedVevo." />
+    <meta name="keywords" content="ZedVevo, Zambian music, download Zambian songs, Zed music videos, Zambia music app, Yo Maps, Slapdee, Macky 2, Chef 187, Zambian mp3 download" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <link rel="canonical" href="https://zedvevo.xyz/" />
     <meta name="theme-color" content="#09090b" />
     <meta name="application-name" content="ZedVevo" />
     <meta name="apple-mobile-web-app-title" content="ZedVevo" />
+
+    <!-- Google Search Schema.org Structured Data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://zedvevo.xyz/#website",
+          "url": "https://zedvevo.xyz/",
+          "name": "ZedVevo",
+          "description": "Stream, discover, and download authentic Zambian music, official music videos, and charts on ZedVevo.",
+          "publisher": {
+            "@type": "Organization",
+            "name": "ZedVevo Entertainment",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://zedvevo.xyz/app-icon.png"
+            }
+          },
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://zedvevo.xyz/music?q={search_term_string}",
+            "query-input": "required name=search_term_string"
+          }
+        },
+        {
+          "@type": "WebApplication",
+          "@id": "https://zedvevo.xyz/#webapp",
+          "name": "ZedVevo - Zambian Music & Video Platform",
+          "url": "https://zedvevo.xyz/",
+          "applicationCategory": "MultimediaApplication",
+          "operatingSystem": "Android, iOS, Web",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "ZMW"
+          }
+        }
+      ]
+    }
+    </script>
 
     <!-- Profitablerate CPM Ad Network Global Integration -->
     <script async="async" data-cfasync="false" src="https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js"></script>

@@ -2,6 +2,7 @@ import * as Sentry from "@sentry/react";
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import { AppWrapper } from "./components/common/PageMeta.tsx";
+import { clearStaleAuthStorage } from "./lib/supabase.ts";
 import "./index.css";
 
 Sentry.init({
@@ -34,16 +35,18 @@ if (typeof window !== "undefined" && "serviceWorker" in navigator) {
 // Handle invalid or missing refresh token errors globally without crashing or showing error overlays
 if (typeof window !== "undefined") {
   window.addEventListener("unhandledrejection", (event) => {
-    const reason = event.reason?.message || event.reason;
+    const reason = event.reason?.message || event.reason?.error_description || (typeof event.reason === "string" ? event.reason : JSON.stringify(event.reason || {}));
     if (
       typeof reason === "string" &&
       (reason.includes("Invalid Refresh Token") ||
         reason.includes("Refresh Token Not Found") ||
+        reason.includes("invalid_grant") ||
         reason.includes("JWT issued at future") ||
         reason.includes("PGRST303") ||
         reason.includes("JWT expired"))
     ) {
       event.preventDefault();
+      clearStaleAuthStorage();
       console.warn("Handled auth / clock skew token notice gracefully:", reason);
     }
   });

@@ -107,6 +107,25 @@ export default function SongPage() {
         <meta name="twitter:title" content={pageTitle} />
         <meta name="twitter:description" content={pageDescription} />
         <meta name="twitter:image" content={absoluteCoverUrl} />
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "MusicRecording",
+            "name": song.title,
+            "byArtist": {
+              "@type": "MusicGroup",
+              "name": artistName,
+            },
+            "image": absoluteCoverUrl,
+            "url": typeof window !== 'undefined' ? window.location.href : '',
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "ZMW",
+              "availability": "https://schema.org/InStock",
+            }
+          })}
+        </script>
       </Helmet>
       <div className="min-h-screen">
       {/* Hero */}

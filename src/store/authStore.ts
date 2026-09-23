@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { supabase, isConfigured, type Profile, type Artist } from '@/lib/supabase'
+import { supabase, isConfigured, clearStaleAuthStorage, type Profile, type Artist } from '@/lib/supabase'
 import { ADMIN_EMAIL, isAdminEmail } from '@/lib/authHelpers'
 
 interface AuthState {
@@ -88,7 +88,9 @@ export const useAuthStore = create<AuthState>()(
           } = await supabase.auth.getUser()
 
           if (userError) {
-            if (userError.message?.toLowerCase().includes('refresh token') || userError.message?.toLowerCase().includes('not found')) {
+            const msg = (userError.message || '').toLowerCase()
+            if (msg.includes('refresh token') || msg.includes('not found') || msg.includes('invalid_grant')) {
+              clearStaleAuthStorage()
               await supabase.auth.signOut().catch(() => {})
             }
             set({

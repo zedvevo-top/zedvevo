@@ -58,6 +58,23 @@ export default function VideoPage() {
         <meta name="twitter:title" content={`${video.title} by ${video.artist?.stage_name || (video as any).artist_name || 'ZedVevo'}`} />
         <meta name="twitter:description" content={video.description ? video.description.slice(0, 160) : `Watch "${video.title}" on ZedVevo.`} />
         <meta name="twitter:image" content={absoluteThumbUrl} />
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "VideoObject",
+            "name": `${video.title} by ${video.artist?.stage_name || (video as any).artist_name || 'ZedVevo'}`,
+            "description": video.description || `Watch official music video for "${video.title}" on ZedVevo.`,
+            "thumbnailUrl": absoluteThumbUrl,
+            "uploadDate": video.created_at || new Date().toISOString(),
+            "contentUrl": video.video_url || undefined,
+            "embedUrl": typeof window !== 'undefined' ? window.location.href : '',
+            "interactionStatistic": {
+              "@type": "InteractionCounter",
+              "interactionType": "https://schema.org/WatchAction",
+              "userInteractionCount": video.view_count || 0,
+            }
+          })}
+        </script>
       </Helmet>
       <div className="min-h-screen">
       {/* Video Player */}

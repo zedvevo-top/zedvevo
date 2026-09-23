@@ -12,7 +12,7 @@
     { "source": "/video/:id([a-zA-Z0-9_-]+)", "destination": "/api/video?slug=:id" },
     { "source": "/watch/:id([a-zA-Z0-9_-]+)", "destination": "/api/video?slug=:id" },
     { "source": "/artist/:id([a-zA-Z0-9_-]+)", "destination": "/api/artist?slug=:id" },
-    { "source": "/((?!api/|assets/|sw\\.js|manifest\\.json|favicon|app-icon).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|assets/|sw\\.js|firebase-messaging-sw\\.js|manifest\\.json|favicon|app-icon).*)", "destination": "/index.html" }
   ],
   "headers": [
     {

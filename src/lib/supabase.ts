@@ -55,6 +55,22 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 export const isConfigured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)
 
+export function clearStaleAuthStorage() {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth-token') || key === 'zedvevo-auth')) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+  } catch (err) {
+    console.warn('Failed to clear stale auth storage:', err);
+  }
+}
+
 export type Tables = {
   profiles: Profile
   artists: Artist
