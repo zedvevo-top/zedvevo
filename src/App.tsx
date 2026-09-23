@@ -150,23 +150,32 @@ const GlobalScriptsAndTheme: React.FC = () => {
     loadConfigAndTheme();
   }, []);
 
-  // 2. Priority Ad Loading mechanism: non-blocking microtask execution hitting < 0.2s target
+  // 2. Priority Ad Loading mechanism: requestIdleCallback with retry loop until ad container DOM element is active
   React.useEffect(() => {
     const codeToInject = adHeaderCode || `<script async="async" data-cfasync="false" src="https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js"></script><div id="container-29a990e051b1bc82dfb7d8c83a9a64af"></div>`;
 
-    const injectAdScripts = () => {
-      try {
-        let container = document.getElementById('dynamic-header-scripts');
-        if (!container) {
-          container = document.createElement('div');
-          container.id = 'dynamic-header-scripts';
-          document.head.appendChild(container);
-        }
-        container.innerHTML = '';
+    let active = true;
+    let attempts = 0;
+    const maxAttempts = 15;
+    let idleCallbackId: number | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
 
+    const attemptAdInjection = () => {
+      if (!active) return;
+      attempts++;
+
+      let container = document.getElementById('dynamic-header-scripts');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'dynamic-header-scripts';
+        document.head.appendChild(container);
+      }
+
+      try {
+        container.innerHTML = '';
         const temp = document.createElement('div');
         temp.innerHTML = codeToInject;
-        
+
         // Re-create scripts as real DOM nodes to force browser execution without blocking UI
         Array.from(temp.childNodes).forEach((node) => {
           if (node.nodeName.toLowerCase() === 'script') {
@@ -179,23 +188,40 @@ const GlobalScriptsAndTheme: React.FC = () => {
             container.appendChild(node.cloneNode(true));
           }
         });
-      } catch (e) {
-        console.warn('Could not execute priority ad script injection on route transition:', e);
+
+        // Verify if ad container or target script element is confirmed as active in DOM
+        const targetContainer = document.getElementById('container-29a990e051b1bc82dfb7d8c83a9a64af') || document.getElementById('dynamic-header-scripts');
+        if (!targetContainer && attempts < maxAttempts) {
+          scheduleRetry();
+        }
+      } catch (err) {
+        console.warn(`Ad script injection attempt ${attempts} failed:`, err);
+        if (attempts < maxAttempts) {
+          scheduleRetry();
+        }
       }
     };
 
-    // Priority ad scheduler using requestIdleCallback with 200ms fallback timeout or queueMicrotask
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      const handle = (window as any).requestIdleCallback(injectAdScripts, { timeout: 200 });
-      return () => {
-        if ('cancelIdleCallback' in window) (window as any).cancelIdleCallback(handle);
-      };
-    } else if (typeof queueMicrotask === 'function') {
-      queueMicrotask(injectAdScripts);
-    } else {
-      const timer = setTimeout(injectAdScripts, 0);
-      return () => clearTimeout(timer);
-    }
+    const scheduleRetry = () => {
+      if (!active) return;
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        idleCallbackId = (window as any).requestIdleCallback(attemptAdInjection, { timeout: 150 });
+      } else {
+        timeoutId = setTimeout(attemptAdInjection, 100);
+      }
+    };
+
+    scheduleRetry();
+
+    return () => {
+      active = false;
+      if (idleCallbackId !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        (window as any).cancelIdleCallback(idleCallbackId);
+      }
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
+    };
   }, [adHeaderCode, location.pathname]);
 
   return null;

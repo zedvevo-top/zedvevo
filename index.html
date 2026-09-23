@@ -17,6 +17,39 @@
         } catch(e) {}
       })();
     </script>
+    <!-- Android Viewport Transformation & Layout Scaling Script -->
+    <script>
+      (function() {
+        try {
+          var ua = navigator.userAgent || navigator.vendor || window.opera;
+          var isAndroid = /android/i.test(ua);
+          if (isAndroid) {
+            document.documentElement.classList.add('is-android-device');
+            function applyAndroidViewportFit() {
+              var root = document.getElementById('root');
+              if (!root) return;
+              var screenWidth = window.innerWidth || document.documentElement.clientWidth;
+              if (screenWidth < 480 && screenWidth > 0) {
+                root.style.transformOrigin = 'top center';
+                root.style.width = '100%';
+                root.style.maxWidth = '100vw';
+                root.style.overflowX = 'hidden';
+                root.style.overflowY = 'visible';
+                document.documentElement.style.overflowY = 'auto';
+                document.body.style.overflowY = 'auto';
+              }
+            }
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', applyAndroidViewportFit);
+            } else {
+              applyAndroidViewportFit();
+            }
+            window.addEventListener('resize', applyAndroidViewportFit);
+            window.addEventListener('orientationchange', applyAndroidViewportFit);
+          }
+        } catch(e) {}
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />

@@ -212,12 +212,15 @@ export default function AdBanner({
   // 1. Render custom admin ad codes if provided (Adsterra, PropellerAds, custom banner scripts, etc.)
   if (format === 'leaderboard' && customLeaderboardCode) {
     return (
-      <div className={`w-full overflow-hidden rounded-xl border border-border/40 bg-card/40 my-4 text-center ${className}`}>
-        <div className="flex items-center justify-between px-3 py-1 bg-muted/40 border-b border-border/20 text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">
-          <span>Sponsored Ad</span>
-        </div>
-        <div className="p-2 min-h-[90px] flex items-center justify-center">
-          <ScriptHtmlContainer code={customLeaderboardCode} />
+      <div className="space-y-2">
+        <ProfitablerateCpmContainer />
+        <div className={`w-full overflow-hidden rounded-xl border border-border/40 bg-card/40 my-4 text-center ${className}`}>
+          <div className="flex items-center justify-between px-3 py-1 bg-muted/40 border-b border-border/20 text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">
+            <span>Sponsored Ad</span>
+          </div>
+          <div className="p-2 min-h-[90px] flex items-center justify-center">
+            <ScriptHtmlContainer code={customLeaderboardCode} />
+          </div>
         </div>
       </div>
     );
@@ -225,12 +228,15 @@ export default function AdBanner({
 
   if (format === 'feed' && customFeedCode) {
     return (
-      <div className={`w-full overflow-hidden rounded-xl border border-border/40 bg-card/40 my-4 text-center ${className}`}>
-        <div className="flex items-center justify-between px-3 py-1 bg-muted/40 border-b border-border/20 text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">
-          <span>Sponsored Ad</span>
-        </div>
-        <div className="p-2 min-h-[90px] flex items-center justify-center">
-          <ScriptHtmlContainer code={customFeedCode} />
+      <div className="space-y-2">
+        <ProfitablerateCpmContainer />
+        <div className={`w-full overflow-hidden rounded-xl border border-border/40 bg-card/40 my-4 text-center ${className}`}>
+          <div className="flex items-center justify-between px-3 py-1 bg-muted/40 border-b border-border/20 text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">
+            <span>Sponsored Ad</span>
+          </div>
+          <div className="p-2 min-h-[90px] flex items-center justify-center">
+            <ScriptHtmlContainer code={customFeedCode} />
+          </div>
         </div>
       </div>
     );

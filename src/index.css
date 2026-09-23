@@ -12,13 +12,16 @@
   font-display: swap;
 }
 
-/* Android Screen View & Mobile Screen Optimization */
-html, body {
+/* Android & Universal Device Screen View & Smooth Up/Down Scrolling Optimization */
+html, body, #root {
   overflow-x: hidden;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
   max-width: 100vw;
-  touch-action: manipulation;
+  touch-action: pan-y pinch-zoom;
   -webkit-tap-highlight-color: transparent;
-  overscroll-behavior-y: contain;
+  overscroll-behavior-y: auto;
+  min-height: 100vh;
 }
 
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
