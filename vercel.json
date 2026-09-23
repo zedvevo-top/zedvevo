@@ -1,7 +1,4 @@
 {
-  "engines": {
-    "node": "20.x"
-  },
   "rewrites": [
     { "source": "/api/payments/verify", "destination": "/api/verify-payment" },
     { "source": "/api/lipila/webhook", "destination": "/api/webhook" },
@@ -29,6 +26,5 @@
     }
   ],
   "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "installCommand": "npm install --legacy-peer-deps"
+  "outputDirectory": "dist"
 }
