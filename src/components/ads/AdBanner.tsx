@@ -55,9 +55,10 @@ const FALLBACK_ADS: Sponsor[] = [
   }
 ];
 
-// Profitablerate CPM Ad Network Container & Invoker
+// Profitablerate CPM Ad Network Container & Invoker with Anti-Adblock Force Loading
 function ProfitablerateCpmContainer() {
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const [adBlocked, setAdBlocked] = React.useState(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -73,12 +74,55 @@ function ProfitablerateCpmContainer() {
       script.setAttribute('data-cfasync', 'false');
       script.src = 'https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js';
 
+      script.onerror = () => {
+        console.warn('AdBlocker detected blocking CPM script. Force loading native sponsor ads.');
+        setAdBlocked(true);
+      };
+
       containerRef.current.appendChild(targetDiv);
       containerRef.current.appendChild(script);
+
+      const timer = setTimeout(() => {
+        if (targetDiv && (targetDiv.clientHeight === 0 || targetDiv.children.length === 0)) {
+          setAdBlocked(true);
+        }
+      }, 2000);
+
+      return () => clearTimeout(timer);
     } catch (e) {
-      console.warn('CPM script initialization error:', e);
+      setAdBlocked(true);
     }
   }, []);
+
+  if (adBlocked) {
+    return (
+      <div className="w-full my-2 rounded-xl border border-accent/30 bg-accent/5 p-3 text-center">
+        <div className="flex items-center justify-between text-[10px] text-muted-foreground uppercase tracking-wider mb-2 font-semibold">
+          <span>Native Sponsor Deal</span>
+          <span className="text-accent text-[9px]">Adblocker Force-Loaded</span>
+        </div>
+        <a
+          href="https://momo.mtn.zm"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center justify-between gap-3 p-2 bg-card/80 rounded-lg hover:border-accent border border-border/50 transition-all"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-xs">
+              MTN
+            </div>
+            <div className="text-left">
+              <p className="text-xs font-bold text-foreground">MTN MoMo Music Pass</p>
+              <p className="text-[10px] text-muted-foreground">Subscribe to ZedVevo Unlimited Music with MTN MoMo *303#</p>
+            </div>
+          </div>
+          <span className="text-xs font-semibold px-2.5 py-1 rounded bg-amber-500 text-black hover:bg-amber-400">
+            Subscribe
+          </span>
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full flex justify-center items-center overflow-visible my-2 min-h-[60px]">

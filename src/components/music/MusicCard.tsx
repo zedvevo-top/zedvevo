@@ -27,7 +27,8 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
   const [detailOpen, setDetailOpen] = useState(false);
 
   const shareUrl = `${window.location.origin}/song/${song.id}`;
-  const shareText = `Listen to "${song.title}" by ${song.artist_name} on ZedVevo — ${window.location.origin}/song/${song.id}`;
+  const shareTitle = `${song.title} by ${song.artist_name}`;
+  const shareText = `🎵 "${song.title}" by ${song.artist_name}\nStream & download on ZedVevo:`;
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -271,7 +272,7 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         url={shareUrl}
-        title={song.title}
+        title={shareTitle}
         text={shareText}
         thumbnailUrl={song.cover_url}
         embedId={song.id}

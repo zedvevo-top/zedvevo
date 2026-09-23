@@ -91,7 +91,45 @@ export default function SharedItemPage() {
     fetchItem();
   }, [id, type]);
 
-  // Realtime subscription for nominee votes
+  useEffect(() => {
+    if (!data) return;
+    let t = 'ZedVevo';
+    let d = 'Stream music, watch videos, and vote on ZedVevo';
+    let img = `${typeof window !== 'undefined' ? window.location.origin : ''}/og-image.png`;
+
+    if (type === 'song') {
+      const artist = data.artist_name || data.artist || 'ZedVevo Artist';
+      t = `${data.title} by ${artist} — ZedVevo`;
+      d = `Stream and download "${data.title}" by ${artist} on ZedVevo.`;
+      const raw = data.cover_url || '';
+      img = raw.startsWith('http://') || raw.startsWith('https://') ? raw : (raw ? `${window.location.origin}${raw.startsWith('/') ? '' : '/'}${raw}` : img);
+    } else if (type === 'video') {
+      const artist = data.artist_name || 'ZedVevo';
+      t = `${data.title} - ${artist} (Official Video) | ZedVevo`;
+      d = data.description || `Watch "${data.title}" by ${artist} on ZedVevo.`;
+      const raw = data.thumbnail_url || '';
+      img = raw.startsWith('http://') || raw.startsWith('https://') ? raw : (raw ? `${window.location.origin}${raw.startsWith('/') ? '' : '/'}${raw}` : img);
+    }
+
+    document.title = t;
+    const setMeta = (selector: string, attrName: string, attrVal: string, content: string) => {
+      let el = document.querySelector(selector) as HTMLMetaElement | null;
+      if (!el) {
+        el = document.createElement('meta');
+        el.setAttribute(attrName, attrVal);
+        document.head.appendChild(el);
+      }
+      el.setAttribute('content', content);
+    };
+
+    setMeta('meta[property="og:title"]', 'property', 'og:title', t);
+    setMeta('meta[property="og:description"]', 'property', 'og:description', d);
+    setMeta('meta[property="og:image"]', 'property', 'og:image', img);
+    setMeta('meta[property="og:image:secure_url"]', 'property', 'og:image:secure_url', img);
+    setMeta('meta[name="twitter:title"]', 'name', 'twitter:title', t);
+    setMeta('meta[name="twitter:description"]', 'name', 'twitter:description', d);
+    setMeta('meta[name="twitter:image"]', 'name', 'twitter:image', img);
+  }, [data, type]);
   useEffect(() => {
     if (type !== 'nominee' || !id) return;
 

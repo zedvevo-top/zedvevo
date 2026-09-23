@@ -1,5 +1,9 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "rewrites": [
+    { "source": "/song/(.*)", "destination": "/api/song?slug=$1" },
+    { "source": "/video/(.*)", "destination": "/api/video?slug=$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)",

@@ -37,16 +37,21 @@ export default function SongPage() {
     })
   }
 
+  const artistName = (song as any)?.artist?.stage_name || (song as any)?.artist_name || 'ZedVevo Artist';
+
   const handleShare = async () => {
+    const shareText = `🎵 "${song?.title}" by ${artistName}\nStream & download on ZedVevo:`;
     if (navigator.share) {
-      await navigator.share({
-        title: song?.title,
-        text: `Listen to ${song?.title} by ${song?.artist?.stage_name}`,
-        url: window.location.href,
-      })
+      try {
+        await navigator.share({
+          title: `${song?.title} - ${artistName}`,
+          text: shareText,
+          url: window.location.href,
+        })
+      } catch (e) {}
     } else {
-      await navigator.clipboard.writeText(window.location.href)
-      toast({ title: 'Link copied to clipboard' })
+      await navigator.clipboard.writeText(`${shareText}\n${window.location.href}`)
+      toast({ title: 'Song link copied to clipboard' })
     }
   }
 

@@ -21,7 +21,8 @@ export default function MusicPlayer() {
   if (!song) return null;
 
   const shareUrl = `${window.location.origin}/song/${song.id}`;
-  const shareText = `Listen to "${song.title}" by ${song.artist_name} on ZedVevo — ${window.location.origin}/song/${song.id}`;
+  const shareTitle = `${song.title} by ${song.artist_name}`;
+  const shareText = `🎵 "${song.title}" by ${song.artist_name}\nStream & download on ZedVevo:`;
 
   const handleSeek = (val: number[]) => seek(val[0]);
 
@@ -158,8 +159,11 @@ export default function MusicPlayer() {
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         url={shareUrl}
-        title={song.title}
+        title={shareTitle}
         text={shareText}
+        thumbnailUrl={song.cover_url}
+        embedId={song.id}
+        embedType="song"
       />
     </div>
   );
