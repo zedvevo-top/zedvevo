@@ -159,16 +159,41 @@ export async function incrementViewCount(videoId: string) {
 // ============================================================
 export async function toggleLike(userId: string, contentId: string, contentType: 'song' | 'video') {
   const { data: existing } = await supabase
-    .from('content_likes').select('id').eq('user_id', userId).eq('content_id', contentId).eq('content_type', contentType).maybeSingle();
+    .from('content_likes')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('content_id', contentId)
+    .eq('content_type', contentType)
+    .maybeSingle();
+
+  let isLiked = false;
+
   if (existing) {
     await supabase.from('content_likes').delete().eq('id', existing.id);
-    // decrement
-    if (contentType === 'song') await supabase.from('songs').update({ like_count: supabase.rpc('like_count') }).eq('id', contentId);
-    return false;
+    isLiked = false;
   } else {
-    await supabase.from('content_likes').insert({ user_id: userId, content_id: contentId, content_type: contentType });
-    return true;
+    await supabase.from('content_likes').insert({
+      user_id: userId,
+      content_id: contentId,
+      content_type: contentType,
+    });
+    isLiked = true;
   }
+
+  // Recalculate true total like count from content_likes table
+  const { count } = await supabase
+    .from('content_likes')
+    .select('id', { count: 'exact', head: true })
+    .eq('content_id', contentId)
+    .eq('content_type', contentType);
+
+  const exactCount = count ?? 0;
+
+  // Persist updated count to target table
+  const targetTable = contentType === 'song' ? 'songs' : 'videos';
+  await supabase.from(targetTable).update({ like_count: exactCount }).eq('id', contentId);
+
+  return isLiked;
 }
 
 export async function getLikedContentIds(userId: string, contentType: 'song' | 'video') {

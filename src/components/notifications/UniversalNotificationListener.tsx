@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { Sparkles, Music2, Award, DollarSign, CheckCircle2, XCircle, Bell, X, ExternalLink } from 'lucide-react';
@@ -17,8 +18,33 @@ interface MobilePushNotification {
 }
 
 export function UniversalNotificationListener() {
+  const navigate = useNavigate();
   const { user, profile } = useAuth();
   const [activePush, setActivePush] = useState<MobilePushNotification | null>(null);
+
+  // Listen for Service Worker NOTIFICATION_NAVIGATE messages across Android browsers
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      const handleSWMessage = (event: MessageEvent) => {
+        if (event.data && event.data.type === 'NOTIFICATION_NAVIGATE' && event.data.url) {
+          console.log('[UniversalNotifListener] NOTIFICATION_NAVIGATE received from ServiceWorker:', event.data.url);
+          pushDiagnosticStore.addLog('sw_event', 'ServiceWorkerProtocol', `NOTIFICATION_NAVIGATE to ${event.data.url}`, { url: event.data.url });
+          
+          try {
+            navigate(event.data.url);
+          } catch (err) {
+            console.warn('[UniversalNotifListener] SPA navigate failed, falling back to location.href:', err);
+            window.location.href = event.data.url;
+          }
+        }
+      };
+
+      navigator.serviceWorker.addEventListener('message', handleSWMessage);
+      return () => {
+        navigator.serviceWorker.removeEventListener('message', handleSWMessage);
+      };
+    }
+  }, [navigate]);
 
   const isAdmin =
     profile?.role === 'admin' ||

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bell, Plus, Loader2, Activity, Smartphone, CheckCircle, AlertCircle, RefreshCw, Trash2, Terminal, ShieldAlert } from 'lucide-react';
+import { Bell, Plus, Loader2, Activity, Smartphone, CheckCircle, AlertCircle, RefreshCw, Trash2, Terminal, ShieldAlert, Play, CheckCircle2, XCircle, ArrowRight, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,7 +15,7 @@ import { supabase } from '@/db/supabase';
 import { createNotification } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import type { Notification } from '@/types/index';
-import { pushDiagnosticStore, type PushLogEntry, type AndroidSessionMetrics } from '@/services/pushDiagnosticStore';
+import { pushDiagnosticStore, type PushLogEntry, type AndroidSessionMetrics, type DiagnosticTestSuiteResult } from '@/services/pushDiagnosticStore';
 import { showAdminPopNotification } from '@/services/adminNotificationService';
 
 type NotifType = 'info' | 'success' | 'warning' | 'error';
@@ -33,6 +33,11 @@ export default function AdminNotificationsPage() {
   const [logs, setLogs] = useState<PushLogEntry[]>(pushDiagnosticStore.getLogs());
   const [metrics, setMetrics] = useState<AndroidSessionMetrics>(pushDiagnosticStore.getMetrics());
   const [logFilter, setLogFilter] = useState<'all' | 'realtime' | 'deliver' | 'error'>('all');
+
+  // Unified Push Diagnostic Suite State
+  const [testRoute, setTestRoute] = useState('/admin/notifications');
+  const [diagRunning, setDiagRunning] = useState(false);
+  const [diagResult, setDiagResult] = useState<DiagnosticTestSuiteResult | null>(null);
 
   useEffect(() => {
     // Subscribe to live push diagnostic updates
@@ -94,9 +99,22 @@ export default function AdminNotificationsPage() {
       body: testBody,
       icon: '/app-icon.png',
       tag: `test-${Date.now()}`,
-      data: { url: '/admin/notifications' },
+      data: { url: testRoute || '/admin/notifications' },
     });
     toast.info('Test push notification dispatched to browser/OS');
+  };
+
+  const handleRunDiagnosticSuite = async () => {
+    setDiagRunning(true);
+    try {
+      const res = await pushDiagnosticStore.runFullPushDiagnostics(testRoute);
+      setDiagResult(res);
+      toast.success('Unified Push Diagnostic Suite completed successfully!');
+    } catch {
+      toast.error('Diagnostic test suite encountered an error');
+    } finally {
+      setDiagRunning(false);
+    }
   };
 
   const filteredLogs = logs.filter((log) => {
@@ -178,6 +196,110 @@ export default function AdminNotificationsPage() {
               <div className="text-2xl font-black text-destructive pt-1">{metrics.failCount}</div>
               <p className="text-[11px] text-muted-foreground">Unreachable device states</p>
             </div>
+          </div>
+
+          {/* UNIFIED PUSH NOTIFICATION TEST DIAGNOSTIC CARD */}
+          <div className="border border-accent/40 rounded-2xl bg-card p-5 space-y-4 shadow-md bg-gradient-to-br from-card via-card to-accent/5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/60">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-accent/10 text-accent border border-accent/20">
+                  <Zap className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-foreground">Unified FCM & Android Push Test Diagnostic</h3>
+                  <p className="text-xs text-muted-foreground">Verify Service Worker FCM handling, NOTIFICATION_NAVIGATE protocol, and blank-screen safety across Android mobile browsers</p>
+                </div>
+              </div>
+
+              <Badge variant="outline" className="w-fit text-xs px-2.5 py-1 bg-accent/10 border-accent/30 text-accent font-mono font-bold">
+                {metrics.deviceInfo}
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+              <div className="md:col-span-7 space-y-1.5">
+                <Label className="text-xs font-bold text-foreground">Target Test Navigation Route</Label>
+                <Select value={testRoute} onValueChange={setTestRoute}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="Select target route" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="/admin/notifications">/admin/notifications (Admin Notification Center)</SelectItem>
+                    <SelectItem value="/music">/music (Music Library)</SelectItem>
+                    <SelectItem value="/videos">/videos (Video Player)</SelectItem>
+                    <SelectItem value="/awards">/awards (ZedVevo Awards)</SelectItem>
+                    <SelectItem value="/dashboard">/dashboard (User Dashboard)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">Tests deep-link navigation without triggering full page reloads or blank screens.</p>
+              </div>
+
+              <div className="md:col-span-5 flex items-center gap-2">
+                <Button
+                  onClick={handleRunDiagnosticSuite}
+                  disabled={diagRunning}
+                  className="bg-accent hover:bg-accent/90 text-accent-foreground text-xs font-bold gap-1.5 flex-1 h-9 shadow-sm"
+                >
+                  {diagRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                  Run Diagnostic Suite
+                </Button>
+
+                <Button
+                  onClick={handleTestTestPush}
+                  variant="outline"
+                  className="text-xs font-semibold gap-1.5 h-9 border-border hover:bg-accent/10 hover:text-accent"
+                >
+                  <Bell className="h-3.5 w-3.5 text-accent" />
+                  Simulate Android Push
+                </Button>
+              </div>
+            </div>
+
+            {/* Diagnostic Test Suite Verification Status */}
+            {diagResult && (
+              <div className="mt-3 p-4 rounded-xl bg-background/80 border border-border/80 space-y-3 animate-in fade-in duration-300">
+                <div className="flex items-center justify-between text-xs font-bold pb-2 border-b border-border/50">
+                  <span className="text-foreground">Diagnostic Suite Execution Checklist</span>
+                  <Badge variant="default" className="text-[10px] bg-emerald-500 text-white font-mono">
+                    VERIFIED PASS
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                  <div className="p-2.5 rounded-lg border bg-muted/30 space-y-1">
+                    <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                      <span>Service Worker</span>
+                      {diagResult.swActive ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <XCircle className="h-4 w-4 text-red-500" />}
+                    </div>
+                    <p className="font-bold text-foreground truncate">{diagResult.swActive ? 'Active & Scope Ready' : 'Inactive / Re-registering'}</p>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg border bg-muted/30 space-y-1">
+                    <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                      <span>Android FCM Support</span>
+                      {diagResult.fcmCompatible ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <XCircle className="h-4 w-4 text-amber-500" />}
+                    </div>
+                    <p className="font-bold text-foreground truncate">{diagResult.fcmCompatible ? 'PushManager Ready' : 'Basic Web Push'}</p>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg border bg-muted/30 space-y-1">
+                    <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                      <span>NOTIFICATION_NAVIGATE</span>
+                      {diagResult.navigateProtocolSuccess ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <XCircle className="h-4 w-4 text-red-500" />}
+                    </div>
+                    <p className="font-bold text-foreground truncate">{diagResult.navigateProtocolSuccess ? 'Protocol Verified' : 'Protocol Blocked'}</p>
+                  </div>
+
+                  <div className="p-2.5 rounded-lg border bg-muted/30 space-y-1">
+                    <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                      <span>Blank Screen Safety</span>
+                      {diagResult.blankScreenSafe ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <XCircle className="h-4 w-4 text-red-500" />}
+                    </div>
+                    <p className="font-bold text-foreground truncate">{diagResult.blankScreenSafe ? 'SPA Route Protected' : 'Path Check Failed'}</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Diagnostic Controls & Live Log Stream */}

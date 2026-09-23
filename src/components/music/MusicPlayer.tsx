@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { recordDownload, incrementSongDownloadCount } from '@/lib/api';
 import { formatDuration } from '@/lib/utils';
 import ShareSheet from '@/components/common/ShareSheet';
+import ZedVevoWatermark from '@/components/common/ZedVevoWatermark';
 
 export default function MusicPlayer() {
   const { user } = useAuth();
@@ -83,7 +84,8 @@ export default function MusicPlayer() {
 
           {/* Cover + info */}
           <div className="flex items-center gap-2.5 flex-1 min-w-0">
-            <div className="h-10 w-10 rounded overflow-hidden bg-muted shrink-0">
+            <div className="relative h-10 w-10 rounded overflow-hidden bg-muted shrink-0">
+              <ZedVevoWatermark size="sm" className="top-0.5 left-0.5 scale-75 origin-top-left" />
               {song.cover_url
                 ? <img src={song.cover_url} alt={song.title} className="w-full h-full object-cover" />
                 : <div className="w-full h-full flex items-center justify-center"><Music className="h-4 w-4 text-muted-foreground" /></div>

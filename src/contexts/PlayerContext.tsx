@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useRef, useCallback, useEff
 import type { Song } from '@/types/index';
 import { incrementPlayCount } from '@/lib/api';
 import { analytics } from '@/lib/analytics';
+import { playZedVevoIntroTagSequence, playZedVevoOutroTag } from '@/services/audioTagService';
 
 interface PlayerContextValue {
   currentSong: Song | null;
@@ -33,6 +34,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [volume, setVolumeState] = useState(0.8);
   const [muted, setMutedState] = useState(false);
   const countedRef = useRef<string | null>(null);
+  const outroPlayedRef = useRef<string | null>(null);
 
   // Boot / swap audio when song changes
   useEffect(() => {
@@ -53,6 +55,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     audio.volume = muted ? 0 : volume;
     audioRef.current = audio;
     countedRef.current = null;
+    outroPlayedRef.current = null;
 
     const onTime = () => setCurrentTime(audio.currentTime);
     const onMeta = () => setDuration(audio.duration);
@@ -62,25 +65,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     audio.addEventListener('loadedmetadata', onMeta);
     audio.addEventListener('ended', onEnded);
 
-    const playPromise = audio.play();
-    if (playPromise !== undefined) {
-      playPromise
-        .then(() => setPlaying(true))
-        .catch(err => {
-          console.warn('Autoplay blocked, binding to first user interaction:', err);
-          const resumeOnInteraction = () => {
-            if (audioRef.current === audio) {
-              audio.play()
-                .then(() => setPlaying(true))
-                .catch(console.error);
-            }
-            document.removeEventListener('click', resumeOnInteraction);
-            document.removeEventListener('keydown', resumeOnInteraction);
-          };
-          document.addEventListener('click', resumeOnInteraction);
-          document.addEventListener('keydown', resumeOnInteraction);
-        });
-    }
+    // Play jingle/voice tag FIRST and always wait for it to finish before song starts
+    setPlaying(true);
+    playZedVevoIntroTagSequence().then(() => {
+      if (audioRef.current === audio) {
+        audio
+          .play()
+          .then(() => {
+            setPlaying(true);
+          })
+          .catch((err) => {
+            console.warn('Autoplay blocked, binding to first user interaction:', err);
+            const resumeOnInteraction = () => {
+              if (audioRef.current === audio) {
+                audio
+                  .play()
+                  .then(() => setPlaying(true))
+                  .catch(console.error);
+              }
+              document.removeEventListener('click', resumeOnInteraction);
+              document.removeEventListener('keydown', resumeOnInteraction);
+            };
+            document.addEventListener('click', resumeOnInteraction);
+            document.addEventListener('keydown', resumeOnInteraction);
+          });
+      }
+    });
 
     return () => {
       audio.removeEventListener('timeupdate', onTime);
@@ -106,7 +116,18 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         window.dispatchEvent(new CustomEvent('zedvevo:song-played', { detail: { songId: currentSong.id } }));
       }
     }
-  }, [currentTime, currentSong]);
+
+    // Trigger end-of-song promo voice tag near song completion (e.g. 7s before end)
+    if (
+      duration > 12 &&
+      currentTime >= duration - 7 &&
+      currentSong &&
+      outroPlayedRef.current !== currentSong.id
+    ) {
+      outroPlayedRef.current = currentSong.id;
+      playZedVevoOutroTag();
+    }
+  }, [currentTime, duration, currentSong]);
 
   // Keep a stable ref to next so the 'ended' handler always sees the latest queue
   const nextRef = useRef<() => void>(() => undefined);
@@ -133,78 +154,67 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { nextRef.current = next; }, [next]);
 
-  const playSong = useCallback((song: Song, q: Song[] = []) => {
-    setQueue(q);
-    setCurrentSong(song);
+  const playSong = useCallback((song: Song, newQueue?: Song[]) => {
     analytics.trackPlayerEvent('play', song.title, song.artist_name || 'Unknown');
+    if (newQueue && newQueue.length > 0) setQueue(newQueue);
+    else setQueue([song]);
+    setCurrentSong(song);
   }, []);
 
   const closeSong = useCallback(() => {
+    if (currentSong) {
+      analytics.trackPlayerEvent('stop', currentSong.title, currentSong.artist_name || 'Unknown');
+    }
+    audioRef.current?.pause();
+    if (audioRef.current) audioRef.current.src = '';
+    audioRef.current = null;
     setCurrentSong(null);
     setQueue([]);
-  }, []);
+    setPlaying(false);
+  }, [currentSong]);
 
   const togglePlay = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
+    if (!audioRef.current || !currentSong) return;
     if (playing) {
-      audio.pause();
+      analytics.trackPlayerEvent('pause', currentSong.title, currentSong.artist_name || 'Unknown');
+      audioRef.current.pause();
       setPlaying(false);
-      analytics.trackPlayerEvent('pause', currentSong?.title || 'Unknown', currentSong?.artist_name || 'Unknown');
-    }
-    else {
-      audio.play().then(() => {
-        setPlaying(true);
-        analytics.trackPlayerEvent('play', currentSong?.title || 'Unknown', currentSong?.artist_name || 'Unknown');
-      }).catch(console.error);
+    } else {
+      analytics.trackPlayerEvent('resume', currentSong.title, currentSong.artist_name || 'Unknown');
+      audioRef.current.play().then(() => setPlaying(true)).catch(console.error);
     }
   }, [playing, currentSong]);
 
   const seek = useCallback((time: number) => {
-    if (audioRef.current) { audioRef.current.currentTime = time; setCurrentTime(time); }
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+      setCurrentTime(time);
+    }
   }, []);
 
   const setVolume = useCallback((v: number) => {
     setVolumeState(v);
-    setMutedState(false);
+    if (v > 0) setMutedState(false);
   }, []);
 
-  const setMuted = useCallback((m: boolean) => setMutedState(m), []);
+  const setMuted = useCallback((m: boolean) => {
+    setMutedState(m);
+  }, []);
 
   return (
-    <PlayerContext.Provider value={{
-      currentSong, queue, playing, currentTime, duration, volume, muted,
-      playSong, closeSong, togglePlay, next, prev, seek, setVolume, setMuted,
-    }}>
+    <PlayerContext.Provider
+      value={{
+        currentSong, queue, playing, currentTime, duration, volume, muted,
+        playSong, closeSong, togglePlay, next, prev, seek, setVolume, setMuted,
+      }}
+    >
       {children}
     </PlayerContext.Provider>
   );
 }
 
-export function usePlayer(): PlayerContextValue {
+export function usePlayer() {
   const ctx = useContext(PlayerContext);
-  // Return a safe no-op fallback during HMR reloads or if used outside the provider
-  if (!ctx) {
-    if (import.meta.env.DEV) {
-      console.warn('[usePlayer] called outside <PlayerProvider> — returning no-op fallback');
-    }
-    return {
-      currentSong: null,
-      queue: [],
-      playing: false,
-      currentTime: 0,
-      duration: 0,
-      volume: 0.8,
-      muted: false,
-      playSong: () => {},
-      closeSong: () => {},
-      togglePlay: () => {},
-      next: () => {},
-      prev: () => {},
-      seek: () => {},
-      setVolume: () => {},
-      setMuted: () => {},
-    };
-  }
+  if (!ctx) throw new Error('usePlayer must be used within PlayerProvider');
   return ctx;
 }

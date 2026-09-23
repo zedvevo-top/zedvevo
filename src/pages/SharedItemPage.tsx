@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import VideoPlayer from '@/components/video/VideoPlayer';
 import VoteDialog from '@/components/awards/VoteDialog';
 import ShareSheet from '@/components/common/ShareSheet';
+import ZedVevoWatermark from '@/components/common/ZedVevoWatermark';
 import type { Song, Video, Nominee } from '@/types/index';
 
 export default function SharedItemPage() {
@@ -268,6 +269,7 @@ export default function SharedItemPage() {
         <div className="flex flex-col md:flex-row gap-6 p-6 sm:p-8 items-start">
           {/* Main Content Thumbnail */}
           <div className="w-full md:w-64 aspect-square rounded-xl overflow-hidden bg-muted shrink-0 border border-border relative">
+            <ZedVevoWatermark size="sm" />
             {imageUrl ? (
               <img src={imageUrl} alt={title} className="w-full h-full object-cover" />
             ) : (

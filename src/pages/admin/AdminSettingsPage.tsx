@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/db/supabase';
-import { Plus, Pencil, Trash2, Loader2, Bell, Download, Globe, Search, Share2, Sparkles, CheckCircle2, Copy, Image as ImageIcon, Upload, RefreshCw } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Bell, Download, Globe, Search, Share2, Sparkles, CheckCircle2, Copy, Image as ImageIcon, Upload, RefreshCw, Shield, Volume2, Play, Music } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,6 +24,8 @@ import {
 } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import type { UploadPlan, HeroBanner, Download as DownloadType, AppSetting } from '@/types/index';
+import ZedVevoWatermark from '@/components/common/ZedVevoWatermark';
+import { playZedVevoIntroTag, playZedVevoOutroTag } from '@/services/audioTagService';
 
 type NotifType = 'info' | 'success' | 'warning' | 'error';
 
@@ -60,6 +62,233 @@ export default function AdminSettingsPage() {
   const [newVal, setNewVal] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newSaving, setNewSaving] = useState(false);
+
+  // Watermark & Audio Tag settings state
+  const watermarkIconFileRef = useRef<HTMLInputElement>(null);
+  const [watermarkUploading, setWatermarkUploading] = useState(false);
+  const [watermarkIconInput, setWatermarkIconInput] = useState('');
+
+  const audioTagCustomFileRef = useRef<HTMLInputElement>(null);
+  const audioBrandingJingleRef = useRef<HTMLInputElement>(null);
+  const audioBrandingVoiceRef = useRef<HTMLInputElement>(null);
+  
+  const [audioTagUploading, setAudioTagUploading] = useState(false);
+  const [audioBrandingJingleUploading, setAudioBrandingJingleUploading] = useState(false);
+  const [audioBrandingVoiceUploading, setAudioBrandingVoiceUploading] = useState(false);
+
+  const [audioTagCustomInput, setAudioTagCustomInput] = useState('');
+  const [audioBrandingJingleInput, setAudioBrandingJingleInput] = useState('');
+  const [audioBrandingVoiceInput, setAudioBrandingVoiceInput] = useState('');
+
+  const [audioIntroText, setAudioIntroText] = useState('');
+  const [audioOutroText, setAudioOutroText] = useState('');
+
+  useEffect(() => {
+    setWatermarkIconInput(settings['watermark_app_icon_url'] || '');
+    setAudioTagCustomInput(settings['audio_tag_custom_file_url'] || '');
+    setAudioBrandingJingleInput(settings['audio_branding_jingle_url'] || '');
+    setAudioBrandingVoiceInput(settings['audio_branding_voice_url'] || '');
+
+    if (settings['audio_tag_intro_text']) {
+      setAudioIntroText(settings['audio_tag_intro_text']);
+    } else {
+      setAudioIntroText('Thank You For Streaming On Zed Vevo');
+    }
+    if (settings['audio_tag_outro_text']) {
+      setAudioOutroText(settings['audio_tag_outro_text']);
+    } else {
+      setAudioOutroText('Are You An Artist or Content Creator? Download Zed Vevo App And Discover How To Earn Money');
+    }
+  }, [settings]);
+
+  const handleAudioBrandingJingleUpload = async (file: File) => {
+    setAudioBrandingJingleUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'mp3';
+      const path = `watermarks/rock-jingle-${Date.now()}.${ext}`;
+      let publicUrl = '';
+      try {
+        publicUrl = await uploadFile('songs', path, file);
+      } catch {
+        const reader = new FileReader();
+        publicUrl = await new Promise<string>((resolve) => {
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsDataURL(file);
+        });
+      }
+      setAudioBrandingJingleInput(publicUrl);
+      await saveSetting('audio_branding_jingle_url', publicUrl);
+      await saveSetting('audio_tag_custom_file_url', publicUrl);
+      window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+      toast.success('Rock style jingle audio uploaded and attached globally!');
+    } catch (err: any) {
+      toast.error('Could not upload rock jingle audio: ' + (err.message || 'Unknown error'));
+    } finally {
+      setAudioBrandingJingleUploading(false);
+    }
+  };
+
+  const handleAudioBrandingVoiceUpload = async (file: File) => {
+    setAudioBrandingVoiceUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'mp3';
+      const path = `watermarks/voice-message-${Date.now()}.${ext}`;
+      let publicUrl = '';
+      try {
+        publicUrl = await uploadFile('songs', path, file);
+      } catch {
+        const reader = new FileReader();
+        publicUrl = await new Promise<string>((resolve) => {
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsDataURL(file);
+        });
+      }
+      setAudioBrandingVoiceInput(publicUrl);
+      await saveSetting('audio_branding_voice_url', publicUrl);
+      window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+      toast.success('Thank You voice message audio uploaded and attached globally!');
+    } catch (err: any) {
+      toast.error('Could not upload voice message audio: ' + (err.message || 'Unknown error'));
+    } finally {
+      setAudioBrandingVoiceUploading(false);
+    }
+  };
+
+  const handleSaveAudioBrandingJingleUrl = async () => {
+    await saveSetting('audio_branding_jingle_url', audioBrandingJingleInput.trim());
+    await saveSetting('audio_tag_custom_file_url', audioBrandingJingleInput.trim());
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+    toast.success('Rock jingle URL saved');
+  };
+
+  const handleSaveAudioBrandingVoiceUrl = async () => {
+    await saveSetting('audio_branding_voice_url', audioBrandingVoiceInput.trim());
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+    toast.success('Voice message URL saved');
+  };
+
+  const handleAudioTagCustomFileUpload = async (file: File) => {
+    setAudioTagUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'mp3';
+      const path = `watermarks/audio-jingle-${Date.now()}.${ext}`;
+      let publicUrl = '';
+      try {
+        publicUrl = await uploadFile('songs', path, file);
+      } catch {
+        const reader = new FileReader();
+        publicUrl = await new Promise<string>((resolve) => {
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsDataURL(file);
+        });
+      }
+      setAudioTagCustomInput(publicUrl);
+      await saveSetting('audio_tag_custom_file_url', publicUrl);
+      window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+      toast.success('Custom audio jingle tag uploaded and set!');
+    } catch (err: any) {
+      toast.error('Could not upload audio jingle: ' + (err.message || 'Unknown error'));
+    } finally {
+      setAudioTagUploading(false);
+    }
+  };
+
+  const handleSaveAudioTagCustomUrl = async () => {
+    await saveSetting('audio_tag_custom_file_url', audioTagCustomInput.trim());
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+    toast.success('Custom audio tag URL updated');
+  };
+
+  const watermarkEnabled = settings['watermark_enabled'] !== 'false';
+  const watermarkUseAppIcon = settings['watermark_use_app_icon'] !== 'false';
+  const audioTagEnabled = settings['audio_tag_enabled'] !== 'false';
+  const audioTagIntroBeat = settings['audio_tag_intro_beat'] !== 'false';
+  const audioTagSpeed = settings['audio_tag_speed'] || '0.84';
+  const audioTagOutroEnabled = settings['audio_tag_outro_enabled'] !== 'false';
+
+  const currentWatermarkIcon =
+    settings['watermark_app_icon_url'] ||
+    settings['app_logo_url'] ||
+    settings['app_icon_url'] ||
+    '/app-icon.png';
+
+  const handleWatermarkIconUpload = async (file: File) => {
+    setWatermarkUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'png';
+      const path = `branding/watermark-icon-${Date.now()}.${ext}`;
+      let publicUrl = '';
+      try {
+        publicUrl = await uploadFile('covers', path, file);
+      } catch {
+        const reader = new FileReader();
+        publicUrl = await new Promise<string>((resolve) => {
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsDataURL(file);
+        });
+      }
+      setWatermarkIconInput(publicUrl);
+      await saveSetting('watermark_app_icon_url', publicUrl);
+      window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+      toast.success('Watermark app icon uploaded and applied globally!');
+    } catch (err: any) {
+      toast.error('Could not upload watermark icon: ' + (err.message || 'Unknown error'));
+    } finally {
+      setWatermarkUploading(false);
+    }
+  };
+
+  const handleSaveWatermarkIconUrl = async () => {
+    if (!watermarkIconInput.trim()) return;
+    await saveSetting('watermark_app_icon_url', watermarkIconInput.trim());
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+    toast.success('Watermark icon URL saved and applied globally!');
+  };
+
+  const toggleWatermarkEnabled = async (checked: boolean) => {
+    await saveSetting('watermark_enabled', checked ? 'true' : 'false');
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+  };
+
+  const toggleWatermarkUseAppIcon = async (checked: boolean) => {
+    await saveSetting('watermark_use_app_icon', checked ? 'true' : 'false');
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+  };
+
+  const toggleAudioTagEnabled = async (checked: boolean) => {
+    await saveSetting('audio_tag_enabled', checked ? 'true' : 'false');
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+  };
+
+  const toggleAudioTagIntroBeat = async (checked: boolean) => {
+    await saveSetting('audio_tag_intro_beat', checked ? 'true' : 'false');
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+  };
+
+  const toggleAudioTagOutroEnabled = async (checked: boolean) => {
+    await saveSetting('audio_tag_outro_enabled', checked ? 'true' : 'false');
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+  };
+
+  const handleSaveIntroText = async () => {
+    if (!audioIntroText.trim()) return;
+    await saveSetting('audio_tag_intro_text', audioIntroText.trim());
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+    toast.success('Intro speech message saved');
+  };
+
+  const handleSaveOutroText = async () => {
+    if (!audioOutroText.trim()) return;
+    await saveSetting('audio_tag_outro_text', audioOutroText.trim());
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+    toast.success('Outro promo message saved');
+  };
+
+  const handleSaveSpeed = async (val: string) => {
+    await saveSetting('audio_tag_speed', val);
+    window.dispatchEvent(new CustomEvent('zed_settings_updated'));
+    toast.success('Voice tag pace updated');
+  };
 
   // SEO Audit State
   const [auditSongsCount, setAuditSongsCount] = useState(0);
@@ -365,6 +594,10 @@ export default function AdminSettingsPage() {
           <TabsTrigger value="branding" className="text-xs flex items-center gap-1.5">
             <Sparkles className="h-3 w-3 text-amber-400" />
             Branding & Favicon
+          </TabsTrigger>
+          <TabsTrigger value="watermark" className="text-xs flex items-center gap-1.5">
+            <Shield className="h-3 w-3 text-red-500" />
+            Watermark & Voice Tags
           </TabsTrigger>
           <TabsTrigger value="seo"      className="text-xs flex items-center gap-1.5">
             <Globe className="h-3 w-3 text-accent" />
@@ -816,6 +1049,402 @@ export default function AdminSettingsPage() {
                     saving={!!settingSaving['site_name']}
                     onSave={v => saveSetting('site_name', v)}
                   />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Media Watermark & Audio Voice Tag Settings Tab */}
+        <TabsContent value="watermark" className="mt-4 space-y-6">
+          <Card className="border-red-500/20 bg-gradient-to-r from-red-500/10 via-amber-500/5 to-transparent">
+            <CardContent className="p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-5 w-5 text-red-500" />
+                  <h2 className="text-base font-bold">Media Watermark & Audio Voice Tag Engine</h2>
+                  <Badge className="bg-red-500 text-white text-[10px]">ZedVevo Core</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground max-w-2xl">
+                  Configure visual watermark overlays on media cards, video streams, and song covers with your app icon, plus automatic female voice stream greetings and artist recruitment outro promos.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Visual Media Watermark Settings */}
+            <Card>
+              <CardContent className="p-5 space-y-5">
+                <div className="flex items-center gap-2 pb-3 border-b border-border">
+                  <Shield className="h-4 w-4 text-red-500" />
+                  <h3 className="text-sm font-semibold">Visual Watermark Overlay Configuration</h3>
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/40 border border-border">
+                  <div>
+                    <Label className="text-sm font-medium">Enable Watermark Overlay</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Shows the ZEDVEVO badge on video playback, song covers, thumbnails, and shared media
+                    </p>
+                  </div>
+                  <Switch
+                    checked={watermarkEnabled}
+                    onCheckedChange={toggleWatermarkEnabled}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/40 border border-border">
+                  <div>
+                    <Label className="text-sm font-medium">Use App Icon in Watermark</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Embeds the official app icon image on the watermark badge
+                    </p>
+                  </div>
+                  <Switch
+                    checked={watermarkUseAppIcon}
+                    onCheckedChange={toggleWatermarkUseAppIcon}
+                    disabled={!watermarkEnabled}
+                  />
+                </div>
+
+                {/* Watermark App Icon Upload Input Field */}
+                <div className="space-y-3 p-3 rounded-lg bg-muted/40 border border-border">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm font-medium">Watermark App Icon Image</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Upload custom icon image or enter image URL for the watermark badge
+                      </p>
+                    </div>
+                    <div className="h-10 w-10 rounded-full border-2 border-amber-400/80 overflow-hidden bg-black/60 shrink-0 shadow-md flex items-center justify-center">
+                      <img
+                        src={currentWatermarkIcon}
+                        alt="Watermark Icon"
+                        className="h-full w-full object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).src = '/app-icon.png'; }}
+                      />
+                    </div>
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={watermarkIconFileRef}
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleWatermarkIconUpload(file);
+                    }}
+                  />
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-xs h-8"
+                      onClick={() => watermarkIconFileRef.current?.click()}
+                      disabled={watermarkUploading}
+                    >
+                      {watermarkUploading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Upload className="h-3.5 w-3.5 text-amber-400" />
+                      )}
+                      Upload Icon File
+                    </Button>
+
+                    <div className="flex-1 flex gap-1.5">
+                      <Input
+                        value={watermarkIconInput}
+                        onChange={(e) => setWatermarkIconInput(e.target.value)}
+                        placeholder="https://.../icon.png"
+                        className="text-xs h-8"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="text-xs h-8 shrink-0"
+                        onClick={handleSaveWatermarkIconUrl}
+                      >
+                        Save URL
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Watermark Preview */}
+                <div className="space-y-2 pt-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Live Watermark Preview
+                  </Label>
+                  <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-gradient-to-br from-slate-900 via-zinc-800 to-black border border-border flex items-center justify-center group shadow-inner">
+                    <ZedVevoWatermark forceShow={true} size="md" className="top-3 left-3" />
+                    <div className="text-center p-4">
+                      <Music className="h-8 w-8 text-amber-400 mx-auto mb-2 opacity-80" />
+                      <p className="text-xs font-medium text-white/90">Sample Song Artwork & Video Stream</p>
+                      <p className="text-[10px] text-white/50">Watermark overlay positioning demo</p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Audio Branding & Jingle Settings */}
+            <Card>
+              <CardContent className="p-5 space-y-5">
+                <div className="flex items-center justify-between pb-3 border-b border-border">
+                  <div className="flex items-center gap-2">
+                    <Volume2 className="h-4 w-4 text-amber-500" />
+                    <h3 className="text-sm font-semibold">Audio Branding & Merged Jingle Engine</h3>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-400">
+                    Auto-Attached To Streams & Downloads
+                  </Badge>
+                </div>
+
+                {/* 1. Upload 'Rock' Style Jingle Audio */}
+                <div className="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
+                      <Music className="h-3.5 w-3.5" /> 1. 'Rock' Style Jingle Beat Audio File
+                    </Label>
+                    <span className="text-[10px] text-muted-foreground">MP3 / WAV format</span>
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={audioBrandingJingleRef}
+                    accept="audio/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleAudioBrandingJingleUpload(file);
+                    }}
+                  />
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-xs h-8 border-amber-500/40 hover:bg-amber-500/20 shrink-0"
+                      onClick={() => audioBrandingJingleRef.current?.click()}
+                      disabled={audioBrandingJingleUploading}
+                    >
+                      {audioBrandingJingleUploading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Upload className="h-3.5 w-3.5 text-amber-400" />
+                      )}
+                      Upload Rock Jingle
+                    </Button>
+
+                    <Input
+                      value={audioBrandingJingleInput}
+                      onChange={(e) => setAudioBrandingJingleInput(e.target.value)}
+                      placeholder="https://.../rock_jingle.mp3 or leave blank for synth"
+                      className="text-xs h-8 flex-1"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="text-xs h-8 shrink-0"
+                      onClick={handleSaveAudioBrandingJingleUrl}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
+
+                {/* 2. Upload 'Thank You' Voice Message Audio */}
+                <div className="p-3.5 rounded-lg bg-red-500/10 border border-red-500/30 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-rose-400 flex items-center gap-1.5">
+                      <Volume2 className="h-3.5 w-3.5" /> 2. 'Thank You' Voice Message Audio File
+                    </Label>
+                    <span className="text-[10px] text-muted-foreground">MP3 / WAV format</span>
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={audioBrandingVoiceRef}
+                    accept="audio/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleAudioBrandingVoiceUpload(file);
+                    }}
+                  />
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-xs h-8 border-red-500/40 hover:bg-red-500/20 shrink-0"
+                      onClick={() => audioBrandingVoiceRef.current?.click()}
+                      disabled={audioBrandingVoiceUploading}
+                    >
+                      {audioBrandingVoiceUploading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Upload className="h-3.5 w-3.5 text-rose-400" />
+                      )}
+                      Upload Voice Message
+                    </Button>
+
+                    <Input
+                      value={audioBrandingVoiceInput}
+                      onChange={(e) => setAudioBrandingVoiceInput(e.target.value)}
+                      placeholder="https://.../thank_you_voice.mp3 or leave blank for AI voice"
+                      className="text-xs h-8 flex-1"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="text-xs h-8 shrink-0"
+                      onClick={handleSaveAudioBrandingVoiceUrl}
+                    >
+                      Save
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Intro Greeting & Merged Logic Controls */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-muted/40 border border-border">
+                    <div>
+                      <Label className="text-sm font-medium">Enable Intro Audio Jingle Watermark</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Merges and plays jingle & voice over beat to completion BEFORE starting main track
+                      </p>
+                    </div>
+                    <Switch
+                      checked={audioTagEnabled}
+                      onCheckedChange={toggleAudioTagEnabled}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-muted/40 border border-border">
+                    <div>
+                      <Label className="text-sm font-medium">Active Rock Music Beat Layer</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Plays driving electric guitar power chords & rock drums under the voice tag
+                      </p>
+                    </div>
+                    <Switch
+                      checked={audioTagIntroBeat}
+                      onCheckedChange={toggleAudioTagIntroBeat}
+                      disabled={!audioTagEnabled}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Voice-Over Script Text</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={audioIntroText}
+                        onChange={(e) => setAudioIntroText(e.target.value)}
+                        placeholder="Thank You For Streaming On Zed Vevo"
+                        disabled={!audioTagEnabled}
+                        className="text-xs"
+                      />
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={handleSaveIntroText}
+                        disabled={!audioTagEnabled}
+                        className="text-xs shrink-0"
+                      >
+                        Save Script
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 items-center">
+                    <div>
+                      <Label className="text-xs font-medium">Voice Tone & Speed</Label>
+                      <Select
+                        value={audioTagSpeed}
+                        onValueChange={handleSaveSpeed}
+                        disabled={!audioTagEnabled}
+                      >
+                        <SelectTrigger className="mt-1 h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="0.80">0.80 (Very Slow & Catchy)</SelectItem>
+                          <SelectItem value="0.88">0.88 (International Studio Pace - Recommended)</SelectItem>
+                          <SelectItem value="0.95">0.95 (Upbeat Studio Pace)</SelectItem>
+                          <SelectItem value="1.00">1.00 (Standard)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="pt-5">
+                      <Button
+                        size="sm"
+                        className="w-full bg-gradient-to-r from-amber-500 to-red-500 hover:from-amber-600 hover:to-red-600 text-slate-950 font-bold gap-1.5 text-xs h-8 shadow-md"
+                        onClick={() => playZedVevoIntroTagSequence()}
+                      >
+                        <Play className="h-3.5 w-3.5 fill-current" />
+                        Test Merged Jingle & Voice Tag
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-border pt-4 space-y-4">
+                  {/* Outro Promotional Message */}
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-muted/40 border border-border">
+                    <div>
+                      <Label className="text-sm font-medium">Enable End-of-Song Artist Promo</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Promotes app download & artist earnings 7s before song ends
+                      </p>
+                    </div>
+                    <Switch
+                      checked={audioTagOutroEnabled}
+                      onCheckedChange={toggleAudioTagOutroEnabled}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-medium">Outro Promo Message Text</Label>
+                    <Textarea
+                      rows={2}
+                      value={audioOutroText}
+                      onChange={(e) => setAudioOutroText(e.target.value)}
+                      placeholder="Are You An Artist or Content Creator? Download Zed Vevo App And Discover How To Earn Money"
+                      disabled={!audioTagOutroEnabled}
+                      className="text-xs resize-none"
+                    />
+                    <div className="flex justify-between items-center pt-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 text-xs h-8"
+                        onClick={() => playZedVevoOutroTag()}
+                      >
+                        <Volume2 className="h-3.5 w-3.5 text-amber-500" />
+                        Test Outro Promo
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        className="bg-accent hover:bg-accent/90 text-accent-foreground text-xs h-8"
+                        onClick={handleSaveOutroText}
+                        disabled={!audioTagOutroEnabled}
+                      >
+                        Save Outro Message
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>

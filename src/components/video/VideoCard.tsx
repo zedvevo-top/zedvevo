@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Play, Heart, BookmarkPlus, Share2, Video as VideoIcon, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import type { Video } from '@/types/index';
 import { useAuth } from '@/contexts/AuthContext';
-import { toggleLike, toggleSave, recordDownload, incrementVideoDownloadCount } from '@/lib/api';
+import { toggleLike, toggleSave, recordDownload, incrementVideoDownloadCount, getLikedContentIds } from '@/lib/api';
 import { formatDuration } from '@/lib/utils';
 import ShareSheet from '@/components/common/ShareSheet';
+import ZedVevoWatermark from '@/components/common/ZedVevoWatermark';
 
 interface VideoCardProps {
   video: Video;
@@ -17,19 +18,37 @@ interface VideoCardProps {
 export default function VideoCard({ video, onPlay, active = false }: VideoCardProps) {
   const { user } = useAuth();
   const [liked, setLiked] = useState(video.liked ?? false);
+  const [likeCount, setLikeCount] = useState(video.like_count || 0);
+  const [isPopAnimating, setIsPopAnimating] = useState(false);
   const [saved, setSaved] = useState(video.saved ?? false);
   const [downloading, setDownloading] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+
+  useEffect(() => {
+    if (user && video.id && video.liked === undefined) {
+      getLikedContentIds(user.id, 'video').then((ids) => {
+        setLiked(ids.includes(video.id));
+      }).catch(() => {});
+    }
+  }, [user?.id, video.id, video.liked]);
 
   const shareUrl = `${window.location.origin}/video/${video.id}`;
   const shareText = `Watch "${video.title}" by ${video.artist_name} on ZedVevo — ${window.location.origin}/video/${video.id}`;
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!user) { toast.error('Sign in to like videos'); return; }
+    if (!user) {
+      toast.error('Please sign in to like videos');
+      return;
+    }
+
+    setIsPopAnimating(true);
+    setTimeout(() => setIsPopAnimating(false), 800);
+
     try {
       const result = await toggleLike(user.id, video.id, 'video');
       setLiked(result);
+      setLikeCount((prev) => (result ? prev + 1 : Math.max(0, prev - 1)));
       toast.success(result ? 'Added to liked' : 'Removed from liked');
     } catch { toast.error('Failed to update like'); }
   };
@@ -88,6 +107,9 @@ export default function VideoCard({ video, onPlay, active = false }: VideoCardPr
         className="relative aspect-video bg-muted overflow-hidden cursor-pointer"
         onClick={() => onPlay?.(video)}
       >
+        {/* ZedVevo Watermark on Video Thumbnail */}
+        <ZedVevoWatermark size="sm" />
+
         {video.thumbnail_url ? (
           <img src={video.thumbnail_url} alt={video.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
         ) : (
@@ -106,12 +128,12 @@ export default function VideoCard({ video, onPlay, active = false }: VideoCardPr
           </span>
         )}
         {active && (
-          <span className="absolute top-2 left-2 bg-accent text-accent-foreground text-[10px] font-semibold px-2 py-0.5 rounded-full">
+          <span className="absolute top-2 right-2 bg-accent text-accent-foreground text-[10px] font-semibold px-2 py-0.5 rounded-full shadow-md">
             Now Playing
           </span>
         )}
         {!active && video.is_trending && (
-          <span className="absolute top-2 left-2 bg-accent text-accent-foreground text-[10px] font-semibold px-2 py-0.5 rounded-full">
+          <span className="absolute top-2 right-2 bg-accent text-accent-foreground text-[10px] font-semibold px-2 py-0.5 rounded-full shadow-md">
             Trending
           </span>
         )}
@@ -127,8 +149,23 @@ export default function VideoCard({ video, onPlay, active = false }: VideoCardPr
         <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
           <span className="text-xs text-muted-foreground">{video.view_count.toLocaleString()} views</span>
           <div className="flex items-center gap-0.5">
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleLike}>
-              <Heart className={`h-3.5 w-3.5 ${liked ? 'fill-destructive text-destructive' : ''}`} />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="relative h-7 px-1.5 gap-1 text-xs"
+              onClick={handleLike}
+              title={`${likeCount} Likes`}
+            >
+              {/* Floating Heart Particle */}
+              {isPopAnimating && (
+                <Heart className="absolute -top-3 left-1.5 h-4 w-4 fill-rose-500 text-rose-500 animate-heart-float pointer-events-none" />
+              )}
+              <Heart
+                className={`h-3.5 w-3.5 transition-transform duration-200 ${
+                  liked ? 'fill-destructive text-destructive' : ''
+                } ${isPopAnimating ? 'animate-heart-pop text-rose-500' : ''}`}
+              />
+              <span>{likeCount.toLocaleString()}</span>
             </Button>
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleSave}>
               <BookmarkPlus className={`h-3.5 w-3.5 ${saved ? 'fill-accent text-accent' : ''}`} />

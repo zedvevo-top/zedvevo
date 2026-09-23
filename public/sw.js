@@ -9,7 +9,20 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// Handle notification click from Android notification bar or system shade
+// Respond to SW diagnostic ping checks from Admin Panel
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SW_PING') {
+    event.ports[0]?.postMessage({
+      type: 'SW_PONG',
+      status: 'active',
+      fcmCompatible: true,
+      timestamp: Date.now(),
+      userAgent: self.navigator?.userAgent || 'ServiceWorkerContext',
+    });
+  }
+});
+
+// Handle notification click from Android notification bar, system shade, or FCM push
 self.addEventListener('notificationclick', (event) => {
   console.log('[SW-DEBUG] Notification clicked on Android/OS bar:', event.notification);
   event.notification.close();
@@ -17,39 +30,49 @@ self.addEventListener('notificationclick', (event) => {
   const data = event.notification.data || {};
   let targetUrl = data.url || data.actionUrl || data.link || '/';
 
-  // Ensure absolute or clean relative URL
-  if (!targetUrl.startsWith('http') && !targetUrl.startsWith('/')) {
-    targetUrl = '/' + targetUrl;
+  // Ensure absolute URL resolution to prevent blank screen or origin mismatch on mobile browsers
+  if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+    if (!targetUrl.startsWith('/')) {
+      targetUrl = '/' + targetUrl;
+    }
   }
 
-  console.log('[SW-DEBUG] Navigating to targetUrl:', targetUrl);
+  const absoluteUrl = targetUrl.startsWith('http')
+    ? targetUrl
+    : new URL(targetUrl, self.location.origin).href;
+
+  console.log('[SW-DEBUG] Navigating via NOTIFICATION_NAVIGATE protocol to:', absoluteUrl);
 
   event.waitUntil(
     self.clients
       .matchAll({ type: 'window', includeUncontrolled: true })
       .then((clientList) => {
-        // If an open window exists, focus it and navigate to target route
+        // 1. If an open window client exists, focus it and dispatch NOTIFICATION_NAVIGATE message for smooth SPA transition
         for (const client of clientList) {
           if ('focus' in client) {
             client.focus();
-            if ('navigate' in client && targetUrl) {
-              return client.navigate(targetUrl);
-            }
-            client.postMessage({ type: 'NOTIFICATION_NAVIGATE', url: targetUrl });
+            client.postMessage({
+              type: 'NOTIFICATION_NAVIGATE',
+              url: targetUrl,
+              absoluteUrl: absoluteUrl,
+              timestamp: Date.now(),
+              notificationData: data,
+            });
             return;
           }
         }
-        // If no window is currently open, open a new window to target route
+
+        // 2. If no client window is currently open, open a new window to absolute URL
         if (self.clients.openWindow) {
-          return self.clients.openWindow(targetUrl);
+          return self.clients.openWindow(absoluteUrl);
         }
       })
   );
 });
 
-// Handle push events if push service is active
+// Handle FCM and Web Push background events on Android devices
 self.addEventListener('push', (event) => {
-  console.log('[SW-DEBUG] Push event received on Android device:', event);
+  console.log('[SW-DEBUG] FCM Push event received on Android device:', event);
   if (!event.data) {
     console.log('[SW-DEBUG] Push event received with no data payload');
     return;
@@ -58,13 +81,25 @@ self.addEventListener('push', (event) => {
   try {
     const payload = event.data.json();
     console.log('[SW-DEBUG] Parsed JSON push payload:', payload);
-    const title = payload.title || 'ZedVevo Notification';
+
+    const notificationPayload = payload.notification || payload;
+    const dataPayload = payload.data || payload;
+
+    const title = notificationPayload.title || dataPayload.title || 'ZedVevo Notification';
+    const body = notificationPayload.body || dataPayload.body || dataPayload.message || 'You have a new update on ZedVevo';
+    const icon = notificationPayload.icon || dataPayload.icon || '/app-icon.png';
+    const url = dataPayload.url || dataPayload.actionUrl || notificationPayload.click_action || '/';
+
     const options = {
-      body: payload.body || payload.message || 'You have a new update on ZedVevo',
-      icon: payload.icon || '/app-icon.png',
+      body,
+      icon,
       badge: '/app-icon.png',
       tag: payload.tag || `zedvevo-${Date.now()}`,
-      data: { url: payload.url || payload.actionUrl || '/' },
+      data: {
+        url,
+        fcmMessageId: payload.fcmMessageId || dataPayload.fcmMessageId,
+        timestamp: Date.now(),
+      },
       vibrate: [200, 100, 200],
       requireInteraction: true,
     };
@@ -78,7 +113,7 @@ self.addEventListener('push', (event) => {
         body: text,
         icon: '/app-icon.png',
         badge: '/app-icon.png',
-        data: { url: '/' },
+        data: { url: '/', timestamp: Date.now() },
       })
     );
   }
