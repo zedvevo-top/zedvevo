@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
 import { supabase } from '@/db/supabase';
 import type { User } from '@supabase/supabase-js';
 import type { Profile } from '@/types/index';
@@ -66,11 +66,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(profileData);
   };
 
+  const initialLoadRef = useRef(true);
+
   useEffect(() => {
     supabase.auth.getSession()
       .then(({ data: { session }, error }) => {
         if (error) {
           if (error.message?.toLowerCase().includes('refresh token') || error.message?.toLowerCase().includes('not found')) {
+            toast.warning('Your login session has expired. Please log in again.');
             supabase.auth.signOut().catch(() => {});
           }
           setUser(null);
@@ -78,24 +81,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         setUser(session?.user ?? null);
-        if (session?.user) getProfile(session.user.id).then(setProfile);
+        if (session?.user) {
+          getProfile(session.user.id).then(setProfile);
+        }
       })
       .catch(error => {
         if (error?.message?.toLowerCase().includes('refresh token') || error?.message?.toLowerCase().includes('not found')) {
+          toast.warning('Your login session has expired. Please log in again.');
           supabase.auth.signOut().catch(() => {});
         } else if (error?.message) {
           toast.error(`Session error: ${error.message}`);
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        // Turn off initial load flag after session resolution is done
+        setTimeout(() => {
+          initialLoadRef.current = false;
+        }, 1000);
+      });
 
     // Do NOT use await inside onAuthStateChange – use .then() to avoid deadlocks.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        getProfile(session.user.id).then(setProfile);
+        getProfile(session.user.id).then((prof) => {
+          setProfile(prof);
+          if (event === 'SIGNED_IN' && !initialLoadRef.current) {
+            toast.success(`Welcome back, ${prof?.display_name || session.user.email}!`);
+          }
+        });
       } else {
         setProfile(null);
+        if (event === 'SIGNED_OUT' && !initialLoadRef.current) {
+          toast.info('You have logged out successfully.');
+        } else if (event === 'USER_UPDATED' && !session && !initialLoadRef.current) {
+          toast.warning('Your login session expired. Please log in again.');
+        }
       }
     });
 

@@ -28,6 +28,65 @@ export default function PaymentStatusOverlay({
   onSimulate
 }: PaymentStatusOverlayProps) {
   const [simulating, setSimulating] = React.useState(false);
+  const [dbStatus, setDbStatus] = React.useState<string | null>(null);
+  const [dbFailureReason, setDbFailureReason] = React.useState<string | null>(null);
+
+  // Watch status in the database in real-time
+  React.useEffect(() => {
+    if (!paymentId) return;
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paymentId);
+
+    const fetchRecord = async () => {
+      try {
+        let query = supabase.from('payments').select('*');
+        if (isUuid) {
+          query = query.eq('id', paymentId);
+        } else {
+          query = query.or(`lipila_transaction_id.eq.${paymentId},lipila_reference.eq.${paymentId},external_id.eq.${paymentId}`);
+        }
+        const { data, error } = await query.maybeSingle();
+        if (!error && data) {
+          setDbStatus(data.status);
+          setDbFailureReason(data.failure_reason);
+        }
+      } catch (err) {
+        console.warn('[Overlay Watcher] Error fetching status:', err);
+      }
+    };
+
+    fetchRecord();
+    const interval = setInterval(fetchRecord, 1500);
+
+    // Also listen to realtime updates on payments table
+    let channel: any;
+    if (isUuid) {
+      channel = supabase
+        .channel(`overlay_realtime_watch_${paymentId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'payments',
+            filter: `id=eq.${paymentId}`,
+          },
+          (payload) => {
+            const p = payload.new as any;
+            if (p) {
+              setDbStatus(p.status);
+              setDbFailureReason(p.failure_reason);
+            }
+          }
+        )
+        .subscribe();
+    }
+
+    return () => {
+      clearInterval(interval);
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [paymentId]);
 
   if (!status) return null;
 
@@ -54,6 +113,11 @@ export default function PaymentStatusOverlay({
       }
 
       await query;
+      // Instantly reflect simulated status locally
+      setDbStatus(simStatus);
+      if (simStatus === 'failed') {
+        setDbFailureReason('Simulated mobile network PIN decline.');
+      }
     } catch (err) {
       console.warn('[Simulation] Error updating payment record:', err);
     } finally {
@@ -61,14 +125,28 @@ export default function PaymentStatusOverlay({
     }
   };
 
-  const showSimulate = status === 'pending' && (paymentId || onSimulate);
+  // Map database status or prop status to display mode
+  const rawStatus = dbStatus || (
+    status === 'success' ? 'completed' :
+    status === 'failed' ? 'failed' :
+    'pending'
+  );
+
+  const displayStatus: 'pending' | 'success' | 'failed' =
+    (rawStatus === 'completed' || rawStatus === 'successful') ? 'success' :
+    (['failed', 'declined', 'cancelled', 'insufficient_funds'].includes(rawStatus)) ? 'failed' :
+    'pending';
+
+  const activeFailureReason = dbFailureReason || failureReason;
+
+  const showSimulate = displayStatus === 'pending' && (paymentId || onSimulate);
 
   return (
     <div className="absolute inset-0 bg-background/98 backdrop-blur-md z-50 flex flex-col justify-between p-6 animate-in fade-in duration-200">
       <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full space-y-6">
         
         {/* ── PENDING STATE ── */}
-        {status === 'pending' && (
+        {displayStatus === 'pending' && (
           <div className="space-y-5">
             <div className="text-center space-y-3">
               <div className="relative h-16 w-16 mx-auto flex items-center justify-center">
@@ -140,7 +218,7 @@ export default function PaymentStatusOverlay({
         )}
 
         {/* ── SUCCESS STATE ── */}
-        {status === 'success' && (
+        {displayStatus === 'success' && (
           <div className="space-y-5 text-center animate-in zoom-in-95 duration-300">
             <div className="h-16 w-16 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto">
               <CheckCircle2 className="h-8 w-8 text-emerald-500" />
@@ -164,14 +242,14 @@ export default function PaymentStatusOverlay({
               </div>
               <div className="flex justify-between text-xs py-1">
                 <span className="text-muted-foreground">Status</span>
-                <span className="font-semibold text-emerald-500">Completed</span>
+                <span className="font-semibold text-emerald-500">Completed (Original: {rawStatus})</span>
               </div>
             </div>
           </div>
         )}
 
         {/* ── FAILED STATE ── */}
-        {status === 'failed' && (
+        {displayStatus === 'failed' && (
           <div className="space-y-5 text-center animate-in zoom-in-95 duration-300">
             <div className="h-16 w-16 bg-destructive/10 border border-destructive/30 rounded-full flex items-center justify-center mx-auto">
               <XCircle className="h-8 w-8 text-destructive" />
@@ -179,14 +257,14 @@ export default function PaymentStatusOverlay({
             <div className="space-y-1">
               <h3 className="font-bold text-lg text-foreground tracking-tight">Transaction Failed</h3>
               <p className="text-xs text-destructive/90 bg-destructive/5 py-1 px-2 rounded-lg border border-destructive/10 max-w-xs mx-auto">
-                {failureReason || 'Declined or timed out. Please try again.'}
+                {activeFailureReason || 'Declined or timed out. Please try again.'}
               </p>
             </div>
 
             {/* Troubleshooting Note */}
             <div className="bg-muted/40 border border-border/50 rounded-xl p-4 text-left space-y-2.5">
               <h4 className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                <HelpCircle className="h-3.5 w-3.5 text-accent" /> Common Solutions:
+                <HelpCircle className="h-3.5 w-3.5 text-accent" /> Status: {rawStatus}
               </h4>
               <ul className="space-y-1.5 text-xs text-muted-foreground list-disc pl-4">
                 <li>Ensure you have enough balance in your wallet.</li>
@@ -201,17 +279,17 @@ export default function PaymentStatusOverlay({
 
       {/* ── FIXED BOTTOM ACTIONS ── */}
       <div className="pt-4 border-t border-border/50 max-w-sm mx-auto w-full flex gap-2">
-        {status === 'pending' && (
+        {displayStatus === 'pending' && (
           <Button variant="outline" className="w-full text-xs h-10 font-medium" onClick={onClose}>
             Close & Verify in Background
           </Button>
         )}
-        {status === 'success' && (
+        {displayStatus === 'success' && (
           <Button className="w-full bg-accent hover:bg-accent/90 text-accent-foreground text-xs h-10 font-semibold" onClick={onClose}>
             Continue
           </Button>
         )}
-        {status === 'failed' && (
+        {displayStatus === 'failed' && (
           <>
             <Button variant="outline" className="flex-1 text-xs h-10" onClick={onClose}>
               Cancel

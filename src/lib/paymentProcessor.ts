@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { applyPaymentBenefits } from '@/lib/api';
 import { detectNetwork } from '@/services/lipila';
+import { LIPILA_CONFIG } from '@/constants';
 
 export interface UnifiedPaymentParams {
   amount: number;
@@ -200,6 +201,75 @@ export function listenForPaymentStatus(
     }
   };
 
+  // Synchronously fetch real-time status from Lipila API as a proactive backup poller
+  const checkLipilaGatewayStatus = async (p: any) => {
+    if (!p || !LIPILA_CONFIG.apiKey || isStopped) return p;
+    // Skip checking if already terminal
+    if (['completed', 'successful', 'failed', 'declined', 'cancelled', 'insufficient_funds'].includes(p.status)) {
+      return p;
+    }
+
+    try {
+      const refId = p.reference_id || p.id || paymentId;
+      if (!refId) return p;
+
+      // Ensure we are not sending local LIP- mock prefixes to the real Lipila endpoint
+      if (String(refId).startsWith('LIP-')) {
+        return p;
+      }
+
+      console.log(`[Real-time Poller] Proactively checking status of ${refId} from Lipila API...`);
+      const response = await fetch(
+        `${LIPILA_CONFIG.apiUrl}/payments/${refId}/status`,
+        {
+          headers: {
+            'Authorization': `Bearer ${LIPILA_CONFIG.apiKey}`,
+            'X-API-Key': LIPILA_CONFIG.apiKey,
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        const rawStatus = String(data.status || '').toLowerCase();
+        const rawMessage = String(data.message || '');
+        const isSuccess = rawStatus === 'successful' || rawStatus === 'success' || rawStatus === 'completed';
+        const isFailed = rawStatus === 'failed' || rawStatus === 'failure';
+        const isInsufficient = rawMessage.toUpperCase().includes('LOW_BALANCE') || rawMessage.toLowerCase().includes('insufficient');
+
+        let newStatus: string | null = null;
+        if (isSuccess) newStatus = 'completed';
+        else if (isInsufficient) newStatus = 'insufficient_funds';
+        else if (isFailed) newStatus = 'failed';
+
+        if (newStatus && newStatus !== p.status) {
+          console.log('[Real-time Poller] Got status update from Lipila API:', newStatus);
+          
+          // Update the database immediately
+          const { error: updateErr } = await supabase
+            .from('payments')
+            .update({
+              status: newStatus,
+              failure_reason: isFailed ? rawMessage || 'Payment declined.' : null,
+              completed_at: isSuccess ? new Date().toISOString() : null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', p.id);
+
+          if (!updateErr) {
+            p.status = newStatus;
+            if (isFailed) {
+              p.failure_reason = rawMessage || 'Payment declined.';
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Real-time Poller] error querying status from Lipila:', err);
+    }
+    return p;
+  };
+
   // Helper to process the matched payment state
   const checkStatusResult = async (p: any) => {
     if (!p || isStopped) return false;
@@ -253,9 +323,10 @@ export function listenForPaymentStatus(
   }
 
   // 2. Perform IMMEDIATE check on start
-  fetchPaymentRecord().then((p) => {
+  fetchPaymentRecord().then(async (p) => {
     if (p) {
-      checkStatusResult(p);
+      const updatedP = await checkLipilaGatewayStatus(p);
+      checkStatusResult(updatedP);
     }
   });
 
@@ -267,7 +338,8 @@ export function listenForPaymentStatus(
     }
     const p = await fetchPaymentRecord();
     if (p) {
-      await checkStatusResult(p);
+      const updatedP = await checkLipilaGatewayStatus(p);
+      await checkStatusResult(updatedP);
     }
   }, 3000);
 
