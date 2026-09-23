@@ -83,7 +83,6 @@ export default function SongPage() {
 
   if (!song) return null
 
-  const artistName = (song.artist as any)?.stage_name || (song as any).artist_name || 'ZedVevo Artist';
   const pageTitle = `${song.title} by ${artistName} — ZedVevo`;
   const pageDescription = `Stream and download "${song.title}" by ${artistName} on ZedVevo.${song.album ? ` From the album ${song.album.title}.` : ''}`;
   const rawCover = song.cover_url || '';
