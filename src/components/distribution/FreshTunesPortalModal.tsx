@@ -1,5 +1,17 @@
-import React from 'react';
-import { ExternalLink, CheckCircle2, Globe, Music, Sparkles, ArrowRight, ShieldCheck } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  ExternalLink,
+  RotateCw,
+  X,
+  Lock,
+  Globe,
+  Music,
+  CheckCircle2,
+  Maximize2,
+  Minimize2,
+  Loader2,
+  Sparkles,
+} from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -13,129 +25,168 @@ import { Badge } from '@/components/ui/badge';
 interface FreshTunesPortalModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onProceedToUpload: () => void;
+  onProceedToUpload?: () => void;
 }
-
-const STREAMING_PLATFORMS = [
-  { name: 'Spotify', color: '#1DB954' },
-  { name: 'Apple Music', color: '#FA243C' },
-  { name: 'YouTube Music', color: '#FF0000' },
-  { name: 'TikTok', color: '#00F2FE' },
-  { name: 'Amazon Music', color: '#00A8E1' },
-  { name: 'Deezer', color: '#A238FF' },
-  { name: 'Boomplay', color: '#00C853' },
-  { name: 'Audiomack', color: '#FFA000' },
-];
 
 export default function FreshTunesPortalModal({
   open,
   onOpenChange,
   onProceedToUpload,
 }: FreshTunesPortalModalProps) {
-  const handleOpenFreshTunes = () => {
-    // Open the real web www.freshtunes.com in a new browser window/tab
-    // This preserves the app iframe and keeps the user in ZedVevo
-    window.open('https://www.freshtunes.com', '_blank', 'noopener,noreferrer');
+  const [iframeKey, setIframeKey] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
+
+  const handleRefresh = () => {
+    setIsLoading(true);
+    setIframeKey((prev) => prev + 1);
+  };
+
+  const handleClose = () => {
+    onOpenChange(false);
+  };
+
+  const handleProceed = () => {
+    onOpenChange(false);
+    if (onProceedToUpload) {
+      onProceedToUpload();
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md sm:max-w-lg bg-card border-border shadow-2xl p-0 overflow-hidden">
-        {/* Header with App Theme Accent */}
-        <div className="relative p-6 bg-gradient-to-br from-card via-card to-accent/10 border-b border-border/80">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <div className="flex items-center gap-2">
-              <span className="font-black tracking-tight text-foreground text-lg">ZedVevo</span>
-              <span className="text-muted-foreground text-xs">✕</span>
-              <span className="font-bold text-accent text-sm tracking-wide">FreshTunes</span>
+      <DialogContent
+        className={`bg-background border border-border shadow-2xl p-0 overflow-hidden flex flex-col transition-all duration-300 ${
+          isFullScreen
+            ? 'w-screen h-screen max-w-none max-h-none rounded-none'
+            : 'w-[96vw] max-w-6xl h-[88vh] max-h-[880px] rounded-2xl'
+        }`}
+      >
+        <DialogHeader className="sr-only">
+          <DialogTitle>FreshTunes All Streaming Platforms Portal</DialogTitle>
+          <DialogDescription>
+            Embedded in-app frame to distribute your music to Spotify, Apple Music, and DSPs worldwide via FreshTunes.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* In-App Browser App Frame Header */}
+        <div className="bg-card border-b border-border/80 px-4 py-2.5 flex items-center justify-between gap-3 shrink-0">
+          {/* Left: Branding & Status */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="flex items-center gap-1.5 bg-accent/10 border border-accent/30 text-accent rounded-lg px-2.5 py-1 text-xs font-bold">
+              <Globe className="h-3.5 w-3.5" />
+              <span>FreshTunes Portal</span>
             </div>
-            <Badge variant="outline" className="border-accent/40 bg-accent/10 text-accent gap-1 text-[11px] font-semibold py-0.5">
-              <CheckCircle2 className="h-3 w-3" /> Plan Activated
+            <Badge
+              variant="outline"
+              className="hidden sm:inline-flex border-emerald-500/40 bg-emerald-500/10 text-emerald-500 gap-1 text-[11px] font-semibold py-0.5"
+            >
+              <CheckCircle2 className="h-3 w-3" /> All Streaming Unlocked
             </Badge>
           </div>
 
-          <DialogHeader className="text-left">
-            <DialogTitle className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-              <span>All Streaming Platforms</span>
-              <Sparkles className="h-4 w-4 text-accent" />
-            </DialogTitle>
-            <DialogDescription className="text-sm text-muted-foreground mt-1">
-              Your payment is authenticated! Your release will be distributed worldwide through FreshTunes and featured on ZedVevo.
-            </DialogDescription>
-          </DialogHeader>
+          {/* Center: In-App Browser URL Bar */}
+          <div className="flex-1 max-w-xl mx-auto flex items-center gap-2 bg-muted/50 border border-border/80 rounded-xl px-3 py-1.5 text-xs text-muted-foreground shadow-inner">
+            <Lock className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+            <span className="font-mono text-[11px] sm:text-xs text-foreground truncate select-all">
+              https://freshtunes.com/
+            </span>
+            <div className="ml-auto flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={handleRefresh}
+                title="Reload Portal"
+                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <RotateCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin text-accent' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* Right: Frame Controls */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsFullScreen(!isFullScreen)}
+              title={isFullScreen ? 'Exit Full Screen' : 'Full Screen'}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors hidden sm:inline-flex"
+            >
+              {isFullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => window.open('https://freshtunes.com/', '_blank', 'noopener,noreferrer')}
+              title="Open in new window (optional)"
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors hidden md:inline-flex"
+            >
+              <ExternalLink className="h-4 w-4" />
+            </button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleClose}
+              className="h-8 px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg"
+            >
+              <X className="h-4 w-4 mr-1" />
+              <span>Done</span>
+            </Button>
+          </div>
         </div>
 
-        {/* Body Content */}
-        <div className="p-6 space-y-5">
-          {/* Platforms Grid */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">
-              Global Distribution Coverage
-            </p>
-            <div className="grid grid-cols-4 gap-2">
-              {STREAMING_PLATFORMS.map((platform) => (
-                <div
-                  key={platform.name}
-                  className="flex items-center justify-center p-2 rounded-lg bg-muted/30 border border-border/60 text-center hover:border-accent/40 transition-colors"
-                >
-                  <span className="text-xs font-medium text-foreground truncate">{platform.name}</span>
-                </div>
-              ))}
+        {/* Main App Frame Area */}
+        <div className="relative flex-1 w-full bg-muted/20 overflow-hidden">
+          {/* Loading indicator */}
+          {isLoading && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-xs gap-3">
+              <Loader2 className="h-8 w-8 text-accent animate-spin" />
+              <div className="text-center">
+                <p className="text-sm font-semibold text-foreground">Loading FreshTunes Portal...</p>
+                <p className="text-xs text-muted-foreground">Preparing in-app frame for all streaming distribution</p>
+              </div>
             </div>
+          )}
+
+          {/* Embedded App Frame */}
+          <iframe
+            key={iframeKey}
+            src="https://freshtunes.com/"
+            title="FreshTunes In-App Frame"
+            className="w-full h-full border-0 bg-white"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            onLoad={() => setIsLoading(false)}
+          />
+        </div>
+
+        {/* Footer Quick Controls */}
+        <div className="bg-card border-t border-border/80 px-4 py-2.5 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Sparkles className="h-3.5 w-3.5 text-accent" />
+            <span className="hidden sm:inline">Global DSPs: Spotify, Apple Music, YouTube Music, Deezer, TikTok & Boomplay.</span>
+            <span className="text-foreground font-medium">Keep 100% Royalties</span>
           </div>
 
-          {/* Workflow Steps */}
-          <div className="rounded-xl border border-border/80 bg-muted/20 p-4 space-y-3">
-            <div className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-accent/15 text-accent text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                1
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-semibold text-foreground">Upload to ZedVevo</p>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  First, complete your upload here on ZedVevo for instant Zambian streaming, downloads, and airplay charts.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-3">
-              <div className="w-6 h-6 rounded-full bg-accent/15 text-accent text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                2
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-semibold text-foreground">Open FreshTunes Real Web</p>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Use your credentials at <span className="font-mono text-accent">www.freshtunes.com</span> to register your ISRC and deliver to DSPs worldwide with 100% royalties kept.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="space-y-2.5 pt-1">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <Button
-              onClick={handleOpenFreshTunes}
-              className="w-full h-11 bg-accent hover:bg-accent/90 text-accent-foreground font-semibold flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Globe className="h-4 w-4" />
-              <span>Open www.freshtunes.com (Real Web)</span>
-              <ExternalLink className="h-4 w-4 ml-auto" />
-            </Button>
-
-            <Button
+              type="button"
               variant="outline"
-              onClick={onProceedToUpload}
-              className="w-full h-10 border-border hover:bg-muted font-medium flex items-center justify-center gap-2"
+              size="sm"
+              onClick={handleClose}
+              className="flex-1 sm:flex-none h-8 text-xs font-medium border-border"
             >
-              <Music className="h-4 w-4 text-accent" />
-              <span>Proceed to Upload on ZedVevo</span>
-              <ArrowRight className="h-4 w-4 ml-auto text-muted-foreground" />
+              Close Frame
             </Button>
-          </div>
-
-          <div className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5 text-accent" />
-            <span>Opens real external website in a clean new tab without breaking the app</span>
+            {onProceedToUpload && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleProceed}
+                className="flex-1 sm:flex-none h-8 text-xs font-semibold bg-accent hover:bg-accent/90 text-accent-foreground flex items-center gap-1.5"
+              >
+                <Music className="h-3.5 w-3.5" />
+                <span>Upload to ZedVevo</span>
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>

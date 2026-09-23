@@ -28,7 +28,24 @@ if (typeof window !== "undefined") {
 }
 
 createRoot(document.getElementById("root")!).render(
-  <Sentry.ErrorBoundary fallback={<p>应用发生错误，请刷新页面重试</p>}>
+  <Sentry.ErrorBoundary fallback={
+    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="max-w-md w-full bg-card border border-border p-6 rounded-3xl text-center shadow-xl space-y-4">
+        <h2 className="text-lg font-black text-white">ZedVevo System Notice</h2>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Your session was refreshed or signed out. Please return to home or sign in to continue enjoying ZedVevo.
+        </p>
+        <div className="flex gap-2 justify-center pt-2">
+          <a href="/" className="px-4 py-2 bg-accent text-accent-foreground rounded-xl font-bold text-xs hover:bg-accent/90 transition-colors">
+            Home
+          </a>
+          <a href="/login" className="px-4 py-2 bg-muted text-foreground rounded-xl font-bold text-xs hover:bg-muted/80 transition-colors">
+            Sign In
+          </a>
+        </div>
+      </div>
+    </div>
+  }>
     <AppWrapper>
       <App />
     </AppWrapper>

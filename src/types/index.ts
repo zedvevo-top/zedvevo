@@ -22,6 +22,7 @@ export interface Profile {
   bio?: string;
   role: UserRole;
   is_artist?: boolean;
+  upload_access?: 'active' | 'inactive' | string;
   created_at: string;
   updated_at: string;
 }
@@ -55,6 +56,8 @@ export interface UserSubscription {
   activated_at?: string;
   expires_at?: string;
   is_active: boolean;
+  consumed?: boolean;
+  status?: string;
   created_at: string;
   upload_plans?: UploadPlan;
 }
@@ -340,15 +343,22 @@ export interface HeroBanner {
 
 export interface Notification {
   id: string;
-  user_id?: string;
+  user_id?: string | null;
   title: string;
   message: string;
-  type: 'info' | 'success' | 'warning' | 'error';
+  type?: 'info' | 'success' | 'warning' | 'error' | string;
   notification_type: string;
   link?: string;
-  metadata?: Record<string, unknown>;
+  action_url?: string;
+  action_label?: string;
+  payment_id?: string;
+  transaction_id?: string;
+  nominee_id?: string;
+  target_id?: string;
+  metadata?: Record<string, any>;
   is_read: boolean;
   created_at: string;
+  read_at?: string;
 }
 
 export interface LipilaPaymentResponse {

@@ -10,7 +10,7 @@ export function IOSBackButton({ label = 'Back', homePath = '/' }: { label?: stri
     <div className="flex items-center justify-between py-3 px-4 mb-4 bg-card/40 backdrop-blur-xl border border-border/40 rounded-2xl shadow-sm">
       <button
         onClick={() => {
-          if (window.history.length > 2) {
+          if (window.history.length > 1) {
             navigate(-1);
           } else {
             navigate(homePath);

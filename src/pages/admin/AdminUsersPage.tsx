@@ -112,22 +112,28 @@ export default function AdminUsersPage() {
     if (!promoteTarget) return;
     setPromoteLoading(true);
     try {
-      // Update profile to artist
-      await updateProfile(promoteTarget.id, { role: 'artist', is_artist: true });
+      const registeredName = promoteTarget.display_name || 
+                             (promoteTarget as any).full_name || 
+                             promoteTarget.username || 
+                             promoteTarget.email?.split('@')[0] || 
+                             'Artist';
 
-      // Create artist record if not exists
-      const { data: existingArtist } = await supabase
-        .from('artists')
-        .select('id')
-        .eq('user_id', promoteTarget.id)
-        .single();
+      // Update profile to artist with active upload access
+      await updateProfile(promoteTarget.id, { 
+        role: 'artist', 
+        is_artist: true,
+        upload_access: 'active',
+      } as any);
 
-      if (!existingArtist) {
-        await supabase.from('artists').insert({
-          user_id: promoteTarget.id,
-          stage_name: promoteTarget.display_name || promoteTarget.username || promoteTarget.email?.split('@')[0] || 'Artist',
-        });
-      }
+      // Create or update artist record with registered details
+      await supabase.from('artists').upsert({
+        user_id: promoteTarget.id,
+        name: registeredName,
+        stage_name: registeredName,
+        bio: (promoteTarget as any).bio || undefined,
+        avatar_url: (promoteTarget as any).avatar_url || undefined,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
 
       // Create subscription
       const plan = ARTIST_PLANS[promotePlan];
@@ -137,6 +143,27 @@ export default function AdminUsersPage() {
       else if (promotePlan === 'weekly') endDate.setDate(endDate.getDate() + 7);
       else endDate.setFullYear(endDate.getFullYear() + 1);
 
+      const isOneTime = promotePlan === 'daily';
+
+      // 1. user_subscriptions
+      await supabase.from('user_subscriptions')
+        .update({ is_active: false, status: 'inactive' })
+        .eq('user_id', promoteTarget.id);
+
+      await supabase.from('user_subscriptions').insert({
+        user_id: promoteTarget.id,
+        plan_id: '00000000-0000-0000-0000-000000000001',
+        plan_type: promotePlan === 'weekly' ? 'k100_weekly' : promotePlan === 'annual' ? 'k300_yearly' : 'k10_single',
+        uploads_used: 0,
+        uploads_allowed: isOneTime ? 1 : null,
+        activated_at: now.toISOString(),
+        expires_at: endDate.toISOString(),
+        is_active: true,
+        status: 'active',
+        consumed: false,
+      });
+
+      // 2. artist_subscriptions
       await supabase.from('artist_subscriptions').upsert({
         user_id: promoteTarget.id,
         plan: promotePlan,

@@ -251,6 +251,18 @@ export const lipilaService = {
         : data.status === 'refunded' ? 'refunded' 
         : 'pending'
 
+      if (newStatus === 'completed') {
+        await supabase
+          .from('payments')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', payment.id)
+
+        await handleSuccessfulPayment(payment.id, payment)
+      }
+
       return {
         success: newStatus === 'completed',
         status: newStatus as 'pending' | 'completed' | 'failed' | 'refunded',
@@ -258,8 +270,8 @@ export const lipilaService = {
         reference: payment.reference_id,
       }
     } catch (error) {
-      console.error('Error checking payment status:', error)
-      return { success: false, status: 'pending', error: 'Verification failed' }
+      console.warn('Backend API verification query error:', error)
+      return { success: false, status: 'pending', error: 'Waiting for payment confirmation.' }
     }
   },
 
@@ -344,6 +356,34 @@ export const lipilaService = {
 
     return data || []
   },
+
+  async autoActivateAllSuccessfulArtistPlans() {
+    return autoActivateAllSuccessfulArtistPlans();
+  },
+}
+
+export async function autoActivateAllSuccessfulArtistPlans() {
+  try {
+    const { data: successfulPayments } = await supabase
+      .from('payments')
+      .select('*')
+      .in('payment_type', ['artist_subscription', 'upload', 'upload_plan', 'plan', 'subscription'])
+      .in('status', ['completed', 'successful', 'SUCCESSFUL', 'COMPLETED']);
+
+    if (!successfulPayments) return;
+
+    for (const payment of successfulPayments) {
+      if (payment.user_id) {
+        const metadata = (payment.metadata as Record<string, unknown>) || {};
+        const rawPlan = (metadata?.item_id as string) || (metadata?.plan_type as string) || (metadata?.plan_id as string) || (payment.plan_id) || 'daily';
+        const planKey = rawPlan.includes('year') || rawPlan.includes('300') || rawPlan === 'annual' ? 'annual' :
+                        rawPlan.includes('week') || rawPlan.includes('100') ? 'weekly' : 'daily';
+        await activateArtistSubscription(payment.user_id, planKey, payment.id);
+      }
+    }
+  } catch (err) {
+    console.warn('Error auto-activating successful artist plans:', err);
+  }
 }
 
 async function handleSuccessfulPayment(paymentId: string, payment: Payment): Promise<void> {
@@ -421,36 +461,68 @@ async function activateArtistSubscription(
     auto_renew: false,
   }
 
-  // Always update profile to artist first — do this regardless of subscription insert result
+  // Always fetch profile to use exact registered details
+  const { data: prof } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
+
+  const registeredArtistName = prof?.display_name || 
+                               (prof as any)?.full_name || 
+                               prof?.username || 
+                               prof?.email?.split('@')[0] || 
+                               'Artist';
+
+  // Always update profile to artist with active upload access
   await supabase
     .from('profiles')
-    .update({ is_artist: true, role: 'artist' })
-    .eq('id', userId)
-
-  // Ensure artist record exists
-  const { data: artistExists } = await supabase
-    .from('artists')
-    .select('id')
-    .eq('user_id', userId)
-    .single()
-
-  if (!artistExists) {
-    const { data: userData } = await supabase
-      .from('profiles')
-      .select('full_name, username')
-      .eq('id', userId)
-      .single()
-    
-    await supabase.from('artists').insert({
-      user_id: userId,
-      stage_name: userData?.full_name || userData?.username || 'New Artist',
+    .update({ 
+      is_artist: true, 
+      role: (prof?.role === 'admin' || prof?.role === 'super_admin') ? prof.role : 'artist', 
+      upload_access: 'active',
+      updated_at: new Date().toISOString()
     })
-  }
+    .eq('id', userId);
+
+  // Always ensure artist record is upserted with their registered details
+  await supabase.from('artists').upsert({
+    user_id: userId,
+    name: registeredArtistName,
+    stage_name: registeredArtistName,
+    bio: prof?.bio || undefined,
+    avatar_url: prof?.avatar_url || undefined,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'user_id' });
 
   // Upsert subscription (handles existing expired subscriptions gracefully)
   const { error } = await supabase
     .from('artist_subscriptions')
     .upsert(subscription, { onConflict: 'user_id,plan' })
+
+  // Also sync user_subscriptions with consumed: false, status: 'active', is_active: true
+  const mappedPlanType = planType === 'weekly' ? 'k100_weekly' : planType === 'annual' ? 'k300_yearly' : 'k10_single'
+  const isOneTime = plan.songLimit === 1
+
+  await supabase
+    .from('user_subscriptions')
+    .update({ is_active: false, status: 'inactive' })
+    .eq('user_id', userId)
+
+  await supabase
+    .from('user_subscriptions')
+    .insert({
+      user_id: userId,
+      plan_id: paymentId,
+      plan_type: mappedPlanType,
+      uploads_used: 0,
+      uploads_allowed: isOneTime ? 1 : null,
+      activated_at: startDate.toISOString(),
+      expires_at: endDate.toISOString(),
+      is_active: true,
+      status: 'active',
+      consumed: false,
+    })
 
   if (!error) {
     await supabase.from('notifications').insert({

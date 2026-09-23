@@ -15,6 +15,7 @@ import NotificationBell from '@/components/notifications/NotificationBell';
 import DonationDialog from '@/components/donation/DonationDialog';
 import InstallAppButton from '@/components/layout/InstallAppButton';
 import ThemeSelector from '@/components/common/ThemeSelector';
+import BackButton from '@/components/common/BackButton';
 
 const navLinks = [
   { to: '/', label: 'Home' },
@@ -60,11 +61,20 @@ export default function Header() {
         }`}
       >
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between gap-4">
-          {/* Brand */}
-          <Link to="/" className="flex items-center gap-2 shrink-0">
-            <CDLogo size={40} spinning />
-            <span className="text-lg font-bold tracking-tight hidden sm:block">{siteName}</span>
-          </Link>
+          {/* Brand & Back Navigation */}
+          <div className="flex items-center gap-2 shrink-0">
+            {location.pathname !== '/' && (
+              <BackButton
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 bg-card/60 backdrop-blur border border-border/50 hover:bg-accent/15 hover:text-accent shadow-xs"
+              />
+            )}
+            <Link to="/" className="flex items-center gap-2">
+              <CDLogo size={40} spinning />
+              <span className="text-lg font-bold tracking-tight hidden sm:block">{siteName}</span>
+            </Link>
+          </div>
 
           {/* Desktop Nav */}
           <nav className="hidden lg:flex items-center gap-1">

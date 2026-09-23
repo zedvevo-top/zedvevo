@@ -65,9 +65,9 @@ export default defineConfig({
       },
     }),
     {
-      name: "serve-real-apk",
+      name: "serve-real-apk-and-apis",
       configureServer(server) {
-        server.middlewares.use((req, res, next) => {
+        server.middlewares.use(async (req, res, next) => {
           const url = req.url ? req.url.split("?")[0] : "";
           if (url === "/ZedVevo.apk" || url === "/app-release.apk" || url.endsWith(".apk")) {
             const apkFile = fs.existsSync(path.resolve(__dirname, "public/ZedVevo.apk"))
@@ -86,6 +86,54 @@ export default defineConfig({
               return;
             }
           }
+
+          if (url === "/api/webhook" || url === "/api/lipila/webhook") {
+            try {
+              let body = "";
+              req.on("data", (chunk) => { body += chunk; });
+              req.on("end", async () => {
+                try {
+                  (req as any).body = body ? JSON.parse(body) : {};
+                } catch {
+                  (req as any).body = {};
+                }
+                const mod = await import("./api/webhook.js");
+                await mod.default(req, res);
+              });
+              return;
+            } catch (err: any) {
+              res.writeHead(500, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: err.message }));
+              return;
+            }
+          }
+
+          if (url === "/api/verify-payment" || url === "/api/payments/verify") {
+            try {
+              const parsedUrl = new URL(req.url || "", "http://localhost");
+              const query: Record<string, string> = {};
+              parsedUrl.searchParams.forEach((v, k) => { query[k] = v; });
+              (req as any).query = query;
+
+              let body = "";
+              req.on("data", (chunk) => { body += chunk; });
+              req.on("end", async () => {
+                try {
+                  (req as any).body = body ? JSON.parse(body) : {};
+                } catch {
+                  (req as any).body = {};
+                }
+                const mod = await import("./api/verify-payment.js");
+                await mod.default(req, res);
+              });
+              return;
+            } catch (err: any) {
+              res.writeHead(500, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: err.message }));
+              return;
+            }
+          }
+
           next();
         });
       },

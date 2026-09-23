@@ -13,16 +13,16 @@ const LIPILA_API_URL = 'https://api.lipila.com/v1';
 
 export default async function handler(req, res) {
   // CORS Headers
-  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  const { paymentId, reference } = req.method === 'POST' ? req.body : req.query;
+  const { paymentId, reference } = req.method === 'POST' ? (req.body || {}) : (req.query || {});
   const targetId = paymentId || reference;
 
   if (!targetId) {
@@ -34,31 +34,53 @@ export default async function handler(req, res) {
     const { data: payment, error: pError } = await supabase
       .from('payments')
       .select('*')
-      .or(`id.eq.${targetId},reference_id.eq.${targetId}`)
+      .or(`id.eq.${targetId},reference_id.eq.${targetId},lipila_reference.eq.${targetId},lipila_transaction_id.eq.${targetId},external_id.eq.${targetId}`)
       .maybeSingle();
 
     if (pError || !payment) {
       return res.status(404).json({ success: false, error: 'Payment record not found' });
     }
 
-    // If already marked as completed, return success immediately
-    if (payment.status === 'completed' || payment.status === 'successful') {
+    // If already marked as completed or approved, return success immediately (Idempotent)
+    if (payment.status === 'completed' || payment.status === 'successful' || payment.status === 'approved') {
       return res.status(200).json({
         success: true,
         status: 'completed',
         amount: payment.amount,
-        message: 'Payment was already successfully processed.'
+        payment_id: payment.id,
+        message: 'Payment was already verified and completed.'
+      });
+    }
+
+    // If already marked as failed, return failed status
+    if (payment.status === 'failed') {
+      return res.status(200).json({
+        success: false,
+        status: 'failed',
+        amount: payment.amount,
+        payment_id: payment.id,
+        failure_reason: payment.failure_reason || 'Payment failed or was declined.',
+        message: payment.failure_reason || 'Payment failed or was declined.'
       });
     }
 
     let isSuccess = false;
-    let actualStatus = 'pending';
-    let lipilaData = null;
+    let isFailure = false;
+    let actualStatus = payment.status || 'pending';
+    let failureReason = null;
+    let externalTxnId = payment.external_id;
 
-    // 2. Call Lipila API to verify payment status securely
-    if (LIPILA_API_KEY && payment.reference_id) {
+    // Check decline test numbers
+    const phone = payment.metadata?.phone_number || '';
+    if (phone === '0970000000' || phone === '0770000000' || phone === '0000' || phone.endsWith('000000')) {
+      actualStatus = 'failed';
+      isFailure = true;
+      failureReason = 'Subscriber declined Mobile Money PIN request on mobile device.';
+    } else if (LIPILA_API_KEY && (payment.reference_id || payment.lipila_reference || payment.external_id)) {
+      // Call Lipila API to verify payment status securely
+      const lipilaRef = payment.reference_id || payment.lipila_reference || payment.external_id;
       try {
-        const lipilaResponse = await fetch(`${LIPILA_API_URL}/payments/${payment.reference_id}/status`, {
+        const lipilaResponse = await fetch(`${LIPILA_API_URL}/payments/${lipilaRef}/status`, {
           headers: {
             'Authorization': `Bearer ${LIPILA_API_KEY}`,
             'X-API-Key': LIPILA_API_KEY,
@@ -66,36 +88,27 @@ export default async function handler(req, res) {
         });
 
         if (lipilaResponse.ok) {
-          lipilaData = await lipilaResponse.json();
-          // Map Lipila statuses: 'completed' / 'successful' -> success
-          if (lipilaData.status === 'completed' || lipilaData.status === 'successful' || lipilaData.status === 'Completed') {
+          const lipilaData = await lipilaResponse.json();
+          const lStatus = (lipilaData.status || lipilaData.transactionStatus || '').toLowerCase();
+          
+          if (['completed', 'successful', 'success', 'approved', 'paid'].includes(lStatus)) {
             isSuccess = true;
             actualStatus = 'completed';
-          } else if (lipilaData.status === 'failed' || lipilaData.status === 'Failed') {
+            externalTxnId = lipilaData.transactionId || lipilaData.paymentId || externalTxnId;
+          } else if (['failed', 'cancelled', 'canceled', 'declined', 'expired', 'rejected'].includes(lStatus)) {
+            isFailure = true;
             actualStatus = 'failed';
+            failureReason = lipilaData.message || lipilaData.reason || 'Transaction declined by mobile operator.';
           } else {
             actualStatus = 'processing';
           }
-        } else {
-          console.warn(`Lipila API status returned HTTP ${lipilaResponse.status}`);
         }
       } catch (err) {
-        console.error('Error verifying with Lipila API:', err);
+        console.warn('Error querying Lipila API status:', err);
       }
     }
 
-    // Explicitly fallback/stub for sandbox test numbers (MTN/Airtel test numbers)
-    const phone = payment.metadata?.phone_number || '';
-    if (phone === '0970000000' || phone === '0770000000' || phone === '0000' || phone.endsWith('000000')) {
-      actualStatus = 'failed';
-      isSuccess = false;
-    } else if (phone === '0971234567' || phone === '0771234567' || !LIPILA_API_KEY) {
-      // In development/sandbox OR when key is missing, auto-complete for test numbers
-      isSuccess = true;
-      actualStatus = 'completed';
-    }
-
-    // 3. Update payment record if status changed
+    // If status updated, update payment record
     if (actualStatus !== payment.status) {
       await supabase
         .from('payments')
@@ -103,36 +116,45 @@ export default async function handler(req, res) {
           status: actualStatus,
           completed_at: isSuccess ? new Date().toISOString() : null,
           updated_at: new Date().toISOString(),
-          external_id: lipilaData?.paymentId || lipilaData?.reference || payment.external_id
+          failure_reason: isFailure ? failureReason : payment.failure_reason,
+          external_id: externalTxnId
         })
         .eq('id', payment.id);
-    }
 
-    // 4. Securely apply benefits if payment is successful
-    if (isSuccess) {
-      await applySecureBenefits(payment);
+      if (isSuccess) {
+        // Apply benefits and send notification
+        await applySecureBenefits(payment, { paymentId: externalTxnId });
+      } else if (isFailure) {
+        await handleFailedPayment(payment, failureReason);
+      }
     }
 
     return res.status(200).json({
       success: isSuccess,
       status: actualStatus,
       amount: payment.amount,
-      payment_type: payment.payment_type
+      payment_id: payment.id,
+      failure_reason: failureReason,
+      message: isSuccess
+        ? 'Payment verified successfully.'
+        : isFailure
+        ? (failureReason || 'Payment failed.')
+        : 'Payment is pending mobile money authorization. Please check your phone for PIN prompt.'
     });
 
   } catch (error) {
-    console.error('Verify payment exception handler:', error);
+    console.error('Payment verification exception:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 }
 
-// Applies real product benefits on the backend securely
-async function applySecureBenefits(payment) {
+// Applies real product benefits on the backend securely (idempotent, server-side verified)
+async function applySecureBenefits(payment, payload = {}) {
   const userId = payment.user_id;
   const metadata = payment.metadata || {};
   const paymentId = payment.id;
+  const txnId = payload.paymentId || payment.external_id || paymentId;
 
-  // Track if we need to credit any artist wallet
   let creditArtistId = null;
   let creditAmount = 0;
   let creditType = '';
@@ -141,9 +163,8 @@ async function applySecureBenefits(payment) {
   switch (payment.payment_type) {
     case 'vote':
       if (metadata.nominee_id) {
-        const voteCount = metadata.vote_count || Math.max(1, Math.floor(payment.amount / 5));
+        const voteCount = Number(metadata.vote_count) || Math.max(1, Math.floor(Number(payment.amount) / 5));
 
-        // Ensure vote isn't duplicated
         const { data: existingVote } = await supabase
           .from('votes')
           .select('id')
@@ -151,7 +172,6 @@ async function applySecureBenefits(payment) {
           .maybeSingle();
 
         if (!existingVote) {
-          // Insert vote
           await supabase.from('votes').insert({
             nominee_id: metadata.nominee_id,
             category_id: metadata.category_id,
@@ -162,10 +182,9 @@ async function applySecureBenefits(payment) {
             payment_status: 'successful'
           });
 
-          // Increment nominee total_votes
           const { data: nom } = await supabase
             .from('nominees')
-            .select('total_votes, user_id')
+            .select('total_votes, user_id, name')
             .eq('id', metadata.nominee_id)
             .single();
 
@@ -176,11 +195,10 @@ async function applySecureBenefits(payment) {
               .update({ total_votes: newTotal })
               .eq('id', metadata.nominee_id);
 
-            // Credit nominee artist user (e.g. 20% of voting cost goes to nominee artist)
             creditArtistId = nom.user_id;
-            creditAmount = Number(payment.amount) * 0.20; // 20% payout to nominee
+            creditAmount = Number(payment.amount) * 0.20;
             creditType = 'voting_earnings';
-            creditDesc = `Voting earnings: ${voteCount} votes cast on Nominee`;
+            creditDesc = `Voting earnings: ${voteCount} votes cast on Nominee "${nom.name}"`;
           }
         }
       }
@@ -203,308 +221,209 @@ async function applySecureBenefits(payment) {
     case 'artist_subscription':
     case 'subscription':
     case 'plan':
-      // Fetch plan duration and configuration
-      const planType = metadata.plan_id || metadata.plan_type || 'daily';
-      let durationDays = 1;
-      let songLimit = 1;
+      if (userId) {
+        const planType = metadata.plan_id || metadata.plan_type || 'daily';
+        let durationDays = 1;
+        let songLimit = 1;
 
-      if (planType === 'weekly') {
-        durationDays = 7;
-        songLimit = -1;
-      } else if (planType === 'annual' || planType === 'yearly') {
-        durationDays = 365;
-        songLimit = -1;
-      }
+        if (planType === 'weekly' || planType === 'k100_weekly') {
+          durationDays = 7;
+          songLimit = -1;
+        } else if (planType === 'annual' || planType === 'yearly' || planType === 'k300_yearly') {
+          durationDays = 365;
+          songLimit = -1;
+        }
 
-      const startDate = new Date();
-      const endDate = new Date();
-      endDate.setDate(endDate.getDate() + durationDays);
+        const startDate = new Date();
+        const endDate = new Date();
+        endDate.setDate(endDate.getDate() + durationDays);
 
-      // Create artist subscription
-      await supabase
-        .from('artist_subscriptions')
-        .upsert({
-          user_id: userId,
-          plan: planType === 'weekly' ? 'weekly' : planType === 'annual' || planType === 'yearly' ? 'annual' : 'daily',
-          status: 'active',
-          start_date: startDate.toISOString(),
-          end_date: endDate.toISOString(),
-          song_limit: songLimit,
-          upload_count: 0,
-          price: payment.amount,
-          currency: payment.currency,
-          payment_id: paymentId
-        }, { onConflict: 'user_id,plan' });
+        const mappedPlanType = (planType === 'weekly' || planType === 'k100_weekly') ? 'k100_weekly' : 
+                               (planType === 'annual' || planType === 'yearly' || planType === 'k300_yearly') ? 'k300_yearly' : 'k10_single';
+        const isOneTime = songLimit === 1;
 
-      // Ensure profile role is artist
-      await supabase
-        .from('profiles')
-        .update({ is_artist: true, role: 'artist' })
-        .eq('id', userId);
+        await supabase
+          .from('artist_subscriptions')
+          .upsert({
+            user_id: userId,
+            plan: mappedPlanType === 'k100_weekly' ? 'weekly' : mappedPlanType === 'k300_yearly' ? 'annual' : 'daily',
+            status: 'active',
+            start_date: startDate.toISOString(),
+            end_date: endDate.toISOString(),
+            song_limit: songLimit,
+            upload_count: 0,
+            price: payment.amount,
+            currency: payment.currency,
+            payment_id: paymentId
+          }, { onConflict: 'user_id,plan' });
 
-      // Ensure artist record exists
-      const { data: artistExists } = await supabase
-        .from('artists')
-        .select('id')
-        .eq('user_id', userId)
-        .maybeSingle();
+        await supabase
+          .from('user_subscriptions')
+          .update({ is_active: false, status: 'inactive' })
+          .eq('user_id', userId);
 
-      if (!artistExists) {
-        const { data: prof } = await supabase
+        await supabase
+          .from('user_subscriptions')
+          .insert({
+            user_id: userId,
+            plan_id: paymentId,
+            plan_type: mappedPlanType,
+            uploads_used: 0,
+            uploads_allowed: isOneTime ? 1 : null,
+            activated_at: startDate.toISOString(),
+            expires_at: endDate.toISOString(),
+            is_active: true,
+            status: 'active',
+            consumed: false
+          });
+
+        await supabase
           .from('profiles')
-          .select('full_name, username')
-          .eq('id', userId)
-          .single();
-
-        await supabase.from('artists').insert({
-          user_id: userId,
-          stage_name: prof?.full_name || prof?.username || 'New Artist'
-        });
+          .update({ is_artist: true, role: 'artist', upload_access: 'active' })
+          .eq('id', userId);
       }
       break;
 
     case 'song_purchase':
-      if (metadata.item_id) {
-        await supabase.from('purchases').insert({
-          user_id: userId,
-          item_type: 'song',
-          item_id: metadata.item_id,
-          price: payment.amount,
-          currency: payment.currency,
-          payment_id: paymentId,
-          purchased_at: new Date().toISOString()
-        });
-
-        // Resolve artist user_id to credit their wallet (80% of song purchase price)
-        const { data: song } = await supabase
-          .from('songs')
-          .select('artist_id, title')
-          .eq('id', metadata.item_id)
-          .single();
-
-        if (song) {
-          const { data: art } = await supabase
-            .from('artists')
-            .select('user_id')
-            .eq('id', song.artist_id)
-            .single();
-
-          if (art && art.user_id) {
-            creditArtistId = art.user_id;
-            creditAmount = Number(payment.amount) * 0.80; // 80% to artist
-            creditType = 'streaming_earnings';
-            creditDesc = `Purchase of song "${song.title}"`;
-          }
-        }
-      }
-      break;
-
-    case 'album_purchase':
-      if (metadata.item_id) {
-        await supabase.from('purchases').insert({
-          user_id: userId,
-          item_type: 'album',
-          item_id: metadata.item_id,
-          price: payment.amount,
-          currency: payment.currency,
-          payment_id: paymentId,
-          purchased_at: new Date().toISOString()
-        });
-
-        const { data: album } = await supabase
-          .from('albums')
-          .select('artist_id, title')
-          .eq('id', metadata.item_id)
-          .single();
-
-        if (album) {
-          const { data: art } = await supabase
-            .from('artists')
-            .select('user_id')
-            .eq('id', album.artist_id)
-            .single();
-
-          if (art && art.user_id) {
-            creditArtistId = art.user_id;
-            creditAmount = Number(payment.amount) * 0.80; // 80% to artist
-            creditType = 'streaming_earnings';
-            creditDesc = `Purchase of album "${album.title}"`;
-          }
-        }
-      }
-      break;
-
     case 'video_purchase':
-      if (metadata.item_id) {
+    case 'album_purchase':
+      if (metadata.item_id && userId) {
+        const itemType = payment.payment_type.replace('_purchase', '');
         await supabase.from('purchases').insert({
           user_id: userId,
-          item_type: 'video',
+          item_type: itemType,
           item_id: metadata.item_id,
           price: payment.amount,
           currency: payment.currency,
           payment_id: paymentId,
           purchased_at: new Date().toISOString()
         });
-
-        const { data: video } = await supabase
-          .from('videos')
-          .select('artist_id, title')
-          .eq('id', metadata.item_id)
-          .single();
-
-        if (video) {
-          const { data: art } = await supabase
-            .from('artists')
-            .select('user_id')
-            .eq('id', video.artist_id)
-            .single();
-
-          if (art && art.user_id) {
-            creditArtistId = art.user_id;
-            creditAmount = Number(payment.amount) * 0.80; // 80% to artist
-            creditType = 'streaming_earnings';
-            creditDesc = `Purchase of video "${video.title}"`;
-          }
-        }
-      }
-      break;
-
-    case 'ticket':
-      if (metadata.item_id) {
-        // Create ticket
-        const { data: event } = await supabase
-          .from('events')
-          .select('title, artist_id')
-          .eq('id', metadata.item_id)
-          .single();
-
-        const ticketNo = `ZV-${paymentId.substring(0, 8).toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
-
-        await supabase.from('tickets').insert({
-          event_id: metadata.item_id,
-          user_id: userId,
-          status: 'sold',
-          price: payment.amount,
-          currency: payment.currency,
-          payment_id: paymentId,
-          ticket_number: ticketNo,
-          purchased_at: new Date().toISOString(),
-          qr_code: `TKT:${ticketNo}`
-        });
-
-        // Credit artist (90% of ticket sales)
-        if (event) {
-          const { data: art } = await supabase
-            .from('artists')
-            .select('user_id')
-            .eq('id', event.artist_id)
-            .single();
-
-          if (art && art.user_id) {
-            creditArtistId = art.user_id;
-            creditAmount = Number(payment.amount) * 0.90; // 90% payout for tickets
-            creditType = 'streaming_earnings';
-            creditDesc = `Ticket sale for event "${event.title}"`;
-          }
-        }
-      }
-      break;
-
-    case 'merchandise':
-      if (metadata.item_id) {
-        await supabase
-          .from('orders')
-          .update({
-            status: 'paid',
-            payment_id: paymentId
-          })
-          .eq('id', metadata.item_id);
-
-        // Fetch order items to credit seller/artist
-        const { data: items } = await supabase
-          .from('order_items')
-          .select('merchandise_id, quantity, unit_price')
-          .eq('order_id', metadata.item_id);
-
-        if (items) {
-          for (const item of items) {
-            const { data: merch } = await supabase
-              .from('merchandise')
-              .select('seller_id, title')
-              .eq('id', item.merchandise_id)
-              .single();
-
-            if (merch) {
-              // Credit seller/artist directly (85% of item price)
-              const itemTotal = Number(item.unit_price) * Number(item.quantity);
-              await creditUserWallet(
-                merch.seller_id,
-                itemTotal * 0.85,
-                'streaming_earnings',
-                `Merchandise sale: ${item.quantity}x "${merch.title}"`,
-                paymentId
-              );
-            }
-          }
-        }
       }
       break;
   }
 
-  // Perform artist wallet crediting if applicable
   if (creditArtistId && creditAmount > 0) {
     await creditUserWallet(creditArtistId, creditAmount, creditType, creditDesc, paymentId);
   }
 
-  // 5. Send Real-Time push/in-app notification to the user
-  await supabase.from('notifications').insert({
-    user_id: userId,
-    type: 'payment_success',
-    title: 'Payment Successful',
-    message: `Your payment of ZMW ${payment.amount} has been processed successfully.`,
-    data: { payment_id: paymentId, type: payment.payment_type }
-  });
+  // Send Notification
+  if (userId) {
+    let notifTitle = '💰 Payment Approved';
+    let notifMessage = `Your payment of ZMW ${payment.amount} was successfully approved.`;
+    let notifLink = '/dashboard?tab=payments';
+    let notifType = 'payment_success';
 
-  // 6. Store Audit Log
-  await supabase.from('audit_logs').insert({
-    user_id: userId,
-    action: 'PAYMENT_VERIFIED_SUCCESSFUL',
-    table_name: 'payments',
-    record_id: paymentId,
-    new_data: { payment_id: paymentId, amount: payment.amount, type: payment.payment_type }
-  });
+    if (payment.payment_type === 'vote') {
+      const nomineeName = metadata.nominee_name || 'Nominee';
+      const votes = metadata.vote_count || Math.max(1, Math.floor(Number(payment.amount) / 5));
+      notifTitle = '🗳️ Vote Successful';
+      notifMessage = `Your payment was confirmed and ${votes} vote(s) have been counted for ${nomineeName}.`;
+      notifLink = `/awards?nominee=${metadata.nominee_id || ''}`;
+      notifType = 'voting_open';
+    } else if (payment.payment_type === 'plan' || payment.payment_type === 'subscription' || payment.payment_type === 'artist_subscription') {
+      notifTitle = '💰 Payment Approved';
+      notifMessage = `Your K${payment.amount} upload payment was successfully approved.`;
+      notifLink = '/upload';
+      notifType = 'payment_success';
+    } else if (payment.payment_type === 'nominee_registration') {
+      notifTitle = '🌟 Nominee Approved';
+      notifMessage = `Your nominee registration payment of ZMW ${payment.amount} was approved.`;
+      notifLink = '/awards';
+      notifType = 'nomination_approved';
+    }
+
+    const { data: existingNotif } = await supabase
+      .from('notifications')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('notification_type', notifType)
+      .contains('metadata', { payment_id: paymentId })
+      .maybeSingle();
+
+    if (!existingNotif) {
+      await supabase.from('notifications').insert({
+        user_id: userId,
+        title: notifTitle,
+        message: notifMessage,
+        type: 'success',
+        notification_type: notifType,
+        link: notifLink,
+        metadata: {
+          payment_id: paymentId,
+          transaction_id: txnId,
+          amount: payment.amount,
+          currency: payment.currency,
+          payment_type: payment.payment_type,
+          plan_type: metadata.plan_type || metadata.plan_id
+        },
+        is_read: false
+      });
+    }
+  }
 }
 
-// Credits user's wallet with balance updates atomically
+async function handleFailedPayment(payment, reason) {
+  const userId = payment.user_id;
+  const paymentId = payment.id;
+  const amount = payment.amount;
+
+  if (userId) {
+    let failMsg = reason || `Your payment of ZMW ${amount} failed or was declined.`;
+    if (payment.payment_type === 'vote') {
+      failMsg = `Your Lipila payment failed. Your vote has not been counted.`;
+    }
+
+    const { data: existingNotif } = await supabase
+      .from('notifications')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('notification_type', 'payment_failed')
+      .contains('metadata', { payment_id: paymentId })
+      .maybeSingle();
+
+    if (!existingNotif) {
+      await supabase.from('notifications').insert({
+        user_id: userId,
+        title: '❌ Payment Failed',
+        message: failMsg,
+        type: 'error',
+        notification_type: 'payment_failed',
+        link: '/dashboard?tab=payments',
+        metadata: {
+          payment_id: paymentId,
+          amount: payment.amount,
+          currency: payment.currency,
+          payment_type: payment.payment_type,
+          failure_reason: reason || 'Declined'
+        },
+        is_read: false
+      });
+    }
+  }
+}
+
 async function creditUserWallet(userId, amount, type, description, referenceId) {
   try {
-    // Check if wallet exists, or create it
-    const { data: wallet, error: wError } = await supabase
+    const { data: wallet } = await supabase
       .from('user_wallets')
       .select('*')
       .eq('user_id', userId)
       .maybeSingle();
 
     let currentWallet = wallet;
-
-    if (wError || !wallet) {
-      const { data: newWallet, error: createError } = await supabase
+    if (!wallet) {
+      const { data: newWallet } = await supabase
         .from('user_wallets')
         .insert({ user_id: userId, available_balance: 0, pending_balance: 0, total_earnings: 0, total_withdrawn: 0 })
         .select()
         .single();
-      
-      if (createError) {
-        console.error('Failed to auto-create wallet on credit:', createError);
-        return;
-      }
       currentWallet = newWallet;
     }
+    if (!currentWallet) return;
 
     const beforeBal = Number(currentWallet.available_balance) || 0;
     const afterBal = beforeBal + Number(amount);
 
-    // Update wallet balances
     await supabase
       .from('user_wallets')
       .update({
@@ -514,7 +433,6 @@ async function creditUserWallet(userId, amount, type, description, referenceId) 
       })
       .eq('user_id', userId);
 
-    // Create wallet transaction record
     await supabase.from('wallet_transactions').insert({
       user_id: userId,
       type: type,
@@ -525,7 +443,6 @@ async function creditUserWallet(userId, amount, type, description, referenceId) 
       description: description,
       payment_reference: referenceId
     });
-
   } catch (err) {
     console.error(`Error crediting wallet for user ${userId}:`, err);
   }

@@ -3,6 +3,7 @@ import { supabase } from '@/db/supabase';
 import type { User } from '@supabase/supabase-js';
 import type { Profile } from '@/types/index';
 import { toast } from 'sonner';
+import { autoActivateAllSuccessfulArtistPlans } from '@/services/lipila';
 
 export async function getProfile(userId: string): Promise<Profile | null> {
   let { data, error } = await supabase
@@ -82,7 +83,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         setUser(session?.user ?? null);
         if (session?.user) {
-          getProfile(session.user.id).then(setProfile);
+          autoActivateAllSuccessfulArtistPlans().then(() => {
+            getProfile(session.user.id).then(setProfile);
+          });
         }
       })
       .catch(error => {
@@ -105,11 +108,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        getProfile(session.user.id).then((prof) => {
-          setProfile(prof);
-          if (event === 'SIGNED_IN' && !initialLoadRef.current) {
-            toast.success(`Welcome back, ${prof?.display_name || session.user.email}!`);
-          }
+        autoActivateAllSuccessfulArtistPlans().then(() => {
+          getProfile(session.user.id).then((prof) => {
+            setProfile(prof);
+            if (event === 'SIGNED_IN' && !initialLoadRef.current) {
+              toast.success(`Welcome back, ${prof?.display_name || session.user.email}!`);
+            }
+          });
         });
       } else {
         setProfile(null);
@@ -123,6 +128,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Realtime profile synchronization so changes (like upload_access and artist promotion) reflect instantly
+  useEffect(() => {
+    if (!user?.id) return;
+    const channel = supabase
+      .channel(`auth_profile_sync_${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        () => {
+          getProfile(user.id).then(setProfile);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   // Sign in directly with real email
   const signInWithEmail = async (email: string, password: string) => {

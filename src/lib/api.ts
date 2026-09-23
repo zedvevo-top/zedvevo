@@ -888,53 +888,121 @@ export async function applyPaymentBenefits(paymentId: string) {
       }).eq('id', p.metadata.nominee_id);
     }
     // 3. If it's a subscription or upload plan, activate user subscription
-    else if ((p.payment_type === 'subscription' || p.payment_type === 'plan') && p.user_id && (p.plan_id || p.metadata?.plan_id)) {
-      const planId = p.plan_id || p.metadata?.plan_id;
-      
-      // Fetch plan details from upload_plans
-      const { data: plan } = await supabase
-        .from('upload_plans')
-        .select('*')
-        .eq('id', planId)
-        .maybeSingle();
+    else if ((p.payment_type === 'subscription' || p.payment_type === 'plan' || p.payment_type === 'artist_subscription') && p.user_id) {
+      let rawPlanId = p.plan_id || p.metadata?.plan_id || p.metadata?.item_id;
+      let planType: PlanType = (p.metadata?.plan_type as PlanType) || 'k10_single';
 
-      const validityDays = plan?.validity_days || (p.metadata?.plan_type === 'k300_yearly' ? 365 : p.metadata?.plan_type === 'k100_weekly' ? 7 : p.metadata?.plan_type === 'k30_all_platforms' ? 8 : 30);
-      const planType = plan?.plan_type || p.metadata?.plan_type || 'k10_single';
-      const uploadsAllowed = plan?.uploads_allowed !== undefined ? plan?.uploads_allowed : (planType === 'k10_single' || planType === 'k30_all_platforms' ? 1 : null);
+      // Normalize planType from daily/weekly/annual
+      if (rawPlanId === 'daily' || (planType as string) === 'daily') planType = 'k10_single';
+      else if (rawPlanId === 'weekly' || (planType as string) === 'weekly') planType = 'k100_weekly';
+      else if (rawPlanId === 'annual' || rawPlanId === 'yearly' || (planType as string) === 'annual') planType = 'k300_yearly';
+
+      // Fetch plan details from upload_plans
+      let plan: UploadPlan | null = null;
+      if (rawPlanId && rawPlanId.length > 20) {
+        const { data } = await supabase.from('upload_plans').select('*').eq('id', rawPlanId).maybeSingle();
+        plan = data;
+      }
+      if (!plan) {
+        const { data } = await supabase.from('upload_plans').select('*').eq('plan_type', planType).maybeSingle();
+        plan = data;
+      }
+      if (!plan) {
+        const { data } = await supabase.from('upload_plans').select('*').order('price', { ascending: true }).limit(1).maybeSingle();
+        plan = data;
+      }
+
+      const finalPlanId = plan?.id || (rawPlanId && rawPlanId.length > 20 ? rawPlanId : '00000000-0000-0000-0000-000000000001');
+      const validityDays = plan?.validity_days || (planType === 'k300_yearly' ? 365 : planType === 'k100_weekly' ? 7 : 30);
+      const isOneTime = planType === 'k10_single' || plan?.uploads_allowed === 1;
+      const uploadsAllowed = plan?.uploads_allowed !== undefined ? plan?.uploads_allowed : (isOneTime ? 1 : null);
 
       const now = new Date();
-      const expiresAt = new Date(now.getTime() + validityDays * 24 * 60 * 60 * 1000).toISOString();
+      const expiresAt = validityDays ? new Date(now.getTime() + validityDays * 24 * 60 * 60 * 1000).toISOString() : null;
 
       // Deactivate any existing active subscriptions for this user
       await supabase
         .from('user_subscriptions')
-        .update({ is_active: false })
+        .update({ is_active: false, status: 'inactive' })
         .eq('user_id', p.user_id);
 
-      // Insert new active subscription
+      // Insert new active subscription with consumed: false and status: 'active'
       const { error: subInsertErr } = await supabase
         .from('user_subscriptions')
         .insert({
           user_id: p.user_id,
-          plan_id: planId,
+          plan_id: finalPlanId,
           plan_type: planType,
           uploads_used: 0,
           uploads_allowed: uploadsAllowed,
-          activated_at: new Date().toISOString(),
+          activated_at: now.toISOString(),
           expires_at: expiresAt,
           is_active: true,
+          status: 'active',
+          consumed: false,
         });
 
       if (subInsertErr) {
         console.warn('user_subscriptions insert fallback error:', subInsertErr);
       }
 
+      // Also upsert into artist_subscriptions for full compatibility
+      const artistPlanType = planType === 'k100_weekly' ? 'weekly' : planType === 'k300_yearly' ? 'annual' : 'daily';
+      const artistEndDate = new Date();
+      artistEndDate.setDate(artistEndDate.getDate() + (validityDays || 1));
+
+      await supabase.from('artist_subscriptions').upsert({
+        user_id: p.user_id,
+        plan: artistPlanType,
+        status: 'active',
+        start_date: now.toISOString(),
+        end_date: artistEndDate.toISOString(),
+        song_limit: isOneTime ? 1 : -1,
+        upload_count: 0,
+        price: p.amount,
+        currency: p.currency || 'ZMW',
+        payment_id: p.id,
+      }, { onConflict: 'user_id,plan' });
+
+      // Ensure profile role is artist and upload_access is active
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', p.user_id)
+        .single();
+
+      const registeredArtistName = prof?.display_name || 
+                                   (prof as any)?.full_name || 
+                                   prof?.username || 
+                                   prof?.email?.split('@')[0] || 
+                                   'Artist';
+
+      await supabase
+        .from('profiles')
+        .update({ 
+          is_artist: true, 
+          role: (prof?.role === 'admin' || prof?.role === 'super_admin') ? prof.role : 'artist', 
+          upload_access: 'active',
+          updated_at: now.toISOString()
+        })
+        .eq('id', p.user_id);
+
+      // Always ensure artist record is created/updated with their registered details
+      await supabase.from('artists').upsert({
+        user_id: p.user_id,
+        name: registeredArtistName,
+        stage_name: registeredArtistName,
+        bio: prof?.bio || undefined,
+        avatar_url: prof?.avatar_url || undefined,
+        updated_at: now.toISOString()
+      }, { onConflict: 'user_id' });
+
       // Also create an in-app notification for the user
       try {
         await supabase.from('notifications').insert({
           user_id: p.user_id,
-          title: 'Plan Activated!',
-          message: `Your ${plan?.name || 'Upload'} plan is now active. You can start uploading content immediately.`,
+          title: 'Upload Plan & Artist Account Activated!',
+          message: `Your ${plan?.name || 'Upload'} plan is now active for ${registeredArtistName}. You can start uploading songs and videos immediately.`,
           type: 'success',
           notification_type: 'subscription_activated',
         });
@@ -1003,14 +1071,299 @@ export async function updatePlan(id: string, payload: Partial<UploadPlan>) {
 }
 
 // ============================================================
-// USER SUBSCRIPTIONS
+// USER SUBSCRIPTIONS & DYNAMIC ENTITLEMENT
 // ============================================================
+export interface UploadEntitlementResult {
+  entitled: boolean;
+  subscription: UserSubscription | null;
+  reason: 'active' | 'consumed' | 'expired_time' | 'limit_reached' | 'no_subscription';
+  remainingUploads?: number | null;
+}
+
+export async function checkUploadEntitlement(userId: string): Promise<UploadEntitlementResult> {
+  if (!userId) return { entitled: false, subscription: null, reason: 'no_subscription' };
+
+  // 1. Fetch user's profile to check role and upload_access
+  const { data: prof } = await supabase
+    .from('profiles')
+    .select('id, upload_access, role, is_artist, display_name, full_name, username')
+    .eq('id', userId)
+    .maybeSingle();
+
+  // Admins always have unlimited upload entitlement
+  if (prof?.role === 'admin' || prof?.role === 'super_admin') {
+    return {
+      entitled: true,
+      subscription: {
+        id: 'admin-unlimited',
+        user_id: userId,
+        plan_id: '00000000-0000-0000-0000-000000000000',
+        plan_type: 'k300_yearly',
+        uploads_used: 0,
+        uploads_allowed: null,
+        is_active: true,
+        consumed: false,
+        status: 'active',
+        created_at: new Date().toISOString(),
+        expires_at: null,
+        upload_plans: {
+          id: '00000000-0000-0000-0000-000000000000',
+          name: 'Admin Unlimited Access',
+          plan_type: 'k300_yearly',
+          price: 0,
+          description: 'Full administrative upload privilege',
+          uploads_allowed: null,
+          validity_days: 9999,
+          is_active: true,
+          created_at: new Date().toISOString()
+        }
+      },
+      reason: 'admin',
+      remainingUploads: null
+    };
+  }
+
+  // 2. CHECK APPROVED PAYMENTS:
+  // If payment is marked SUCCESSFUL and the plan is not yet used (for 1-upload plans, until upload is made),
+  // immediately entitle user and show upload page!
+  const { data: latestPayment } = await supabase
+    .from('payments')
+    .select('*')
+    .eq('user_id', userId)
+    .in('status', ['successful', 'completed', 'SUCCESSFUL', 'COMPLETED'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (latestPayment) {
+    const paymentTime = latestPayment.updated_at || latestPayment.created_at;
+    const isOneTimePayment = 
+      latestPayment.amount <= 15 || 
+      latestPayment.payment_type === 'upload' || 
+      latestPayment.metadata?.plan_type === 'k10_single' || 
+      latestPayment.metadata?.plan_type === 'daily' ||
+      latestPayment.metadata?.uploads_allowed === 1;
+
+    if (isOneTimePayment) {
+      // For 1-upload plan: check how many songs or videos were uploaded ON OR AFTER the approved payment time
+      const [{ count: songCount }, { count: videoCount }] = await Promise.all([
+        supabase.from('songs').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', paymentTime),
+        supabase.from('videos').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', paymentTime),
+      ]);
+      const uploadsSincePayment = (songCount || 0) + (videoCount || 0);
+
+      if (uploadsSincePayment < 1) {
+        // Payment approved and upload NOT yet made -> Grant immediate access!
+        if (prof && prof.upload_access !== 'active') {
+          await supabase.from('profiles').update({ upload_access: 'active', is_artist: true, role: 'artist' }).eq('id', userId);
+        }
+
+        return {
+          entitled: true,
+          subscription: {
+            id: `pay-${latestPayment.id}`,
+            user_id: userId,
+            plan_id: latestPayment.plan_id || '00000000-0000-0000-0000-000000000001',
+            plan_type: 'k10_single',
+            uploads_used: 0,
+            uploads_allowed: 1,
+            is_active: true,
+            consumed: false,
+            status: 'active',
+            created_at: paymentTime,
+            expires_at: null,
+            upload_plans: {
+              id: `pay-${latestPayment.id}`,
+              name: 'Single Upload Plan',
+              plan_type: 'k10_single',
+              price: latestPayment.amount || 10,
+              description: 'Single upload access — active until upload is made',
+              uploads_allowed: 1,
+              validity_days: 30,
+              is_active: true,
+              created_at: paymentTime
+            }
+          },
+          reason: 'active_approved_payment',
+          remainingUploads: 1
+        };
+      }
+    } else {
+      // Multi-upload or subscription (weekly / annual)
+      const isAnnual = latestPayment.metadata?.plan_type === 'k300_yearly' || latestPayment.amount >= 250;
+      const validityDays = isAnnual ? 365 : 7;
+      const expiry = new Date(new Date(paymentTime).getTime() + validityDays * 86400000);
+      if (expiry > new Date()) {
+        if (prof && prof.upload_access !== 'active') {
+          await supabase.from('profiles').update({ upload_access: 'active', is_artist: true, role: 'artist' }).eq('id', userId);
+        }
+
+        return {
+          entitled: true,
+          subscription: {
+            id: `pay-${latestPayment.id}`,
+            user_id: userId,
+            plan_id: latestPayment.plan_id || '00000000-0000-0000-0000-000000000001',
+            plan_type: isAnnual ? 'k300_yearly' : 'k100_weekly',
+            uploads_used: 0,
+            uploads_allowed: null,
+            is_active: true,
+            consumed: false,
+            status: 'active',
+            created_at: paymentTime,
+            expires_at: expiry.toISOString(),
+            upload_plans: {
+              id: `pay-${latestPayment.id}`,
+              name: isAnnual ? 'Annual Artist Plan' : 'Weekly Artist Plan',
+              plan_type: isAnnual ? 'k300_yearly' : 'k100_weekly',
+              price: latestPayment.amount || (isAnnual ? 300 : 100),
+              description: isAnnual ? 'Unlimited uploads for 1 year' : 'Unlimited uploads for 7 days',
+              uploads_allowed: null,
+              validity_days: validityDays,
+              is_active: true,
+              created_at: paymentTime
+            }
+          },
+          reason: 'active_approved_payment',
+          remainingUploads: null
+        };
+      }
+    }
+  }
+
+  // 3. Check active record in user_subscriptions (unconsumed)
+  const { data: sub } = await supabase
+    .from('user_subscriptions')
+    .select('*, upload_plans(*)')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .eq('consumed', false)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (sub) {
+    const userSub = sub as UserSubscription;
+    const isOneTime = userSub.plan_type === 'k10_single' || 
+                      userSub.uploads_allowed === 1 || 
+                      userSub.upload_plans?.name?.toLowerCase().includes('single');
+
+    if (isOneTime && (userSub.consumed === true || (userSub.uploads_used || 0) >= 1)) {
+      await supabase.from('user_subscriptions').update({ 
+        is_active: false, 
+        status: 'inactive', 
+        consumed: true 
+      }).eq('id', userSub.id);
+    } else if (userSub.uploads_allowed !== null && (userSub.uploads_used || 0) >= userSub.uploads_allowed) {
+      await supabase.from('user_subscriptions').update({ 
+        is_active: false, 
+        status: 'inactive' 
+      }).eq('id', userSub.id);
+    } else if (userSub.expires_at && new Date(userSub.expires_at) <= new Date()) {
+      await supabase.from('user_subscriptions').update({ 
+        is_active: false, 
+        status: 'expired' 
+      }).eq('id', userSub.id);
+    } else {
+      return {
+        entitled: true,
+        subscription: userSub,
+        reason: 'active',
+        remainingUploads: userSub.uploads_allowed !== null ? Math.max(0, userSub.uploads_allowed - (userSub.uploads_used || 0)) : null
+      };
+    }
+  }
+
+  // 4. Check active record in artist_subscriptions
+  const { data: artistSub } = await supabase
+    .from('artist_subscriptions')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (artistSub) {
+    const isOneTime = artistSub.plan === 'daily' || artistSub.song_limit === 1;
+    const isConsumed = isOneTime && (artistSub.upload_count || 0) >= 1;
+    const isTimeExpired = artistSub.end_date && new Date(artistSub.end_date) <= new Date();
+
+    if (!isConsumed && !isTimeExpired) {
+      const syntheticSub: UserSubscription = {
+        id: artistSub.id,
+        user_id: artistSub.user_id,
+        plan_id: artistSub.id,
+        plan_type: artistSub.plan === 'daily' ? 'k10_single' : artistSub.plan === 'weekly' ? 'k100_weekly' : 'k300_yearly',
+        uploads_used: artistSub.upload_count || 0,
+        uploads_allowed: artistSub.song_limit === -1 ? null : artistSub.song_limit,
+        is_active: true,
+        consumed: false,
+        status: 'active',
+        created_at: artistSub.start_date || new Date().toISOString(),
+        expires_at: artistSub.end_date,
+        upload_plans: {
+          id: artistSub.id,
+          name: `${artistSub.plan.toUpperCase()} Artist Plan`,
+          plan_type: artistSub.plan === 'daily' ? 'k10_single' : artistSub.plan === 'weekly' ? 'k100_weekly' : 'k300_yearly',
+          price: artistSub.price || 10,
+          description: `Active ${artistSub.plan} plan`,
+          uploads_allowed: artistSub.song_limit === -1 ? null : artistSub.song_limit,
+          validity_days: artistSub.plan === 'daily' ? 1 : artistSub.plan === 'weekly' ? 7 : 365,
+          is_active: true,
+          created_at: artistSub.start_date || new Date().toISOString()
+        }
+      };
+
+      return {
+        entitled: true,
+        subscription: syntheticSub,
+        reason: 'active',
+        remainingUploads: syntheticSub.uploads_allowed ? Math.max(0, syntheticSub.uploads_allowed - syntheticSub.uploads_used) : null
+      };
+    }
+  }
+
+  // 5. Fallback: check profile upload_access
+  if (prof?.upload_access === 'active') {
+    const syntheticSub: UserSubscription = {
+      id: `profile-access-${prof.id}`,
+      user_id: prof.id,
+      plan_id: '00000000-0000-0000-0000-000000000001',
+      plan_type: 'k10_single',
+      uploads_used: 0,
+      uploads_allowed: 1,
+      is_active: true,
+      consumed: false,
+      status: 'active',
+      created_at: new Date().toISOString(),
+      expires_at: null,
+      upload_plans: {
+        id: '00000000-0000-0000-0000-000000000001',
+        name: 'Artist Upload Access',
+        plan_type: 'k10_single',
+        price: 10,
+        description: 'Active artist upload plan',
+        uploads_allowed: 1,
+        validity_days: 30,
+        is_active: true,
+        created_at: new Date().toISOString()
+      }
+    };
+    return {
+      entitled: true,
+      subscription: syntheticSub,
+      reason: 'active',
+      remainingUploads: 1
+    };
+  }
+
+  return { entitled: false, subscription: null, reason: 'no_subscription' };
+}
+
 export async function getUserActiveSubscription(userId: string): Promise<UserSubscription | null> {
-  const { data, error } = await supabase
-    .from('user_subscriptions').select('*, upload_plans(*)').eq('user_id', userId).eq('is_active', true)
-    .order('created_at', { ascending: false }).limit(1).maybeSingle();
-  if (error) return null;
-  return data as UserSubscription | null;
+  const result = await checkUploadEntitlement(userId);
+  return result.entitled ? result.subscription : null;
 }
 
 export async function getUserSubscriptions(userId: string): Promise<UserSubscription[]> {
@@ -1538,11 +1891,19 @@ export async function getUnreadNotificationCount(userId: string): Promise<number
   return count ?? 0;
 }
 
+export async function clearAllUserNotifications(userId: string): Promise<void> {
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('user_id', userId);
+  if (error) throw error;
+}
+
 export async function createNotification(payload: {
   user_id?: string;
   title: string;
   message: string;
-  type: 'info' | 'success' | 'warning' | 'error';
+  type: 'info' | 'success' | 'warning' | 'error' | string;
   notification_type: string;
   link?: string;
   metadata?: Record<string, unknown>;
