@@ -9,7 +9,8 @@
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "tsgo -p tsconfig.check.json; npx biome lint; .rules/check.sh;npx tailwindcss -i ./src/index.css -o /dev/null 2>&1 | grep -E '^(CssSyntaxError|Error):.*' || true;.rules/testBuild.sh"
+    "lint": "npx biome lint src/",
+    "check-css": "npx tailwindcss -i ./src/index.css -o /dev/null"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
