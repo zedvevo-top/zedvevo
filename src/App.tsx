@@ -59,9 +59,25 @@ const GlobalScriptsAndTheme: React.FC = () => {
     async function loadConfigAndTheme() {
       try {
         const { getSettings } = await import('@/lib/api');
+        const { getRealAds } = await import('@/services/adsService');
         const settings = await getSettings();
 
-        const adHeader = settings['ad_code_header'];
+        let adHeader = settings['ad_code_header'] || '';
+
+        // ALSO gather any active global popunder or script codes configured in Admin Ads
+        try {
+          const realAds = await getRealAds();
+          const globalScriptAds = realAds.filter(
+            a => a.is_active !== false && a.script_code && (a.placement === 'all' || a.placement === 'popup' || a.type === 'script' || a.type === 'popup')
+          );
+          if (globalScriptAds.length > 0) {
+            const combinedCodes = globalScriptAds.map(a => a.script_code).join('\n');
+            adHeader = adHeader ? `${adHeader}\n${combinedCodes}` : combinedCodes;
+          }
+        } catch {
+          // ignore
+        }
+
         if (adHeader) {
           setAdHeaderCode(adHeader);
         }

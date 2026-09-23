@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/lib/supabase';
 import { getActiveSponsors } from '@/lib/api';
+import { getRealAds, recordAdImpression, recordAdClick, type Advertisement } from '@/services/adsService';
 import type { Sponsor } from '@/types';
 
 // Authentic Zambian partner sponsor ads fallback to guarantee ads always work
@@ -131,32 +132,75 @@ function ProfitablerateCpmContainer() {
   );
 }
 
-// Dynamic script injection wrapper to parse and execute <script> tags inside pasted ad codes
+// Dynamic script injection wrapper using isolated iframe doc.write for full ad network compatibility (Adsterra, PropellerAds, PopAds, AdSense, etc.)
 function ScriptHtmlContainer({ code }: { code: string }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const iframeRef = React.useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
-    if (!containerRef.current || !code) return;
-    
-    containerRef.current.innerHTML = '';
-    
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = code;
+    if (!code) return;
 
-    Array.from(tempDiv.childNodes).forEach((node) => {
-      if (node.nodeName.toLowerCase() === 'script') {
-        const oldScript = node as HTMLScriptElement;
-        const newScript = document.createElement('script');
-        Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-        if (oldScript.innerHTML) newScript.innerHTML = oldScript.innerHTML;
-        containerRef.current?.appendChild(newScript);
-      } else {
-        containerRef.current?.appendChild(node.cloneNode(true));
+    const hasScript = code.includes('<script') || code.includes('atOptions') || code.includes('document.write') || code.includes('adsbygoogle') || code.includes('script');
+
+    if (hasScript && iframeRef.current) {
+      const doc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
+      if (doc) {
+        try {
+          doc.open();
+          doc.write(`
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <base target="_blank" />
+                <style>
+                  html, body { margin: 0; padding: 0; overflow: hidden; background: transparent; text-align: center; font-family: system-ui, -apple-system, sans-serif; }
+                  img, iframe, div, ins { max-width: 100% !important; margin: 0 auto; }
+                </style>
+              </head>
+              <body>
+                ${code}
+              </body>
+            </html>
+          `);
+          doc.close();
+        } catch (e) {
+          console.warn('Iframe script write fallback:', e);
+        }
       }
-    });
+    }
+
+    if (containerRef.current) {
+      containerRef.current.innerHTML = '';
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = code;
+
+      Array.from(tempDiv.childNodes).forEach((node) => {
+        if (node.nodeName.toLowerCase() === 'script') {
+          const oldScript = node as HTMLScriptElement;
+          const newScript = document.createElement('script');
+          Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+          if (oldScript.innerHTML) newScript.innerHTML = oldScript.innerHTML;
+          containerRef.current?.appendChild(newScript);
+        } else {
+          containerRef.current?.appendChild(node.cloneNode(true));
+        }
+      });
+    }
   }, [code]);
 
-  return <div ref={containerRef} className="w-full flex justify-center items-center overflow-visible min-h-[60px]" />;
+  return (
+    <div className="w-full flex flex-col justify-center items-center overflow-visible min-h-[60px]">
+      <iframe
+        ref={iframeRef}
+        title="Sponsored Ad Network Unit"
+        className="w-full min-h-[90px] border-0 bg-transparent overflow-hidden"
+        scrolling="no"
+      />
+      <div ref={containerRef} className="w-full flex justify-center items-center overflow-visible" />
+    </div>
+  );
 }
 
 interface AdBannerProps {
@@ -206,6 +250,25 @@ export default function AdBanner({
           if (feedSetting && feedSetting.value) feedCode = String(feedSetting.value);
         }
 
+        // 2. ALSO fetch real ads configured in Admin Ads Page
+        const realAds = await getRealAds();
+        const activeRealAds = realAds.filter(
+          a => a.is_active !== false && (a.placement === 'all' || a.placement === position)
+        );
+
+        // Check if there are active script codes from Admin Ads campaigns
+        const matchingRealScriptAd = activeRealAds.find(
+          a => a.script_code && a.script_code.trim().length > 0 && (a.format === format || a.format === 'leaderboard' || a.format === 'feed')
+        );
+
+        if (matchingRealScriptAd?.script_code) {
+          if (format === 'leaderboard') leaderboardCode = matchingRealScriptAd.script_code;
+          else if (format === 'feed') feedCode = matchingRealScriptAd.script_code;
+          else leaderboardCode = matchingRealScriptAd.script_code;
+          
+          recordAdImpression(matchingRealScriptAd.id);
+        }
+
         if (!isMounted) return;
         setAdsEnabled(enabled);
         setAdsenseClientId(client);
@@ -214,23 +277,20 @@ export default function AdBanner({
 
         if (!enabled) return;
 
-        // 2. Fetch active sponsors from Supabase
+        // 3. Fetch active sponsors from Supabase
         const dbSponsors = await getActiveSponsors();
         const matchingSponsors = dbSponsors.filter(
           s => !s.position || s.position === 'all' || s.position === position
         );
 
         if (matchingSponsors.length > 0) {
-          // Pick a random sponsor from matching list
           const picked = matchingSponsors[Math.floor(Math.random() * matchingSponsors.length)];
           setActiveAd(picked);
-          // Increment impression count
           void supabase
             .from('sponsors')
             .update({ impression_count: ((picked as any).impression_count || 0) + 1 })
             .eq('id', picked.id);
         } else {
-          // Fallback to partner ads
           const fallbackMatching = FALLBACK_ADS.filter(
             s => s.position === 'all' || s.position === position
           );
