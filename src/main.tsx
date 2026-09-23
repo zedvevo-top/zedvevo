@@ -9,6 +9,28 @@ Sentry.init({
   environment: import.meta.env.MODE,
 });
 
+// Register Service Worker for Android Push Notifications & System Bar Deep Linking
+if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker
+      .register("/sw.js", { scope: "/" })
+      .then((reg) => {
+        console.log("[AndroidPush-Debug] ZedVevo Service Worker registered successfully, scope:", reg.scope);
+      })
+      .catch((err) => {
+        console.warn("[AndroidPush-Debug] Service Worker registration failed:", err);
+      });
+  });
+
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    console.log("[AndroidPush-Debug] Message received from ServiceWorker:", event.data);
+    if (event.data && event.data.type === "NOTIFICATION_NAVIGATE" && event.data.url) {
+      console.log("[AndroidPush-Debug] Navigating window location to:", event.data.url);
+      window.location.href = event.data.url;
+    }
+  });
+}
+
 // Handle invalid or missing refresh token errors globally without crashing or showing error overlays
 if (typeof window !== "undefined") {
   window.addEventListener("unhandledrejection", (event) => {

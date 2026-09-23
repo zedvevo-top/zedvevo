@@ -28,9 +28,10 @@ import { analytics } from '@/lib/analytics';
 
 // Guard for admin routes — only admin/super_admin can access
 function AdminGuard({ children }: { children: React.ReactNode }) {
-  const { profile, loading } = useAuth();
+  const { profile, user, loading } = useAuth();
   if (loading) return null;
-  if (!profile || (profile.role !== 'admin' && profile.role !== 'super_admin')) {
+  const isSuperAdminEmail = user?.email?.toLowerCase() === 'topkuchalo@gmail.com' || profile?.email?.toLowerCase() === 'topkuchalo@gmail.com';
+  if (!isSuperAdminEmail && (!profile || (profile.role !== 'admin' && profile.role !== 'super_admin'))) {
     return <NavRedirect to="/" replace />;
   }
   return <AdminLayout>{children}</AdminLayout>;
@@ -38,8 +39,12 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 
 // Guard for super_admin-only routes — redirects admin to /admin overview
 function SuperAdminGuard({ children }: { children: React.ReactNode }) {
-  const { profile, loading } = useAuth();
+  const { profile, user, loading } = useAuth();
   if (loading) return null;
+  const isSuperAdminEmail = user?.email?.toLowerCase() === 'topkuchalo@gmail.com' || profile?.email?.toLowerCase() === 'topkuchalo@gmail.com';
+  if (isSuperAdminEmail) {
+    return <AdminLayout>{children}</AdminLayout>;
+  }
   if (!profile) return <NavRedirect to="/" replace />;
   if (profile.role === 'admin') {
     return <NavRedirect to="/admin" replace />;

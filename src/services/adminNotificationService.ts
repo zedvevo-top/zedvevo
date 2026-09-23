@@ -114,10 +114,11 @@ export async function showAdminPopNotification(
         if (reg && 'showNotification' in reg) {
           await reg.showNotification(title, {
             body: options.body,
-            icon: options.icon || '/favicon.png',
-            badge: '/favicon.png',
+            icon: options.icon || '/app-icon.png',
+            badge: '/app-icon.png',
             tag: options.tag,
-            data: options.data,
+            data: options.data || { url: '/' },
+            vibrate: [200, 100, 200],
             requireInteraction: true,
           } as any);
           return;
@@ -127,14 +128,20 @@ export async function showAdminPopNotification(
       // Fallback to standard window Notification
       const popup = new Notification(title, {
         body: options.body,
-        icon: options.icon || '/favicon.png',
-        badge: '/favicon.png',
+        icon: options.icon || '/app-icon.png',
+        badge: '/app-icon.png',
         tag: options.tag,
+        data: options.data || { url: '/' },
+        vibrate: [200, 100, 200],
         requireInteraction: true,
       } as any);
 
       popup.onclick = () => {
         window.focus();
+        const targetUrl = options.data?.url || options.data?.actionUrl || '/';
+        if (targetUrl) {
+          window.location.href = targetUrl;
+        }
         popup.close();
       };
     } catch (err) {

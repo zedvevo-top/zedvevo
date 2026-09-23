@@ -126,36 +126,38 @@ class ArtistService {
     }
 
     try {
-      // First, ensure user has artist role and artist record
+      // First, ensure user has artist capability and artist record
       const { data: profile } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, email')
         .eq('id', user.id)
         .single()
 
-      if (profile?.role !== 'artist') {
-        const { error: roleError } = await supabase
-          .from('profiles')
-          .update({ role: 'artist', is_artist: true })
-          .eq('id', user.id)
+      const isSuper = profile?.role === 'super_admin' || profile?.email?.toLowerCase() === 'topkuchalo@gmail.com'
+      const isAdmin = profile?.role === 'admin'
+      const targetRole = isSuper ? 'super_admin' : (isAdmin ? 'admin' : 'artist')
 
-        if (roleError) {
-          return { success: false, error: 'Failed to set artist role' }
-        }
+      const { error: roleError } = await supabase
+        .from('profiles')
+        .update({ role: targetRole, is_artist: true, upload_access: 'active' })
+        .eq('id', user.id)
 
-        // Create artist record if not exists
-        const { data: existingArtist } = await supabase
-          .from('artists')
-          .select('id')
-          .eq('user_id', user.id)
-          .single()
+      if (roleError) {
+        return { success: false, error: 'Failed to set artist permissions' }
+      }
 
-        if (!existingArtist) {
-          await supabase.from('artists').insert({
-            user_id: user.id,
-            stage_name: user.full_name || user.username || 'Artist',
-          })
-        }
+      // Create artist record if not exists
+      const { data: existingArtist } = await supabase
+        .from('artists')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (!existingArtist) {
+        await supabase.from('artists').insert({
+          user_id: user.id,
+          stage_name: user.full_name || user.username || 'Artist',
+        })
       }
 
       // Create payment via Lipila with auto-activation
@@ -351,10 +353,20 @@ class ArtistService {
         return { success: false, error: 'Invalid plan' }
       }
 
-      // Ensure user has artist role
+      // Ensure user has artist capability without downgrading super_admin/admin
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('role, email')
+        .eq('id', userId)
+        .maybeSingle()
+
+      const isSuper = prof?.role === 'super_admin' || prof?.email?.toLowerCase() === 'topkuchalo@gmail.com'
+      const isAdmin = prof?.role === 'admin'
+      const targetRole = isSuper ? 'super_admin' : (isAdmin ? 'admin' : 'artist')
+
       await supabase
         .from('profiles')
-        .update({ role: 'artist', is_artist: true })
+        .update({ role: targetRole, is_artist: true, upload_access: 'active' })
         .eq('id', userId)
 
       const now = new Date()

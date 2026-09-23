@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Search, KeyRound, ShieldCheck, ShieldOff, Eye, EyeOff, Loader2, UserCog, Mic } from 'lucide-react';
+import { Search, KeyRound, ShieldCheck, ShieldOff, Eye, EyeOff, Loader2, UserCog, Mic, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { UserAvatar } from '@/components/ui/avatar';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
@@ -13,18 +14,17 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/db/supabase';
-import { getAllProfiles, updateProfile } from '@/lib/api';
+import { useAllUserProfiles, resolveUserAvatarUrl } from '@/hooks/useUserProfile';
+import { updateProfile } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { ARTIST_PLANS } from '@/constants';
 import type { Profile, UserRole } from '@/types/index';
 
 export default function AdminUsersPage() {
   const { profile: myProfile, user } = useAuth();
-  const isSuperAdmin = myProfile?.role === 'super_admin';
+  const isSuperAdmin = myProfile?.role === 'super_admin' || myProfile?.email?.toLowerCase() === 'topkuchalo@gmail.com' || user?.email?.toLowerCase() === 'topkuchalo@gmail.com';
 
-  const [users, setUsers]     = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { profiles: users, loading, refreshProfiles } = useAllUserProfiles();
   const [search, setSearch]   = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
 
@@ -47,13 +47,6 @@ export default function AdminUsersPage() {
   const [promoteTarget, setPromoteTarget] = useState<Profile | null>(null);
   const [promotePlan, setPromotePlan] = useState<'daily' | 'weekly' | 'annual'>('weekly');
   const [promoteLoading, setPromoteLoading] = useState(false);
-
-  useEffect(() => {
-    getAllProfiles()
-      .then(setUsers)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, []);
 
   const filtered = users.filter(u => {
     const q = search.toLowerCase();
@@ -87,11 +80,19 @@ export default function AdminUsersPage() {
   };
 
   const openRoleDialog = (u: Profile) => {
+    if (u.email?.toLowerCase() === 'topkuchalo@gmail.com') {
+      toast.error('The primary Super Admin account is protected.');
+      return;
+    }
     setRoleTarget(u); setNewRole(u.role); setRoleDialog(true);
   };
 
   const handleChangeRole = async () => {
     if (!roleTarget) return;
+    if (roleTarget.email?.toLowerCase() === 'topkuchalo@gmail.com') {
+      toast.error('The primary Super Admin role is protected and cannot be changed.');
+      return;
+    }
     setRoleLoading(true);
     try {
       await updateProfile(roleTarget.id, { role: newRole });
@@ -118,9 +119,13 @@ export default function AdminUsersPage() {
                              promoteTarget.email?.split('@')[0] || 
                              'Artist';
 
-      // Update profile to artist with active upload access
+      const isSuper = promoteTarget.role === 'super_admin' || promoteTarget.email?.toLowerCase() === 'topkuchalo@gmail.com';
+      const isAdmin = promoteTarget.role === 'admin';
+      const targetRole = isSuper ? 'super_admin' : (isAdmin ? 'admin' : 'artist');
+
+      // Update profile to artist with active upload access without downgrading admins
       await updateProfile(promoteTarget.id, { 
-        role: 'artist', 
+        role: targetRole, 
         is_artist: true,
         upload_access: 'active',
       } as any);
@@ -185,7 +190,7 @@ export default function AdminUsersPage() {
         data: { plan: promotePlan },
       });
 
-      setUsers(prev => prev.map(u => u.id === promoteTarget.id ? { ...u, role: 'artist', is_artist: true } : u));
+      setUsers(prev => prev.map(u => u.id === promoteTarget.id ? { ...u, role: targetRole, is_artist: true } : u));
       toast.success(`${promoteTarget.username || promoteTarget.email} is now an artist with ${plan.name} plan`);
       setPromoteDialog(false);
     } catch { toast.error('Failed to promote user to artist'); }
@@ -193,17 +198,17 @@ export default function AdminUsersPage() {
   };
 
   const roleBadge = (role: string) => {
-    if (role === 'super_admin') return <Badge className="text-[10px] bg-accent text-accent-foreground">Super Admin</Badge>;
-    if (role === 'admin')       return <Badge className="text-[10px]">Admin</Badge>;
-    if (role === 'artist')      return <Badge variant="default" className="text-[10px] bg-electric text-white">Artist</Badge>;
+    if (role === 'super_admin') return <Badge className="text-[10px] bg-accent text-accent-foreground font-semibold">Super Admin</Badge>;
+    if (role === 'admin')       return <Badge className="text-[10px] bg-blue-600 text-white font-semibold">Admin</Badge>;
+    if (role === 'artist')      return <Badge variant="default" className="text-[10px] bg-electric text-white font-semibold">Artist</Badge>;
     return <Badge variant="secondary" className="text-[10px]">User</Badge>;
   };
 
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-bold">Users</h1>
-        <p className="text-sm text-muted-foreground">{users.length} registered accounts</p>
+        <h1 className="text-xl font-bold">Users & Profiles</h1>
+        <p className="text-sm text-muted-foreground">{users.length} registered accounts in database</p>
       </div>
 
       {/* Filters */}
@@ -220,6 +225,7 @@ export default function AdminUsersPage() {
           <SelectContent>
             <SelectItem value="all">All roles</SelectItem>
             <SelectItem value="user">User</SelectItem>
+            <SelectItem value="artist">Artist</SelectItem>
             <SelectItem value="admin">Admin</SelectItem>
             <SelectItem value="super_admin">Super Admin</SelectItem>
           </SelectContent>
@@ -227,11 +233,11 @@ export default function AdminUsersPage() {
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full min-w-[640px] text-sm">
-          <thead className="bg-muted/40">
+      <div className="overflow-x-auto rounded-md border border-border bg-card">
+        <table className="w-full min-w-[700px] text-sm">
+          <thead className="bg-muted/50">
             <tr>
-              {['Username', 'Email', 'Role', 'Joined', 'Actions'].map(h => (
+              {['User / Profile', 'Email', 'Role', 'Status', 'Joined', 'Actions'].map(h => (
                 <th key={h} className="text-left py-2.5 px-3 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -240,16 +246,41 @@ export default function AdminUsersPage() {
             {loading ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i} className="border-t border-border">
-                  <td colSpan={5} className="px-3 py-2"><Skeleton className="h-5 w-full" /></td>
+                  <td colSpan={6} className="px-3 py-2"><Skeleton className="h-5 w-full" /></td>
                 </tr>
               ))
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={5} className="py-10 text-center text-muted-foreground text-xs">No users found</td></tr>
+              <tr><td colSpan={6} className="py-10 text-center text-muted-foreground text-xs">No users found</td></tr>
             ) : filtered.map(u => (
               <tr key={u.id} className="border-t border-border hover:bg-muted/30">
-                <td className="py-2.5 px-3 whitespace-nowrap font-medium">{u.username || '—'}</td>
+                <td className="py-2.5 px-3 whitespace-nowrap">
+                  <div className="flex items-center gap-2.5">
+                    <UserAvatar
+                      src={resolveUserAvatarUrl(u)}
+                      name={u.display_name || u.username || u.email}
+                      size="sm"
+                    />
+                    <div className="flex flex-col min-w-0">
+                      <span className="font-semibold text-foreground truncate text-xs">
+                        {u.display_name || u.username || 'User'}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground truncate">
+                        @{u.username || 'no_username'}
+                      </span>
+                    </div>
+                  </div>
+                </td>
                 <td className="py-2.5 px-3 whitespace-nowrap text-muted-foreground text-xs">{u.email || '—'}</td>
                 <td className="py-2.5 px-3 whitespace-nowrap">{roleBadge(u.role)}</td>
+                <td className="py-2.5 px-3 whitespace-nowrap">
+                  {u.upload_access === 'active' || u.is_artist ? (
+                    <Badge variant="outline" className="text-[10px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10">
+                      Upload Active
+                    </Badge>
+                  ) : (
+                    <span className="text-[11px] text-muted-foreground">Standard</span>
+                  )}
+                </td>
                 <td className="py-2.5 px-3 whitespace-nowrap text-muted-foreground text-xs">{formatDate(u.created_at)}</td>
                 <td className="py-2.5 px-3 whitespace-nowrap">
                   <div className="flex gap-1.5">
@@ -260,8 +291,8 @@ export default function AdminUsersPage() {
                         <Mic className="h-3 w-3" /> Promote Artist
                       </Button>
                     )}
-                    {/* Role management — super_admin only, can't change own role */}
-                    {isSuperAdmin && u.id !== user?.id && (
+                    {/* Role management — super_admin only, can't change own role or primary super admin */}
+                    {isSuperAdmin && u.id !== user?.id && u.email?.toLowerCase() !== 'topkuchalo@gmail.com' && (
                       <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => openRoleDialog(u)}>
                         <UserCog className="h-3 w-3" />
                         Role
@@ -285,7 +316,7 @@ export default function AdminUsersPage() {
                         <ShieldCheck className="h-3 w-3" /> Promote
                       </Button>
                     )}
-                    {!isSuperAdmin && myProfile?.role === 'admin' && u.role === 'admin' && u.id !== user?.id && (
+                    {!isSuperAdmin && myProfile?.role === 'admin' && u.role === 'admin' && u.id !== user?.id && u.email?.toLowerCase() !== 'topkuchalo@gmail.com' && (
                       <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-destructive"
                         onClick={async () => {
                           await updateProfile(u.id, { role: 'user' });

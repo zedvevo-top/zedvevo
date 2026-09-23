@@ -1155,7 +1155,10 @@ export async function checkUploadEntitlement(userId: string): Promise<UploadEnti
       if (uploadsSincePayment < 1) {
         // Payment approved and upload NOT yet made -> Grant immediate access!
         if (prof && prof.upload_access !== 'active') {
-          await supabase.from('profiles').update({ upload_access: 'active', is_artist: true, role: 'artist' }).eq('id', userId);
+          const targetRole = (prof.role === 'super_admin' || prof.role === 'admin' || prof.email?.toLowerCase() === 'topkuchalo@gmail.com')
+            ? (prof.email?.toLowerCase() === 'topkuchalo@gmail.com' ? 'super_admin' : prof.role)
+            : 'artist';
+          await supabase.from('profiles').update({ upload_access: 'active', is_artist: true, role: targetRole }).eq('id', userId);
         }
 
         return {
@@ -1195,7 +1198,10 @@ export async function checkUploadEntitlement(userId: string): Promise<UploadEnti
       const expiry = new Date(new Date(paymentTime).getTime() + validityDays * 86400000);
       if (expiry > new Date()) {
         if (prof && prof.upload_access !== 'active') {
-          await supabase.from('profiles').update({ upload_access: 'active', is_artist: true, role: 'artist' }).eq('id', userId);
+          const targetRole = (prof.role === 'super_admin' || prof.role === 'admin' || prof.email?.toLowerCase() === 'topkuchalo@gmail.com')
+            ? (prof.email?.toLowerCase() === 'topkuchalo@gmail.com' ? 'super_admin' : prof.role)
+            : 'artist';
+          await supabase.from('profiles').update({ upload_access: 'active', is_artist: true, role: targetRole }).eq('id', userId);
         }
 
         return {

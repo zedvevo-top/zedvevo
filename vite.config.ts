@@ -87,8 +87,34 @@ export default defineConfig({
             }
           }
 
+          // Helper to polyfill Express-like methods on Node http.ServerResponse
+          const enhanceResponse = (r: any) => {
+            if (!r.status) {
+              r.status = function (code: number) {
+                r.statusCode = code;
+                return r;
+              };
+            }
+            if (!r.json) {
+              r.json = function (data: any) {
+                if (!r.headersSent) {
+                  r.setHeader("Content-Type", "application/json");
+                }
+                r.end(JSON.stringify(data));
+                return r;
+              };
+            }
+            if (!r.send) {
+              r.send = function (data: any) {
+                r.end(typeof data === "object" ? JSON.stringify(data) : data);
+                return r;
+              };
+            }
+          };
+
           if (url === "/api/webhook" || url === "/api/lipila/webhook") {
             try {
+              enhanceResponse(res);
               let body = "";
               req.on("data", (chunk) => { body += chunk; });
               req.on("end", async () => {
@@ -110,6 +136,7 @@ export default defineConfig({
 
           if (url === "/api/verify-payment" || url === "/api/payments/verify") {
             try {
+              enhanceResponse(res);
               const parsedUrl = new URL(req.url || "", "http://localhost");
               const query: Record<string, string> = {};
               parsedUrl.searchParams.forEach((v, k) => { query[k] = v; });
@@ -124,6 +151,28 @@ export default defineConfig({
                   (req as any).body = {};
                 }
                 const mod = await import("./api/verify-payment.js");
+                await mod.default(req, res);
+              });
+              return;
+            } catch (err: any) {
+              res.writeHead(500, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: err.message }));
+              return;
+            }
+          }
+
+          if (url === "/api/adsterra-sync") {
+            try {
+              enhanceResponse(res);
+              let body = "";
+              req.on("data", (chunk) => { body += chunk; });
+              req.on("end", async () => {
+                try {
+                  (req as any).body = body ? JSON.parse(body) : {};
+                } catch {
+                  (req as any).body = {};
+                }
+                const mod = await import("./api/adsterra-sync.js");
                 await mod.default(req, res);
               });
               return;

@@ -120,30 +120,23 @@ export const useAuthStore = create<AuthState>()(
               }
             }
 
-            if (profile && profile.role === 'user') {
-              const { data: existingSuperAdmin } = await supabase
+            const isOwner = profile?.email?.toLowerCase() === 'topkuchalo@gmail.com' || (profile?.username && profile.username.toLowerCase() === 'topkuchalo')
+            if (isOwner && profile?.role !== 'super_admin') {
+              const { data: updatedProfile } = await supabase
                 .from('profiles')
-                .select('id')
-                .eq('role', 'super_admin')
+                .update({ role: 'super_admin', is_artist: true, upload_access: 'active' })
+                .eq('id', profile.id)
+                .select()
                 .maybeSingle()
-
-              if (!existingSuperAdmin) {
-                const { data: updatedProfile } = await supabase
-                  .from('profiles')
-                  .update({ role: 'super_admin' })
-                  .eq('id', profile.id)
-                  .select()
-                  .single()
-                
-                set({
-                  user: updatedProfile || { ...profile, role: 'super_admin' },
-                  isAuthenticated: true,
-                  isAdmin: true,
-                  isSuperAdmin: true,
-                  isArtist: profile?.is_artist || false,
-                })
-                return
-              }
+              
+              set({
+                user: updatedProfile || { ...profile, role: 'super_admin', is_artist: true, upload_access: 'active' },
+                isAuthenticated: true,
+                isAdmin: true,
+                isSuperAdmin: true,
+                isArtist: true,
+              })
+              return
             }
 
             set({
@@ -151,7 +144,7 @@ export const useAuthStore = create<AuthState>()(
               isAuthenticated: true,
               isAdmin: profile?.role === 'super_admin' || profile?.role === 'admin',
               isSuperAdmin: profile?.role === 'super_admin',
-              isArtist: profile?.role === 'artist' || profile?.is_artist || false,
+              isArtist: profile?.role === 'artist' || profile?.is_artist || profile?.role === 'super_admin' || profile?.role === 'admin' || false,
             })
           } else {
             set({
@@ -218,7 +211,7 @@ export const useAuthStore = create<AuthState>()(
           user: data,
           isAdmin: data?.role === 'super_admin' || data?.role === 'admin',
           isSuperAdmin: data?.role === 'super_admin',
-          isArtist: data?.role === 'artist',
+          isArtist: data?.role === 'artist' || data?.is_artist || data?.role === 'super_admin' || data?.role === 'admin' || false,
         })
       },
 

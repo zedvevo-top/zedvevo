@@ -2,9 +2,10 @@ import BackToHome from '@/components/common/BackToHome';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useUserProfile } from '@/hooks/useUserProfile';
 import ArtistEarningsOverview from '@/components/artist/ArtistEarningsOverview';
 import { Music2, Video, CreditCard, Trophy, Bell, BarChart2, Loader2,
-  Pencil, Trash2, Upload, CheckCircle2, XCircle, Clock, TrendingUp, Lock
+  Pencil, Trash2, Upload, CheckCircle2, XCircle, Clock, TrendingUp, Lock, Mail, Calendar, ShieldCheck, Sparkles
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
@@ -12,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { UserAvatar } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
@@ -25,6 +26,7 @@ import {
   deleteSong, deleteVideo, markNotificationRead, updateProfile, uploadFile,
   getUserWallet, getUserWalletTransactions, getUserWithdrawals, requestUserWithdrawal
 } from '@/lib/api';
+import { storageService } from '@/services/storageService';
 import { supabase } from '@/db/supabase';
 import { formatDate, formatCurrency, getPaymentStatusColor, getPaymentStatusLabel } from '@/lib/utils';
 import { Navigate } from 'react-router-dom';
@@ -104,12 +106,18 @@ export default function DashboardPage() {
     try {
       let avatarUrl = profile.avatar_url;
       if (avatarFile) {
-        avatarUrl = await uploadFile('avatars', `${user.id}/avatar.${avatarFile.name.split('.').pop()}`, avatarFile);
+        const uploadRes = await storageService.uploadProfilePicture(avatarFile, user.id);
+        if (uploadRes.success && uploadRes.url) {
+          avatarUrl = uploadRes.url;
+        } else {
+          avatarUrl = await uploadFile('avatars', `${user.id}/avatar_${Date.now()}.${avatarFile.name.split('.').pop()}`, avatarFile);
+        }
       }
       await updateProfile(user.id, { display_name: displayName, bio, avatar_url: avatarUrl || undefined });
       await refreshProfile();
-      toast.success('Profile updated');
+      toast.success('Profile updated successfully');
       setEditDialog(false);
+      setAvatarFile(null);
     } catch { toast.error('Failed to update profile'); }
     finally { setSaving(false); }
   };
@@ -117,6 +125,7 @@ export default function DashboardPage() {
   const openEditProfile = () => {
     setDisplayName(profile?.display_name || '');
     setBio(profile?.bio || '');
+    setAvatarFile(null);
     setEditDialog(true);
   };
 
@@ -215,26 +224,85 @@ export default function DashboardPage() {
     return <Clock className="h-3.5 w-3.5 text-yellow-600" />;
   };
 
+  const roleLabel = (role?: string) => {
+    if (role === 'super_admin') return <Badge className="text-xs bg-accent text-accent-foreground font-semibold">Super Admin</Badge>;
+    if (role === 'admin')       return <Badge className="text-xs bg-blue-600 text-white font-semibold">Admin</Badge>;
+    if (role === 'artist')      return <Badge className="text-xs bg-electric text-white font-semibold">Artist</Badge>;
+    return <Badge variant="secondary" className="text-xs">User</Badge>;
+  };
+
   return (
     <div className="min-h-screen pt-20 pb-24 lg:pb-6">
       <div className="max-w-5xl mx-auto px-4 py-6">
         <BackToHome />
         {/* Profile header */}
-        <div className="flex items-start gap-4 mb-6">
-          <Avatar className="h-16 w-16 border-2 border-border">
-            <AvatarImage src={profile?.avatar_url || undefined} />
-            <AvatarFallback className="text-xl font-bold bg-accent text-accent-foreground">
-              {(profile?.display_name || profile?.username || 'U')[0].toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-bold truncate">{profile?.display_name || profile?.username || 'User'}</h1>
-            <p className="text-sm text-muted-foreground truncate">@{profile?.username}</p>
-            {profile?.bio && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{profile.bio}</p>}
+        <div className="bg-card border border-border rounded-xl p-5 mb-6 shadow-xs">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <UserAvatar
+                src={profile?.avatar_url}
+                name={profile?.display_name || profile?.username || 'User'}
+                size="xl"
+                className="border-2 border-accent/40"
+              />
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="text-xl font-bold text-foreground">
+                    {profile?.display_name || profile?.username || 'User'}
+                  </h1>
+                  {roleLabel(profile?.role)}
+                  {(profile?.is_artist || profile?.upload_access === 'active') && (
+                    <Badge variant="outline" className="text-xs text-emerald-500 border-emerald-500/30 bg-emerald-500/10">
+                      Upload Access
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground font-mono">@{profile?.username || 'no_username'}</p>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground pt-1 flex-wrap">
+                  {profile?.email && (
+                    <span className="flex items-center gap-1">
+                      <Mail className="h-3.5 w-3.5" />
+                      {profile.email}
+                    </span>
+                  )}
+                  {profile?.created_at && (
+                    <span className="flex items-center gap-1">
+                      <Calendar className="h-3.5 w-3.5" />
+                      Joined {formatDate(profile.created_at)}
+                    </span>
+                  )}
+                </div>
+                {profile?.bio && (
+                  <p className="text-xs text-foreground/80 pt-1 max-w-xl line-clamp-2">
+                    {profile.bio}
+                  </p>
+                )}
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={openEditProfile} className="shrink-0 self-end sm:self-center gap-1.5">
+              <Pencil className="h-4 w-4" /> Edit Profile
+            </Button>
           </div>
-          <Button variant="outline" size="sm" onClick={openEditProfile} className="shrink-0">
-            <Pencil className="h-4 w-4 mr-1.5" />Edit
-          </Button>
+
+          {/* Quick profile activity summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-border/60">
+            <div className="text-center sm:text-left">
+              <span className="text-xs text-muted-foreground block">Uploaded Songs</span>
+              <span className="text-lg font-bold text-foreground">{songs.length}</span>
+            </div>
+            <div className="text-center sm:text-left">
+              <span className="text-xs text-muted-foreground block">Uploaded Videos</span>
+              <span className="text-lg font-bold text-foreground">{videos.length}</span>
+            </div>
+            <div className="text-center sm:text-left">
+              <span className="text-xs text-muted-foreground block">Award Nominations</span>
+              <span className="text-lg font-bold text-foreground">{nominations.length}</span>
+            </div>
+            <div className="text-center sm:text-left">
+              <span className="text-xs text-muted-foreground block">Votes Cast</span>
+              <span className="text-lg font-bold text-foreground">{votes.length}</span>
+            </div>
+          </div>
         </div>
 
         {/* Active plan */}
@@ -478,7 +546,23 @@ export default function DashboardPage() {
       <Dialog open={editDialog} onOpenChange={setEditDialog}>
         <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg">
           <DialogHeader><DialogTitle>Edit Profile</DialogTitle></DialogHeader>
-          <div className="space-y-3 py-2">
+          <div className="space-y-4 py-2">
+            <div className="flex items-center gap-4">
+              <UserAvatar 
+                src={avatarFile ? URL.createObjectURL(avatarFile) : profile?.avatar_url} 
+                name={displayName || profile?.username || 'User'} 
+                size="lg" 
+              />
+              <div className="flex-1">
+                <Label>Avatar Photo</Label>
+                <Input 
+                  type="file" 
+                  accept="image/*" 
+                  className="mt-1 cursor-pointer text-xs" 
+                  onChange={e => setAvatarFile(e.target.files?.[0] || null)} 
+                />
+              </div>
+            </div>
             <div>
               <Label>Display Name</Label>
               <Input className="mt-1" value={displayName} onChange={e => setDisplayName(e.target.value)} />
@@ -487,15 +571,11 @@ export default function DashboardPage() {
               <Label>Bio</Label>
               <Input className="mt-1" value={bio} onChange={e => setBio(e.target.value)} placeholder="Tell us about yourself" />
             </div>
-            <div>
-              <Label>Avatar Photo</Label>
-              <Input type="file" accept="image/*" className="mt-1 cursor-pointer" onChange={e => setAvatarFile(e.target.files?.[0] || null)} />
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditDialog(false)}>Cancel</Button>
             <Button className="bg-accent hover:bg-accent/90 text-accent-foreground" onClick={handleSaveProfile} disabled={saving}>
-              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Save
+              {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Save Profile
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { UserAvatar } from '@/components/ui/avatar';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@/components/ui/dialog';
@@ -132,7 +133,7 @@ export default function UploadPage() {
 
     // Realtime: re-fetch subscription whenever a user_subscriptions row changes for this user
     const channelSub = supabase
-      .channel(`user_sub_${user.id}`)
+      .channel(`user_sub_${user.id}_${Math.random().toString(36).slice(2, 9)}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'user_subscriptions', filter: `user_id=eq.${user.id}` },
@@ -144,7 +145,7 @@ export default function UploadPage() {
 
     // Realtime: re-fetch subscription whenever profiles row changes (e.g., admin approvals / trigger)
     const channelProfile = supabase
-      .channel(`user_profile_${user.id}`)
+      .channel(`user_profile_${user.id}_${Math.random().toString(36).slice(2, 9)}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
@@ -156,7 +157,7 @@ export default function UploadPage() {
 
     // Realtime: re-fetch subscription whenever payments row changes for this user (e.g., admin approves payment)
     const channelPayments = supabase
-      .channel(`user_payments_sub_${user.id}`)
+      .channel(`user_payments_sub_${user.id}_${Math.random().toString(36).slice(2, 9)}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'payments', filter: `user_id=eq.${user.id}` },
@@ -686,7 +687,12 @@ export default function UploadPage() {
           <Card className="mb-6 border-accent/30 bg-accent/5">
             <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3 px-4">
               <div className="flex items-start gap-3">
-                <CheckCircle2 className="h-5 w-5 text-accent shrink-0 mt-0.5" />
+                <UserAvatar 
+                  src={profile?.avatar_url} 
+                  name={artistName || registeredInfo?.stageName || registeredInfo?.displayName || registeredInfo?.fullName || registeredInfo?.username || 'Artist'} 
+                  size="md"
+                  className="mt-0.5"
+                />
                 <div className="space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold text-foreground">

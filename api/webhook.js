@@ -289,9 +289,19 @@ async function applySecureBenefits(payment, payload = {}) {
             consumed: false
           });
 
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('full_name, username, role, email')
+          .eq('id', userId)
+          .maybeSingle();
+
+        const isSuperAdmin = prof?.email?.toLowerCase() === 'topkuchalo@gmail.com' || prof?.role === 'super_admin';
+        const isAdmin = prof?.role === 'admin';
+        const targetRole = isSuperAdmin ? 'super_admin' : (isAdmin ? 'admin' : 'artist');
+
         await supabase
           .from('profiles')
-          .update({ is_artist: true, role: 'artist', upload_access: 'active' })
+          .update({ is_artist: true, role: targetRole, upload_access: 'active' })
           .eq('id', userId);
 
         const { data: artistExists } = await supabase

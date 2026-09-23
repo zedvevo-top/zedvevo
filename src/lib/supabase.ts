@@ -13,11 +13,38 @@ const supabaseAnonKey = isPlaceholder(envKey)
   ? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRndWdwZnBvdHh3eW9peWNyYWNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0ODA1NDUsImV4cCI6MjEwMTA1NjU0NX0.6g-0LXv-uKwe2IxKrxa8LMJBDbd6qNKSYeLa-4_87Sk'
   : envKey
 
+// In-memory queue lock implementation to prevent browser Web Locks API collisions and "lock was stolen" errors
+const memoryLocks = new Map<string, Promise<unknown>>();
+async function memoryLock<R>(name: string, _acquireTimeout: number, fn: () => Promise<R>): Promise<R> {
+  const previous = memoryLocks.get(name) || Promise.resolve();
+  let release: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  
+  memoryLocks.set(name, (async () => {
+    try {
+      await previous;
+    } catch {
+      // Ignore errors from previous lock holders
+    }
+    await current;
+  })());
+
+  try {
+    await previous.catch(() => {});
+    return await fn();
+  } finally {
+    release!();
+  }
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
+    lock: memoryLock,
   },
   realtime: {
     params: {

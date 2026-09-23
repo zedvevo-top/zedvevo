@@ -3,6 +3,8 @@ import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { Sparkles, Music2, Award, DollarSign, CheckCircle2, XCircle, Bell, X, ExternalLink } from 'lucide-react';
 import { showAdminPopNotification, requestAdminNotificationPermission, playNotificationChime } from '@/services/adminNotificationService';
+import { useAuth } from '@/contexts/AuthContext';
+import { pushDiagnosticStore } from '@/services/pushDiagnosticStore';
 
 interface MobilePushNotification {
   id: string;
@@ -15,7 +17,13 @@ interface MobilePushNotification {
 }
 
 export function UniversalNotificationListener() {
+  const { user, profile } = useAuth();
   const [activePush, setActivePush] = useState<MobilePushNotification | null>(null);
+
+  const isAdmin =
+    profile?.role === 'admin' ||
+    profile?.role === 'super_admin' ||
+    user?.email?.toLowerCase() === 'topkuchalo@gmail.com';
 
   // Play subtle haptic feedback and custom sound when alert arrives
   const triggerNotificationFeedback = () => {
@@ -32,14 +40,15 @@ export function UniversalNotificationListener() {
   const pushMobileBanner = (notif: MobilePushNotification) => {
     setActivePush(notif);
     triggerNotificationFeedback();
-
-    // Sticky like Facebook / WhatsApp - does not auto-dismiss! The user must interact or swipe/X dismiss.
   };
 
   useEffect(() => {
+    console.log('[UniversalNotifListener-Debug] Universal Notification Listener active. User ID:', user?.id, 'isAdmin:', isAdmin);
+
     // 1. Auto request notification permission on first user interaction if default
     const handleFirstInteraction = () => {
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+        console.log('[UniversalNotifListener-Debug] Requesting browser notification permissions...');
         void requestAdminNotificationPermission();
       }
     };
@@ -47,7 +56,7 @@ export function UniversalNotificationListener() {
     window.addEventListener('click', handleFirstInteraction, { once: true });
     window.addEventListener('touchstart', handleFirstInteraction, { once: true });
 
-    // 2. Realtime Subscription for NEW SONGS
+    // 2. Realtime Subscription for NEW SONGS (Only notify admins for all platform activity, or everyone if public release)
     const songChannel = supabase
       .channel('realtime_universal_songs_broadcast')
       .on(
@@ -56,6 +65,17 @@ export function UniversalNotificationListener() {
         (payload) => {
           const newSong = payload.new;
           if (!newSong) return;
+
+          console.log('[UniversalNotifListener-Debug] Realtime song INSERT received:', newSong);
+          pushDiagnosticStore.addLog('realtime_event', 'SongsRealtime', `New song release: ${newSong.title}`, { songId: newSong.id, title: newSong.title });
+
+          // Only trigger global activity popups for admins
+          if (!isAdmin) {
+            console.log('[UniversalNotifListener-Debug] Non-admin user, skipping platform activity pop-up for song insert');
+            return;
+          }
+
+          pushDiagnosticStore.addLog('deliver_success', 'PushBanner', `Dispatched song push banner: ${newSong.title}`, { targetUrl: `/song/${newSong.slug || newSong.id}` });
 
           const artistName = newSong.artist_name || newSong.artist || 'ZedVevo Artist';
           const songTitle = newSong.title || 'New Song';
@@ -120,6 +140,15 @@ export function UniversalNotificationListener() {
           const newVideo = payload.new;
           if (!newVideo) return;
 
+          console.log('[UniversalNotifListener-Debug] Realtime video INSERT received:', newVideo);
+          pushDiagnosticStore.addLog('realtime_event', 'VideosRealtime', `New video upload: ${newVideo.title}`, { videoId: newVideo.id, title: newVideo.title });
+
+          // Only trigger global activity popups for admins
+          if (!isAdmin) {
+            console.log('[UniversalNotifListener-Debug] Non-admin user, skipping platform activity pop-up for video insert');
+            return;
+          }
+
           const artistName = newVideo.artist_name || 'ZedVevo Artist';
           const videoTitle = newVideo.title || 'New Video';
           const thumbnail = newVideo.thumbnail_url || '/app-icon.png';
@@ -160,6 +189,16 @@ export function UniversalNotificationListener() {
           const p = payload.new as any;
           if (!p) return;
 
+          console.log('[UniversalNotifListener-Debug] Realtime payment change received:', p);
+
+          const isUserPayment = user && p.user_id === user.id;
+
+          // Only notify if it's the user's own payment OR if the current user is an admin receiving all platform payment activity
+          if (!isUserPayment && !isAdmin) {
+            console.log('[UniversalNotifListener-Debug] Skipping payment alert for non-admin user (not user payment)');
+            return;
+          }
+
           const type = p.payment_type;
           const amount = p.amount;
           const status = p.status;
@@ -197,11 +236,14 @@ export function UniversalNotificationListener() {
             }
           }
 
+          const pmtTargetUrl = type === 'vote' ? '/awards' : '/dashboard';
+
           // Native OS Push Notification
           void showAdminPopNotification(popupTitle, {
             body: popupBody,
             icon: meta.photo_url || '/app-icon.png',
-            tag: `pmt-${p.id}`
+            tag: `pmt-${p.id}`,
+            data: { url: pmtTargetUrl }
           });
 
           // Custom Mobile App Push Notification Overlay
@@ -211,6 +253,7 @@ export function UniversalNotificationListener() {
             body: popupBody,
             type: notifType,
             iconUrl: meta.photo_url || '/app-icon.png',
+            actionUrl: pmtTargetUrl,
             timeText: 'Just now'
           });
 
@@ -224,7 +267,7 @@ export function UniversalNotificationListener() {
       )
       .subscribe();
 
-    // 4. Realtime Subscription for BROADCAST NOTIFICATIONS
+    // 4. Realtime Subscription for BROADCAST & PERSONAL NOTIFICATIONS
     const notifChannel = supabase
       .channel('realtime_universal_notifications_broadcast')
       .on(
@@ -234,13 +277,28 @@ export function UniversalNotificationListener() {
           const n = payload.new;
           if (!n) return;
 
+          console.log('[UniversalNotifListener-Debug] Realtime notification INSERT received:', n);
+
+          // Check target user
+          const isTargetedToUser = user && n.user_id === user.id;
+          const isBroadcastToAll = !n.user_id;
+
+          if (!isTargetedToUser && !isBroadcastToAll && !isAdmin) {
+            console.log('[UniversalNotifListener-Debug] Notification not for current user and user is not admin, skipping');
+            return;
+          }
+
           const title = n.title || 'ZedVevo Announcement';
           const message = n.message || n.body || '';
+          const targetUrl = n.link || n.url || '/dashboard';
+
+          console.log('[UniversalNotifListener-Debug] Dispatching push notification UI alert:', { title, message, targetUrl });
 
           void showAdminPopNotification(title, {
             body: message,
             icon: '/app-icon.png',
-            tag: `notif-${n.id}`
+            tag: `notif-${n.id}`,
+            data: { url: targetUrl }
           });
 
           pushMobileBanner({
@@ -249,8 +307,12 @@ export function UniversalNotificationListener() {
             body: message,
             type: 'announcement',
             iconUrl: '/app-icon.png',
+            actionUrl: targetUrl,
             timeText: 'Just now'
           });
+
+          // Trigger reactive refresh in NotificationBell & notificationStore
+          window.dispatchEvent(new CustomEvent('zedvevo_refresh_notifications'));
         }
       )
       .subscribe();
@@ -263,7 +325,7 @@ export function UniversalNotificationListener() {
       void supabase.removeChannel(pmtChannel);
       void supabase.removeChannel(notifChannel);
     };
-  }, []);
+  }, [user?.id, isAdmin]);
 
   return (
     <>

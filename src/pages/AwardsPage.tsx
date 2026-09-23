@@ -76,8 +76,9 @@ export default function AwardsPage() {
 
   // Realtime subscription for votes updating live
   useEffect(() => {
+    const channelId = `realtime_awards_nominees_${Math.random().toString(36).slice(2, 9)}`;
     const channel = supabase
-      .channel('realtime_awards_nominees')
+      .channel(channelId)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'nominees' },

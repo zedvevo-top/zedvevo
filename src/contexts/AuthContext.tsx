@@ -4,6 +4,7 @@ import type { User } from '@supabase/supabase-js';
 import type { Profile } from '@/types/index';
 import { toast } from 'sonner';
 import { autoActivateAllSuccessfulArtistPlans } from '@/services/lipila';
+import { useAuthStore } from '@/store/authStore';
 
 export async function getProfile(userId: string): Promise<Profile | null> {
   let { data, error } = await supabase
@@ -22,12 +23,57 @@ export async function getProfile(userId: string): Promise<Profile | null> {
         .eq('id', userId)
         .maybeSingle();
       if (!retry.error) {
-        return retry.data;
+        data = retry.data;
       }
+    } else {
+      console.warn('Failed to fetch profile:', error.message || error);
     }
-    console.warn('Failed to fetch profile:', error.message || error);
-    return null;
   }
+
+  // Auto-provision profile row if not present
+  if (!data && userId) {
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const email = authData?.user?.email || '';
+      const isOwner = email.toLowerCase() === 'topkuchalo@gmail.com';
+      const initialProfile = {
+        id: userId,
+        email: email || undefined,
+        username: email ? email.split('@')[0] : `user_${userId.slice(0, 6)}`,
+        display_name: isOwner ? 'Admin TopKuchalo' : (email ? email.split('@')[0] : 'User'),
+        role: isOwner ? 'super_admin' : 'user',
+        is_artist: isOwner,
+        upload_access: isOwner ? 'active' : 'none',
+      };
+      const { data: inserted } = await supabase
+        .from('profiles')
+        .upsert(initialProfile)
+        .select('*')
+        .maybeSingle();
+      if (inserted) {
+        data = inserted;
+      }
+    } catch {
+      // Ignore provision failure
+    }
+  }
+
+  if (data) {
+    // Check if the user is the designated super admin (topkuchalo@gmail.com)
+    const isOwnerEmail = data.email?.toLowerCase() === 'topkuchalo@gmail.com' || (data.username && data.username.toLowerCase() === 'topkuchalo');
+    if (isOwnerEmail && data.role !== 'super_admin') {
+      data.role = 'super_admin';
+      data.is_artist = true;
+      data.upload_access = 'active';
+      await supabase.from('profiles').update({ role: 'super_admin', is_artist: true, upload_access: 'active' }).eq('id', userId).catch(() => {});
+    } else if (data.role === 'super_admin' || data.role === 'admin') {
+      // Admins and super_admins always have artist upload privileges
+      data.is_artist = true;
+    }
+    // Synchronize to useAuthStore
+    useAuthStore.getState().setUser(data as any);
+  }
+
   return data;
 }
 
@@ -118,6 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       } else {
         setProfile(null);
+        useAuthStore.getState().setUser(null);
         if (event === 'SIGNED_OUT' && !initialLoadRef.current) {
           toast.info('You have logged out successfully.');
         } else if (event === 'USER_UPDATED' && !session && !initialLoadRef.current) {
@@ -132,8 +179,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Realtime profile synchronization so changes (like upload_access and artist promotion) reflect instantly
   useEffect(() => {
     if (!user?.id) return;
+    const channelId = `auth_profile_sync_${user.id}_${Math.random().toString(36).slice(2, 9)}`;
     const channel = supabase
-      .channel(`auth_profile_sync_${user.id}`)
+      .channel(channelId)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },

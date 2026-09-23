@@ -70,20 +70,24 @@ class MusicApiService {
   }
 
   private async fetch<T>(endpoint: string, params: Record<string, string | number> = {}): Promise<T> {
-    const url = new URL(`${JAMENDO_API_URL}/${endpoint}`)
-    url.searchParams.append('client_id', this.apiKey)
-    url.searchParams.append('format', 'json')
-    
-    for (const [key, value] of Object.entries(params)) {
-      url.searchParams.append(key, String(value))
-    }
+    try {
+      const url = new URL(`${JAMENDO_API_URL}/${endpoint}`)
+      url.searchParams.append('client_id', this.apiKey)
+      url.searchParams.append('format', 'json')
+      
+      for (const [key, value] of Object.entries(params)) {
+        url.searchParams.append(key, String(value))
+      }
 
-    const response = await fetch(url.toString())
-    if (!response.ok) {
-      throw new Error(`Music API error: ${response.status}`)
+      const response = await fetch(url.toString())
+      if (!response.ok) {
+        return { results: [], headers: { status: 'failed', code: response.status } } as unknown as T
+      }
+      
+      return await response.json()
+    } catch {
+      return { results: [], headers: { status: 'failed', code: 0 } } as unknown as T
     }
-    
-    return response.json()
   }
 
   async getSongs(params: {

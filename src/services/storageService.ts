@@ -25,8 +25,14 @@ class StorageService {
   }
 
   async uploadProfilePicture(file: File, userId: string): Promise<{ success: boolean; url?: string; error?: string }> {
-    const path = `profiles/${userId}/${Date.now()}_${file.name}`
-    return this.uploadFile('profiles', path, file)
+    const cleanExt = file.name.split('.').pop() || 'jpg';
+    const path = `${userId}/avatar_${Date.now()}.${cleanExt}`;
+    // Try avatars bucket first, if error try profiles bucket
+    let res = await this.uploadFile('avatars', path, file);
+    if (!res.success) {
+      res = await this.uploadFile('profiles', `avatars/${path}`, file);
+    }
+    return res;
   }
 
   async uploadMusicFile(file: File, userId: string): Promise<{ success: boolean; url?: string; error?: string }> {

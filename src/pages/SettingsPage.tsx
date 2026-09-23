@@ -1,22 +1,31 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/store'
+import { useUserProfile } from '@/hooks/useUserProfile'
 import { useToast } from '@/components/ui/use-toast'
 import { storageService } from '@/services'
-import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { UserAvatar } from '@/components/ui/avatar'
-import { Camera, Save, BellRing, Volume2, Smartphone, HelpCircle } from 'lucide-react'
+import { Camera, Save, BellRing, Volume2, Smartphone, HelpCircle, Loader2 } from 'lucide-react'
 import { playNotificationChime, requestAdminNotificationPermission, getAdminNotificationPermission } from '@/services/adminNotificationService'
 
 export default function SettingsPage() {
-  const { user, updateProfile } = useAuthStore()
+  const { user } = useAuthStore()
+  const { profile, avatarUrl, displayName, updateProfile: saveUserProfile } = useUserProfile()
   const { toast } = useToast()
   const [isLoading, setIsLoading] = useState(false)
-  const [fullName, setFullName] = useState(user?.full_name || '')
-  const [username, setUsername] = useState(user?.username || '')
-  const [bio, setBio] = useState(user?.bio || '')
+  const [fullName, setFullName] = useState(profile?.display_name || (user as any)?.full_name || '')
+  const [username, setUsername] = useState(profile?.username || user?.username || '')
+  const [bio, setBio] = useState(profile?.bio || user?.bio || '')
+
+  useEffect(() => {
+    if (profile) {
+      setFullName(profile.display_name || (user as any)?.full_name || '')
+      setUsername(profile.username || '')
+      setBio(profile.bio || '')
+    }
+  }, [profile, user])
 
   // Custom device notification sound & permission state
   const [soundType, setSoundType] = useState(localStorage.getItem('zedvevo_notification_sound') || 'iphone')
@@ -26,7 +35,6 @@ export default function SettingsPage() {
     localStorage.setItem('zedvevo_notification_sound', type);
     setSoundType(type);
     if (type !== 'none') {
-      // Instantly play a live demonstration of the chime
       setTimeout(() => {
         playNotificationChime(type as 'iphone' | 'samsung');
       }, 100);
@@ -61,13 +69,16 @@ export default function SettingsPage() {
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file || !user) return
+    const targetId = profile?.id || user?.id
+    if (!file || !targetId) return
 
     try {
-      const result = await storageService.uploadProfilePicture(file, user.id)
+      setIsLoading(true)
+      const result = await storageService.uploadProfilePicture(file, targetId)
       if (result.error) throw new Error(result.error)
+      if (!result.url) throw new Error('Failed to retrieve upload URL')
 
-      await updateProfile({ avatar_url: result.url })
+      await saveUserProfile({ avatar_url: result.url })
       toast({ title: 'Avatar updated successfully' })
     } catch (error) {
       toast({
@@ -75,14 +86,16 @@ export default function SettingsPage() {
         description: error instanceof Error ? error.message : 'Please try again',
         variant: 'destructive',
       })
+    } finally {
+      setIsLoading(false)
     }
   }
 
   const handleSave = async () => {
     setIsLoading(true)
     try {
-      await updateProfile({
-        full_name: fullName,
+      await saveUserProfile({
+        display_name: fullName,
         username,
         bio,
       })
@@ -114,12 +127,12 @@ export default function SettingsPage() {
             <div className="flex items-center gap-6">
               <div className="relative">
                 <UserAvatar
-                  name={fullName}
-                  image={user?.avatar_url}
+                  name={fullName || displayName || 'User'}
+                  src={avatarUrl}
                   size="xl"
                   className="w-24 h-24"
                 />
-                <label className="absolute bottom-0 right-0 p-2 bg-electric rounded-full cursor-pointer hover:bg-electric/80">
+                <label className="absolute bottom-0 right-0 p-2 bg-accent rounded-full cursor-pointer hover:bg-accent/80 transition-colors shadow-md">
                   <Camera className="h-4 w-4 text-white" />
                   <input
                     type="file"
@@ -130,8 +143,13 @@ export default function SettingsPage() {
                 </label>
               </div>
               <div>
-                <p className="text-white font-medium">{fullName || 'Your Name'}</p>
-                <p className="text-sm text-gray-400">{user?.email}</p>
+                <p className="text-white font-medium text-lg">{fullName || displayName || 'Your Name'}</p>
+                <p className="text-sm text-muted-foreground">{profile?.email || user?.email}</p>
+                {profile?.role && (
+                  <span className="inline-block mt-1 text-[11px] font-semibold bg-accent/15 text-accent px-2 py-0.5 rounded uppercase">
+                    {profile.role.replace('_', ' ')}
+                  </span>
+                )}
               </div>
             </div>
 

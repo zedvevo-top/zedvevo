@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, Music2, Video, Trophy, Upload, Library, User, LayoutDashboard, LogOut, LogIn, TrendingUp, Download, Heart } from 'lucide-react';
+import { Menu, X, Music2, Video, Trophy, Upload, Library, User, LayoutDashboard, LogOut, LogIn, TrendingUp, Download, Heart, Settings } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { UserAvatar } from '@/components/ui/avatar';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/contexts/AuthContext';
+import { useUserProfile } from '@/hooks/useUserProfile';
 import CDLogo from '@/components/ui/CDLogo';
 import SearchBar from '@/components/search/SearchBar';
 import NotificationBell from '@/components/notifications/NotificationBell';
@@ -29,7 +30,8 @@ const navLinks = [
 ];
 
 export default function Header() {
-  const { user, profile, signOut } = useAuth();
+  const { user, signOut } = useAuth();
+  const { profile } = useUserProfile(user?.id);
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -149,18 +151,28 @@ export default function Header() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="h-9 w-9 rounded-full p-0">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={profile?.avatar_url || undefined} />
-                      <AvatarFallback className="text-xs font-semibold bg-accent text-accent-foreground">
-                        {(profile?.display_name || profile?.username || 'U')[0].toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
+                    <UserAvatar
+                      src={
+                        profile?.avatar_url ||
+                        (user?.user_metadata as any)?.avatar_url ||
+                        (user?.user_metadata as any)?.picture ||
+                        (user?.user_metadata as any)?.photo_url
+                      }
+                      name={profile?.display_name || profile?.username || user?.email || 'User'}
+                      size="sm"
+                      className="border border-border/80"
+                    />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuContent align="end" className="w-52">
                   <div className="px-2 py-1.5 text-sm">
                     <p className="font-medium truncate">{profile?.display_name || profile?.username || 'User'}</p>
-                    <p className="text-xs text-muted-foreground truncate">{profile?.email}</p>
+                    <p className="text-xs text-muted-foreground truncate">{profile?.email || user.email}</p>
+                    {(profile?.role === 'super_admin' || profile?.role === 'admin') && (
+                      <span className="inline-block mt-1 text-[10px] bg-accent/20 text-accent font-semibold px-1.5 py-0.5 rounded">
+                        {profile.role === 'super_admin' ? 'Super Admin' : 'Admin'}
+                      </span>
+                    )}
                   </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
@@ -170,11 +182,14 @@ export default function Header() {
                     <Link to="/profile" className="flex items-center gap-2"><User className="h-4 w-4" />Profile</Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
+                    <Link to="/settings" className="flex items-center gap-2"><Settings className="h-4 w-4" />Settings</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
                     <Link to="/downloads" className="flex items-center gap-2"><Download className="h-4 w-4" />My Downloads</Link>
                   </DropdownMenuItem>
-                  {(profile?.role === 'admin' || profile?.role === 'super_admin') && (
+                  {(profile?.role === 'admin' || profile?.role === 'super_admin' || user?.email?.toLowerCase() === 'topkuchalo@gmail.com') && (
                     <DropdownMenuItem asChild>
-                      <Link to="/admin" className="flex items-center gap-2"><LayoutDashboard className="h-4 w-4" />Admin</Link>
+                      <Link to="/admin" className="flex items-center gap-2 font-medium text-accent"><LayoutDashboard className="h-4 w-4" />Admin Panel</Link>
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />

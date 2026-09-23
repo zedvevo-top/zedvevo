@@ -8,7 +8,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Badge } from '@/components/ui/badge';
+import { UserAvatar } from '@/components/ui/avatar';
 import { useAuth } from '@/contexts/AuthContext';
+import { useUserProfile } from '@/hooks/useUserProfile';
 import { cn } from '@/lib/utils';
 import BackButton from '@/components/common/BackButton';
 import FreshTunesPortalModal from '@/components/distribution/FreshTunesPortalModal';
@@ -39,7 +41,8 @@ const NAV_ITEMS_SUPER_ADMIN = [
 const NAV_ITEMS_ALL = [...NAV_ITEMS_ADMIN, ...NAV_ITEMS_SUPER_ADMIN];
 
 function SidebarContent({ onNavigate, onOpenFreshTunes }: { onNavigate?: () => void; onOpenFreshTunes?: () => void }) {
-  const { user, profile, signOut } = useAuth();
+  const { user, signOut } = useAuth();
+  const { profile } = useUserProfile(user?.id);
   const navigate = useNavigate();
   const isSuperAdmin = profile?.role === 'super_admin';
   const navItems = isSuperAdmin ? NAV_ITEMS_ALL : NAV_ITEMS_ADMIN;
@@ -49,8 +52,9 @@ function SidebarContent({ onNavigate, onOpenFreshTunes }: { onNavigate?: () => v
     if (!user) return;
     getUnreadNotificationCount(user.id).then(setUnreadCount).catch(() => {});
 
+    const channelId = `admin_sidebar_notif_${user.id}_${Math.random().toString(36).slice(2, 9)}`;
     const channel = supabase
-      .channel(`admin_sidebar_notif_${user.id}`)
+      .channel(channelId)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
         getUnreadNotificationCount(user.id).then(setUnreadCount).catch(() => {});
       })
@@ -122,10 +126,13 @@ function SidebarContent({ onNavigate, onOpenFreshTunes }: { onNavigate?: () => v
 
       {/* Footer */}
       <div className="border-t border-border px-4 py-4 space-y-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="h-7 w-7 rounded-full bg-accent/20 flex items-center justify-center shrink-0 text-xs font-bold text-accent">
-            {(profile?.display_name || profile?.username || 'A')[0].toUpperCase()}
-          </div>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <UserAvatar
+            src={profile?.avatar_url || (user?.user_metadata as any)?.avatar_url || (user?.user_metadata as any)?.picture}
+            name={profile?.display_name || profile?.username || 'Admin'}
+            size="sm"
+            className="h-8 w-8"
+          />
           <div className="flex-1 min-w-0">
             <p className="text-xs font-semibold truncate">{profile?.display_name || profile?.username}</p>
             <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4">

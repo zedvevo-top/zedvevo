@@ -8,6 +8,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotificationStore } from '@/store/notificationStore';
 import {
   getUserNotifications, markNotificationRead, deleteNotification,
   markAllNotificationsRead, getUnreadNotificationCount, clearAllUserNotifications
@@ -110,33 +111,33 @@ export default function NotificationBell({ className }: { className?: string }) 
   const { user } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unread, setUnread] = useState(0);
-  const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'unread' | 'transactions'>('all');
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const loadNotifications = useCallback(async () => {
-    if (!user) return;
-    try {
-      const [list, count] = await Promise.all([
-        getUserNotifications(user.id),
-        getUnreadNotificationCount(user.id),
-      ]);
-      setNotifications(list);
-      setUnread(count);
-    } catch (err) {
-      console.warn('Error loading notifications:', err);
-    }
-  }, [user]);
+  const {
+    notifications,
+    unreadCount,
+    isLoading,
+    fetchNotifications,
+    markAsRead,
+    markAllAsRead,
+    deleteNotification: deleteFromStore,
+  } = useNotificationStore();
 
   useEffect(() => {
     if (!user) return;
-    loadNotifications();
+    fetchNotifications();
 
-    // Real-time Supabase subscription for instant live notification bell count
+    const handleExternalRefresh = () => {
+      fetchNotifications();
+    };
+
+    window.addEventListener('zedvevo_refresh_notifications', handleExternalRefresh);
+
+    // Real-time listener for instant badge count updates
+    const channelId = `realtime_bell_${user.id}_${Math.random().toString(36).slice(2, 9)}`;
     const channel = supabase
-      .channel(`realtime_bell_notifications_${user.id}`)
+      .channel(channelId)
       .on(
         'postgres_changes',
         {
@@ -145,33 +146,17 @@ export default function NotificationBell({ className }: { className?: string }) 
           table: 'notifications',
           filter: `user_id=eq.${user.id}`,
         },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newNotif = payload.new as Notification;
-            setNotifications((prev) => [newNotif, ...prev.filter((n) => n.id !== newNotif.id)]);
-            if (!newNotif.is_read) {
-              setUnread((c) => c + 1);
-              try { playNotificationChime(); } catch {}
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = payload.new as Notification;
-            setNotifications((prev) =>
-              prev.map((n) => (n.id === updated.id ? { ...n, ...updated } : n))
-            );
-            loadNotifications();
-          } else if (payload.eventType === 'DELETE') {
-            const oldNotif = payload.old as { id: string };
-            setNotifications((prev) => prev.filter((n) => n.id !== oldNotif.id));
-            loadNotifications();
-          }
+        () => {
+          fetchNotifications();
         }
       )
       .subscribe();
 
     return () => {
+      window.removeEventListener('zedvevo_refresh_notifications', handleExternalRefresh);
       supabase.removeChannel(channel);
     };
-  }, [user, loadNotifications]);
+  }, [user, fetchNotifications]);
 
   // Close when clicking outside
   useEffect(() => {
@@ -190,22 +175,15 @@ export default function NotificationBell({ className }: { className?: string }) 
     const nextState = !open;
     setOpen(nextState);
     if (nextState && user) {
-      setLoading(true);
-      await loadNotifications();
-      setLoading(false);
+      fetchNotifications();
     }
   };
 
   const handleNotificationClick = async (n: Notification, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
 
-    // Mark as read immediately in UI and DB
     if (!n.is_read) {
-      setNotifications((prev) =>
-        prev.map((x) => (x.id === n.id ? { ...x, is_read: true } : x))
-      );
-      setUnread((c) => Math.max(0, c - 1));
-      markNotificationRead(n.id).catch(console.error);
+      await markAsRead(n.id);
     }
 
     setOpen(false);
@@ -217,38 +195,23 @@ export default function NotificationBell({ className }: { className?: string }) 
 
   const handleMarkAsReadOnly = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const item = notifications.find((x) => x.id === id);
-    if (item && !item.is_read) {
-      setNotifications((prev) =>
-        prev.map((x) => (x.id === id ? { ...x, is_read: true } : x))
-      );
-      setUnread((c) => Math.max(0, c - 1));
-      await markNotificationRead(id);
-    }
+    await markAsRead(id);
   };
 
   const handleDeleteNotification = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const item = notifications.find((x) => x.id === id);
-    setNotifications((prev) => prev.filter((x) => x.id !== id));
-    if (item && !item.is_read) {
-      setUnread((c) => Math.max(0, c - 1));
-    }
-    await deleteNotification(id).catch(console.error);
+    await deleteFromStore(id);
   };
 
   const handleMarkAllRead = async () => {
     if (!user) return;
-    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-    setUnread(0);
-    await markAllNotificationsRead(user.id).catch(console.error);
+    await markAllAsRead();
   };
 
   const handleClearAll = async () => {
     if (!user) return;
-    setNotifications([]);
-    setUnread(0);
     await clearAllUserNotifications(user.id).catch(console.error);
+    fetchNotifications();
   };
 
   if (!user) return null;
@@ -275,12 +238,12 @@ export default function NotificationBell({ className }: { className?: string }) 
         onClick={handleOpenToggle}
         aria-label="Notifications"
       >
-        <Bell className={cn('h-5 w-5 transition-transform duration-200', unread > 0 && 'text-foreground animate-[wiggle_1.5s_ease-in-out_infinite]')} />
+        <Bell className={cn('h-5 w-5 transition-transform duration-200', unreadCount > 0 && 'text-foreground animate-[wiggle_1.5s_ease-in-out_infinite]')} />
         
-        {/* Real-time Unread Badge: 🔔 3 */}
-        {unread > 0 && (
+        {/* Real-time Unread Badge */}
+        {unreadCount > 0 && (
           <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1 text-[11px] font-black text-white shadow-md ring-2 ring-background animate-in zoom-in-50 duration-200">
-            {unread > 99 ? '99+' : unread}
+            {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </Button>
@@ -293,9 +256,9 @@ export default function NotificationBell({ className }: { className?: string }) 
             <div className="flex items-center justify-between gap-2 mb-2.5">
               <div className="flex items-center gap-2">
                 <span className="text-base font-bold tracking-tight">Notification Center</span>
-                {unread > 0 ? (
+                {unreadCount > 0 ? (
                   <Badge variant="destructive" className="h-5 px-2 text-[10px] font-bold">
-                    {unread} Unread
+                    {unreadCount} Unread
                   </Badge>
                 ) : (
                   <Badge variant="secondary" className="h-5 px-2 text-[10px]">
@@ -305,7 +268,7 @@ export default function NotificationBell({ className }: { className?: string }) 
               </div>
 
               <div className="flex items-center gap-1.5">
-                {unread > 0 && (
+                {unreadCount > 0 && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -356,7 +319,7 @@ export default function NotificationBell({ className }: { className?: string }) 
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
-                Unread ({unread})
+                Unread ({unreadCount})
               </button>
               <button
                 type="button"
@@ -375,7 +338,7 @@ export default function NotificationBell({ className }: { className?: string }) 
 
           {/* List Content */}
           <div className="max-h-[440px] overflow-y-auto divide-y divide-border/40">
-            {loading ? (
+            {isLoading ? (
               <div className="py-12 text-center text-xs text-muted-foreground">
                 <div className="h-5 w-5 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-2" />
                 Updating notifications...

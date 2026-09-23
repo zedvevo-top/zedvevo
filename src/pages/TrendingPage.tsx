@@ -112,7 +112,7 @@ export default function TrendingPage() {
   // Realtime updates for nominees and songs
   useEffect(() => {
     const nomineeChannel = supabase
-      .channel('realtime_trending_nominees')
+      .channel(`realtime_trending_nominees_${Math.random().toString(36).slice(2, 9)}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'nominees' },
@@ -129,7 +129,7 @@ export default function TrendingPage() {
       .subscribe();
 
     const songChannel = supabase
-      .channel('realtime_trending_songs')
+      .channel(`realtime_trending_songs_${Math.random().toString(36).slice(2, 9)}`)
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'songs' },
