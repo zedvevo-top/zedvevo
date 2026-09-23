@@ -96,13 +96,23 @@ function ScriptHtmlContainer({ code }: { code: string }) {
     
     containerRef.current.innerHTML = '';
     
-    const range = document.createRange();
-    const documentFragment = range.createContextualFragment(code);
-    
-    containerRef.current.appendChild(documentFragment);
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = code;
+
+    Array.from(tempDiv.childNodes).forEach((node) => {
+      if (node.nodeName.toLowerCase() === 'script') {
+        const oldScript = node as HTMLScriptElement;
+        const newScript = document.createElement('script');
+        Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+        if (oldScript.innerHTML) newScript.innerHTML = oldScript.innerHTML;
+        containerRef.current?.appendChild(newScript);
+      } else {
+        containerRef.current?.appendChild(node.cloneNode(true));
+      }
+    });
   }, [code]);
 
-  return <div ref={containerRef} className="w-full flex justify-center items-center overflow-hidden" />;
+  return <div ref={containerRef} className="w-full flex justify-center items-center overflow-visible min-h-[60px]" />;
 }
 
 interface AdBannerProps {

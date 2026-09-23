@@ -13,7 +13,7 @@ const tabs = [
 export default function MobileNav() {
   const location = useLocation();
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 lg:hidden glass border-t border-border">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 lg:hidden glass border-t border-border pb-[env(safe-area-inset-bottom)]">
       <div className="flex items-stretch justify-around">
         {tabs.map(({ to, label, icon: Icon }) => {
           const active = location.pathname === to;
