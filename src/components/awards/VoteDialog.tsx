@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/db/supabase';
 import { applyPaymentBenefits } from '@/lib/api';
+import { processUnifiedPayment } from '@/lib/paymentProcessor';
 import { generateIdempotencyKey, formatCurrency } from '@/lib/utils';
 import CardPaymentForm from '@/components/payment/CardPaymentForm';
 import type { Nominee } from '@/types/index';
@@ -92,72 +93,35 @@ export default function VoteDialog({
     }
 
     setFlowState('initiating');
-    setStatusMessage('Initiating Lipila payment...');
+    setStatusMessage('Processing Lipila payment...');
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-      const idempotencyKey = generateIdempotencyKey();
-
-      const { data, error } = await supabase.functions.invoke('lipila-payment', {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        body: {
-          amount: totalAmount,
-          payment_method: payMethod,
-          phone_number: payMethod === 'mobile_money' ? phone.trim() : undefined,
-          description: `Vote: ${voteCount} vote(s) for ${nominee.name}`,
-          idempotency_key: idempotencyKey,
-          payment_type: 'vote',
-          user_id: user?.id || null, // Allow visitors to vote without login
-          metadata: {
-            nominee_id: nominee.id,
-            category_id: nominee.category_id,
-            vote_count: voteCount,
-            user_id: user?.id || null,
-          },
+      const result = await processUnifiedPayment({
+        amount: totalAmount,
+        payment_method: payMethod,
+        phone_number: payMethod === 'mobile_money' ? phone.trim() : undefined,
+        description: `Vote: ${voteCount} vote(s) for ${nominee.name}`,
+        payment_type: 'vote',
+        user_id: user?.id || null,
+        metadata: {
+          nominee_id: nominee.id,
+          category_id: nominee.category_id,
+          vote_count: voteCount,
+          user_id: user?.id || null,
         },
       });
 
-      if (error || !data) {
+      if (!result.success) {
         setFlowState('failed');
-        setStatusMessage('Failed to initiate payment. Please try again.');
-        toast.error(error?.message || 'Payment initiation failed');
+        setStatusMessage(result.error || 'Payment failed — no votes were added.');
+        toast.error(result.error || 'Payment failed.');
         return;
       }
 
-      if (data.error) {
-        setFlowState('failed');
-        setStatusMessage(data.error);
-        toast.error(data.error);
-        return;
-      }
-
-      const paymentId = data.payment_id;
-      setActivePaymentId(paymentId);
-
-      // If Lipila returned a redirect URL (e.g. Card), open it
-      if (data.payment_url) {
-        try {
-          window.location.href = data.payment_url;
-        } catch {
-          window.open(data.payment_url, '_blank');
-        }
-      }
-
-      // If 0-amount or instant completed
-      if (data.status === 'completed' || data.status === 'successful') {
-        await applyPaymentBenefits(paymentId).catch(console.error);
-        setFlowState('successful');
-        setStatusMessage('Payment successful — votes confirmed.');
-        toast.success(`Thank you! ${voteCount} vote(s) confirmed.`);
-        onVoteSuccess?.();
-        return;
-      }
-
-      // Begin verification polling for Lipila payment confirmation
-      setFlowState('checking');
-      setStatusMessage('Checking payment...');
-      startPaymentPolling(paymentId);
+      setFlowState('successful');
+      setStatusMessage('Payment successful — votes confirmed.');
+      toast.success(`Thank you! ${voteCount} vote(s) confirmed for ${nominee.name}.`);
+      onVoteSuccess?.();
     } catch (err: unknown) {
       setFlowState('failed');
       const msg = (err as Error).message || 'Failed to process payment';

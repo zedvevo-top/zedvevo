@@ -19,6 +19,7 @@ import { generateIdempotencyKey, formatCurrency, formatDate, snakeCaseFileName }
 import { Navigate, useNavigate } from 'react-router-dom';
 import CardPaymentForm from '@/components/payment/CardPaymentForm';
 import FreshTunesPortalModal from '@/components/distribution/FreshTunesPortalModal';
+import { processUnifiedPayment } from '@/lib/paymentProcessor';
 
 type PayMethod = 'mobile_money' | 'card';
 
@@ -276,70 +277,27 @@ export default function UploadPage() {
     if (payMethod === 'mobile_money' && !phone) { toast.error('Enter your phone number'); return; }
     setPayLoading(true);
     try {
-      // Always get the live session token so the edge function can identify the user
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-
-      const idempotencyKey = generateIdempotencyKey();
-      const { data, error } = await supabase.functions.invoke('lipila-payment', {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        body: {
-          amount: selectedPlan.price,
-          payment_method: payMethod,
-          phone_number: payMethod === 'mobile_money' ? phone : undefined,
-          description: `ZedVevo ${selectedPlan.name} Upload Plan`,
-          idempotency_key: idempotencyKey,
-          payment_type: 'plan',
-          plan_id: selectedPlan.id,
-          user_id: user!.id,
-          metadata: { user_id: user!.id, plan_type: selectedPlan.plan_type }
-        }
+      const result = await processUnifiedPayment({
+        amount: selectedPlan.price,
+        payment_method: payMethod,
+        phone_number: payMethod === 'mobile_money' ? phone : undefined,
+        description: `ZedVevo ${selectedPlan.name} Upload Plan`,
+        payment_type: 'plan',
+        plan_id: selectedPlan.id,
+        user_id: user!.id,
+        metadata: { user_id: user!.id, plan_type: selectedPlan.plan_type, plan_id: selectedPlan.id }
       });
 
-      console.log('[payment] invoke result — data:', JSON.stringify(data), 'error:', error?.message);
-
-      // Prefer data.error over the invoke error object (function always returns JSON)
-      if (data?.status === 'insufficient_funds') {
-        setPaymentStatus('insufficient_funds');
-        toast.error('Insufficient funds. Please top up your mobile money and try again.');
+      if (!result.success) {
+        setPaymentStatus('failed');
+        toast.error(result.error || 'Payment failed.');
         return;
       }
 
-      if (data?.error) {
-        setPaymentStatus('failed');
-        toast.error(data.error);
-        return;
-      }
-
-      if (error) {
-        // Network / CORS / deploy error — extract as much detail as possible
-        let msg = error.message || 'Payment initiation failed. Please try again.';
-        try {
-          const ctx = (error as { context?: { json?: () => Promise<{ error?: string }> } }).context;
-          if (ctx?.json) { const b = await ctx.json(); msg = b?.error ?? msg; }
-        } catch { /* ignore */ }
-        toast.error(msg);
-        setPaymentStatus('failed');
-        return;
-      }
-
-      if (data?.payment_id) {
-        if (data.payment_url) setPaymentUrl(data.payment_url);
-        setPaymentStatus('pending');
-        pollPayment(data.payment_id);
-        if (data.payment_url) {
-          try {
-            window.location.href = data.payment_url;
-          } catch {
-            window.open(data.payment_url, '_blank');
-          }
-        } else {
-          toast.info('Request sent! Check your phone for the Mobile Money PIN prompt.');
-        }
-      } else {
-        toast.error('No payment ID returned. Please try again.');
-        setPaymentStatus('failed');
-      }
+      setPaymentStatus('completed');
+      toast.success('Payment approved! Your upload plan is now active.');
+      setPayDialog(false);
+      fetchSubscription();
     } catch (e: unknown) {
       console.error('[payment] unexpected error:', e);
       toast.error((e as Error).message || 'Payment failed. Please try again.');

@@ -23,6 +23,7 @@ import AdminPaymentGatewayPage from '@/pages/admin/AdminPaymentGatewayPage';
 import { useAuth } from '@/contexts/AuthContext';
 import { routes } from './routes';
 import { AdminNotificationListener } from '@/components/admin/AdminNotificationListener';
+import { UniversalNotificationListener } from '@/components/notifications/UniversalNotificationListener';
 import { analytics } from '@/lib/analytics';
 
 // Guard for admin routes — only admin/super_admin can access
@@ -166,20 +167,11 @@ const GlobalScriptsAndTheme: React.FC = () => {
     loadConfigAndTheme();
   }, []);
 
-  // 2. Priority Ad Loading mechanism: requestIdleCallback with retry loop until ad container DOM element is active
+  // 2. Immediate Ad Loading mechanism: inject ad scripts as soon as the app opens
   React.useEffect(() => {
     const codeToInject = adHeaderCode || `<script async="async" data-cfasync="false" src="https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js"></script><div id="container-29a990e051b1bc82dfb7d8c83a9a64af"></div>`;
 
-    let active = true;
-    let attempts = 0;
-    const maxAttempts = 15;
-    let idleCallbackId: number | null = null;
-    let timeoutId: NodeJS.Timeout | null = null;
-
-    const attemptAdInjection = () => {
-      if (!active) return;
-      attempts++;
-
+    const injectImmediately = () => {
       let container = document.getElementById('dynamic-header-scripts');
       if (!container) {
         container = document.createElement('div');
@@ -192,7 +184,7 @@ const GlobalScriptsAndTheme: React.FC = () => {
         const temp = document.createElement('div');
         temp.innerHTML = codeToInject;
 
-        // Re-create scripts as real DOM nodes to force browser execution without blocking UI
+        // Re-create scripts as real DOM nodes to force immediate browser execution
         Array.from(temp.childNodes).forEach((node) => {
           if (node.nodeName.toLowerCase() === 'script') {
             const oldScript = node as HTMLScriptElement;
@@ -204,40 +196,13 @@ const GlobalScriptsAndTheme: React.FC = () => {
             container.appendChild(node.cloneNode(true));
           }
         });
-
-        // Verify if ad container or target script element is confirmed as active in DOM
-        const targetContainer = document.getElementById('container-29a990e051b1bc82dfb7d8c83a9a64af') || document.getElementById('dynamic-header-scripts');
-        if (!targetContainer && attempts < maxAttempts) {
-          scheduleRetry();
-        }
       } catch (err) {
-        console.warn(`Ad script injection attempt ${attempts} failed:`, err);
-        if (attempts < maxAttempts) {
-          scheduleRetry();
-        }
+        console.warn('Immediate ad script injection failed:', err);
       }
     };
 
-    const scheduleRetry = () => {
-      if (!active) return;
-      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-        idleCallbackId = (window as any).requestIdleCallback(attemptAdInjection, { timeout: 150 });
-      } else {
-        timeoutId = setTimeout(attemptAdInjection, 100);
-      }
-    };
-
-    scheduleRetry();
-
-    return () => {
-      active = false;
-      if (idleCallbackId !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-        (window as any).cancelIdleCallback(idleCallbackId);
-      }
-      if (timeoutId !== null) {
-        clearTimeout(timeoutId);
-      }
-    };
+    // Run synchronously on mount
+    injectImmediately();
   }, [adHeaderCode, location.pathname]);
 
   return null;
@@ -263,6 +228,7 @@ const App: React.FC = () => {
           <NavigationAnalytics />
           <IntersectObserver />
           <AdminNotificationListener />
+          <UniversalNotificationListener />
           <Routes>
             {/* Admin sub-routes — full-screen layout, no Header/MobileNav */}
             <Route path="/admin" element={<AdminGuard><AdminOverviewPage /></AdminGuard>} />

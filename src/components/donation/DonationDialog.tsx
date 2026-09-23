@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { supabase } from '@/db/supabase';
+import { processUnifiedPayment } from '@/lib/paymentProcessor';
 
 const QUICK_AMOUNTS = [5, 10, 20, 50, 100];
 
@@ -99,61 +100,28 @@ export default function DonationDialog({ open, onClose }: DonationDialogProps) {
     setLoading(true);
     setErrorMsg('');
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-
-      const { data, error } = await supabase.functions.invoke('lipila-payment', {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        body: {
-          amount: parsed,
-          payment_method: 'mobile_money',
-          payment_type: 'donation',
-          phone_number: rawPhone,
-          idempotency_key: crypto.randomUUID(),
-          description: message.trim() || 'ZedVevo donation',
-          metadata: {
-            donor_name: donorName.trim() || null,
-            message: message.trim() || null,
-            guest_phone: rawPhone,
-          },
+      const result = await processUnifiedPayment({
+        amount: parsed,
+        payment_method: 'mobile_money',
+        phone_number: rawPhone,
+        description: message.trim() || 'ZedVevo donation',
+        payment_type: 'donation',
+        metadata: {
+          donor_name: donorName.trim() || null,
+          message: message.trim() || null,
+          guest_phone: rawPhone,
         },
       });
 
-      console.log('[donation] invoke result — data:', JSON.stringify(data), 'error:', error?.message);
-
-      if (data?.status === 'insufficient_funds') {
-        setErrorMsg('Insufficient funds. Please top up your mobile money and try again.');
+      if (!result.success) {
+        setErrorMsg(result.error || 'Payment failed.');
         setStep('error');
-        toast.error('Insufficient funds. Please top up and try again.');
+        toast.error(result.error || 'Payment failed.');
         return;
       }
 
-      if (data?.error) {
-        setErrorMsg(data.error);
-        setStep('error');
-        toast.error(data.error);
-        return;
-      }
-
-      if (error) {
-        let msg = error.message || 'Payment initiation failed. Please try again.';
-        try {
-          const ctx = (error as { context?: { json?: () => Promise<{ error?: string }> } }).context;
-          if (ctx?.json) { const b = await ctx.json(); msg = b?.error ?? msg; }
-        } catch { /* ignore */ }
-        setErrorMsg(msg);
-        setStep('error');
-        toast.error(msg);
-        return;
-      }
-
-      if (data?.payment_id) {
-        setStep('pending');
-        toast.info('Request sent! Check your phone for the Mobile Money PIN prompt.');
-        pollStatus(data.payment_id);
-      } else {
-        throw new Error('No payment ID returned. Please try again.');
-      }
+      setStep('done');
+      toast.success('Thank you for your donation!');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Payment failed. Please try again.';
       setErrorMsg(msg);

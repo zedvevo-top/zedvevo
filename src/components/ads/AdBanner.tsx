@@ -114,7 +114,7 @@ function ProfitablerateCpmContainer() {
             </div>
             <div className="text-left">
               <p className="text-xs font-bold text-foreground">MTN MoMo Music Pass</p>
-              <p className="text-[10px] text-muted-foreground">Subscribe to ZedVevo Unlimited Music with MTN MoMo *303#</p>
+              <p className="text-[10px] text-muted-foreground">Subscribe to ZedVevo Unlimited Music with MTN MoMo *115#</p>
             </div>
           </div>
           <span className="text-xs font-semibold px-2.5 py-1 rounded bg-amber-500 text-black hover:bg-amber-400">

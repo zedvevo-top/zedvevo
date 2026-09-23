@@ -19,6 +19,7 @@ import { generateIdempotencyKey, formatCurrency } from '@/lib/utils';
 import VoteDialog from '@/components/awards/VoteDialog';
 import ShareSheet from '@/components/common/ShareSheet';
 import AdBanner from '@/components/ads/AdBanner';
+import { processUnifiedPayment } from '@/lib/paymentProcessor';
 
 export default function AwardsPage() {
   const { user } = useAuth();
@@ -138,30 +139,76 @@ export default function AwardsPage() {
         const path = `${uId}_${timestamp}.${ext}`;
         photoUrl = await uploadFile('nominees', path, nomPhoto);
       }
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-      const idempotencyKey = generateIdempotencyKey();
-      const { data, error } = await supabase.functions.invoke('lipila-payment', {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        body: {
-          amount: nomineeFee,
-          payment_method: nomPayMethod,
-          phone_number: nomPayMethod === 'mobile_money' ? nomPhone : undefined,
-          description: `Nominee registration: ${nomName}`,
-          idempotency_key: idempotencyKey,
-          payment_type: 'nominee_registration',
-          user_id: user?.id,
-          metadata: { award_id: nomAwardId, category_id: nomCategoryId, nominee_name: nomName, user_id: user?.id, photo_url: photoUrl }
+
+      // 1. First insert pending nominee record
+      const { data: newNominee, error: nomInsertErr } = await supabase
+        .from('nominees')
+        .insert({
+          category_id: nomCategoryId,
+          name: nomName,
+          photo_url: photoUrl || null,
+          total_votes: 0,
+          registration_status: 'pending',
+          nomination_status: 'pending',
+          user_id: user?.id || null,
+        })
+        .select()
+        .single();
+
+      if (nomInsertErr || !newNominee) {
+        toast.error('Could not create nominee registration record');
+        return;
+      }
+
+      // 2. Process payment
+      const result = await processUnifiedPayment({
+        amount: nomineeFee,
+        payment_method: nomPayMethod,
+        phone_number: nomPayMethod === 'mobile_money' ? nomPhone.trim() : undefined,
+        description: `Nominee registration: ${nomName}`,
+        payment_type: 'nominee_registration',
+        user_id: user?.id || null,
+        metadata: {
+          nominee_id: newNominee.id,
+          award_id: nomAwardId,
+          category_id: nomCategoryId,
+          nominee_name: nomName,
+          user_id: user?.id || null,
+          photo_url: photoUrl
         }
       });
-      if (data?.status === 'insufficient_funds') { toast.error('Insufficient funds. Please top up and try again.'); return; }
-      if (data?.error) { toast.error(data.error); return; }
-      if (error) { toast.error(error.message || 'Payment initiation failed. Please try again.'); return; }
-      toast.success('Payment initiated. Your nomination will be confirmed once payment is verified.');
+
+      if (!result.success) {
+        // Automatically set to failed & rejected
+        await supabase
+          .from('nominees')
+          .update({
+            registration_status: 'failed',
+            nomination_status: 'rejected'
+          })
+          .eq('id', newNominee.id);
+
+        toast.error(result.error || 'Payment failed — Nominee registration rejected.');
+        return;
+      }
+
+      // 3. Automatically approve nominee when payment is successful
+      await supabase
+        .from('nominees')
+        .update({
+          registration_status: 'completed',
+          nomination_status: 'approved'
+        })
+        .eq('id', newNominee.id);
+
+      toast.success(`Congratulations! ${nomName} is now automatically approved as an official nominee.`);
       setNomDialog(false);
       setNomName(''); setNomPhone(''); setNomCategoryId(''); setNomAwardId(''); setNomPhoto(null);
+
+      // Refresh list
+      loadAwards();
     } catch (e: unknown) {
-      toast.error((e as Error).message || 'Failed to initiate payment');
+      toast.error((e as Error).message || 'Failed to process nominee payment');
     } finally { setNomLoading(false); }
   };
 
