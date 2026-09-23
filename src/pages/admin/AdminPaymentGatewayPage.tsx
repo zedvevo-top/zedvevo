@@ -183,9 +183,9 @@ export default function AdminPaymentGatewayPage() {
       // Refresh balance and tables in real time
       await loadBalanceAndPayouts();
       await loadPayments();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Withdrawal error:', err);
-      toast.error(err.message || 'Failed to process withdrawal. Please try again.');
+      toast.error((err as Error).message || 'Failed to process withdrawal. Please try again.');
     } finally {
       setWithdrawing(false);
     }

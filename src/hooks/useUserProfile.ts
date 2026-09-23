@@ -167,3 +167,47 @@ export function useProfilesMap(userIds: string[]) {
 
   return { profilesMap, isLoading };
 }
+
+export function useAllUserProfiles() {
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchProfiles = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data, error: fetchErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (fetchErr) throw fetchErr;
+      
+      const mapped = (data || []).map(p => {
+        if (p.avatar_url && !p.avatar_url.startsWith('http') && !p.avatar_url.startsWith('data:')) {
+          const { data: pub } = supabase.storage.from('avatars').getPublicUrl(p.avatar_url);
+          p.avatar_url = pub.publicUrl;
+        }
+        return p;
+      });
+      
+      setProfiles(mapped);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProfiles();
+  }, [fetchProfiles]);
+
+  return { profiles, setProfiles, loading, error, refreshProfiles: fetchProfiles };
+}
+
+export function resolveUserAvatarUrl(profile: Partial<Profile> | null) {
+  if (!profile) return undefined;
+  if (profile.avatar_url) return profile.avatar_url;
+  return undefined;
+}

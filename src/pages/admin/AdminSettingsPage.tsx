@@ -25,7 +25,7 @@ import {
 import { formatDate } from '@/lib/utils';
 import type { UploadPlan, HeroBanner, Download as DownloadType, AppSetting } from '@/types/index';
 import ZedVevoWatermark from '@/components/common/ZedVevoWatermark';
-import { playZedVevoIntroTag, playZedVevoOutroTag } from '@/services/audioTagService';
+import { playZedVevoIntroTag, playZedVevoOutroTag, playZedVevoIntroTagSequence } from '@/services/audioTagService';
 
 type NotifType = 'info' | 'success' | 'warning' | 'error';
 

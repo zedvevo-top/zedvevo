@@ -13,6 +13,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAllUserProfiles, resolveUserAvatarUrl } from '@/hooks/useUserProfile';
 import { updateProfile } from '@/lib/api';
@@ -24,7 +25,7 @@ export default function AdminUsersPage() {
   const { profile: myProfile, user } = useAuth();
   const isSuperAdmin = myProfile?.role === 'super_admin' || myProfile?.email?.toLowerCase() === 'topkuchalo@gmail.com' || user?.email?.toLowerCase() === 'topkuchalo@gmail.com';
 
-  const { profiles: users, loading, refreshProfiles } = useAllUserProfiles();
+  const { profiles: users, setProfiles: setUsers, loading, refreshProfiles } = useAllUserProfiles();
   const [search, setSearch]   = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
 
