@@ -2,6 +2,7 @@ import BackToHome from '@/components/common/BackToHome';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import ArtistEarningsOverview from '@/components/artist/ArtistEarningsOverview';
 import { Music2, Video, CreditCard, Trophy, Bell, BarChart2, Loader2,
   Pencil, Trash2, Upload, CheckCircle2, XCircle, Clock, TrendingUp, Lock
 } from 'lucide-react';
@@ -21,7 +22,8 @@ import type { Song, Video as VideoType, Payment, UserSubscription, Nominee, Vote
 import {
   getSongs, getVideos, getUserPayments, getUserSubscriptions,
   getUserNominations, getUserVotes, getUserNotifications,
-  deleteSong, deleteVideo, markNotificationRead, updateProfile, uploadFile
+  deleteSong, deleteVideo, markNotificationRead, updateProfile, uploadFile,
+  getUserWallet, getUserWalletTransactions, getUserWithdrawals, requestUserWithdrawal
 } from '@/lib/api';
 import { supabase } from '@/db/supabase';
 import { formatDate, formatCurrency, getPaymentStatusColor, getPaymentStatusLabel } from '@/lib/utils';
@@ -38,6 +40,19 @@ export default function DashboardPage() {
   const [nominations, setNominations] = useState<Nominee[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  // Wallet States
+  const [wallet, setWallet] = useState<any>(null);
+  const [walletTx, setWalletTx] = useState<any[]>([]);
+  const [userWithdrawals, setUserWithdrawals] = useState<any[]>([]);
+  const [wdDialog, setWdDialog] = useState(false);
+  const [wdAmount, setWdAmount] = useState('');
+  const [wdMethod, setWdMethod] = useState<'mtn' | 'airtel' | 'zamtel' | 'bank'>('mtn');
+  const [wdPhone, setWdPhone] = useState('');
+  const [wdBankName, setWdBankName] = useState('');
+  const [wdAccountNo, setWdAccountNo] = useState('');
+  const [wdAccountName, setWdAccountName] = useState('');
+  const [wdSubmitting, setWdSubmitting] = useState(false);
 
   // Edit profile
   const [editDialog, setEditDialog] = useState(false);
@@ -57,7 +72,7 @@ export default function DashboardPage() {
     const load = async () => {
       setLoading(true);
       try {
-        const [s, v, p, sub, nom, vot, notif] = await Promise.all([
+        const [s, v, p, sub, nom, vot, notif, w, wt, wd] = await Promise.all([
           getSongs({ userId: user.id }),
           getVideos({ userId: user.id }),
           getUserPayments(user.id),
@@ -65,9 +80,13 @@ export default function DashboardPage() {
           getUserNominations(user.id),
           getUserVotes(user.id),
           getUserNotifications(user.id),
+          getUserWallet(user.id),
+          getUserWalletTransactions(user.id),
+          getUserWithdrawals(user.id),
         ]);
         setSongs(s); setVideos(v); setPayments(p);
         setSubscriptions(sub); setNominations(nom); setVotes(vot); setNotifications(notif);
+        setWallet(w); setWalletTx(wt); setUserWithdrawals(wd);
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     };
@@ -123,6 +142,71 @@ export default function DashboardPage() {
       setEditSong(null);
     } catch { toast.error('Failed to update song'); }
     finally { setEditLoading(false); }
+  };
+
+  const handleRequestWithdrawal = async () => {
+    if (!user) return;
+    const amountNum = parseFloat(wdAmount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      toast.error('Please enter a valid withdrawal amount.');
+      return;
+    }
+    if (amountNum < 50) {
+      toast.error('The minimum withdrawal limit is ZMW 50.00.');
+      return;
+    }
+    if (!wallet || wallet.available_balance < amountNum) {
+      toast.error('Insufficient available balance to complete this withdrawal request.');
+      return;
+    }
+    if (wdMethod !== 'bank' && !wdPhone.trim()) {
+      toast.error('Please enter a valid mobile money number.');
+      return;
+    }
+    if (wdMethod === 'bank' && (!wdBankName.trim() || !wdAccountNo.trim())) {
+      toast.error('Please enter complete bank and account information.');
+      return;
+    }
+
+    setWdSubmitting(true);
+    try {
+      const acctDetails = wdMethod === 'bank' 
+        ? { bank_name: wdBankName, account_number: wdAccountNo, account_name: wdAccountName }
+        : { phone: wdPhone };
+
+      const newWd = await requestUserWithdrawal({
+        userId: user.id,
+        amount: amountNum,
+        paymentMethod: wdMethod,
+        accountDetails: acctDetails
+      });
+
+      setUserWithdrawals(prev => [newWd, ...prev]);
+      // Instantly update local wallet balance in UI
+      setWallet(prev => ({
+        ...prev,
+        available_balance: prev.available_balance - amountNum,
+        total_withdrawn: (prev.total_withdrawn || 0) + amountNum
+      }));
+
+      // Reload transactions
+      const wt = await getUserWalletTransactions(user.id);
+      setWalletTx(wt);
+
+      toast.success('Withdrawal request submitted successfully!');
+      setWdDialog(false);
+      // Reset form
+      setWdAmount('');
+      setWdPhone('');
+      setWdBankName('');
+      setWdAccountNo('');
+      setWdAccountName('');
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Failed to submit withdrawal request.');
+    } finally {
+      setWdSubmitting(false);
+    }
   };
 
   const statusIcon = (status: string) => {
@@ -275,42 +359,9 @@ export default function DashboardPage() {
             }
           </TabsContent>
 
-          {/* Get Paid Over Streams — coming soon */}
+          {/* Real Artist Royalty Wallet and Earnings Dashboard */}
           <TabsContent value="earnings">
-            <div className="space-y-4">
-              <div className="rounded-xl border border-border bg-card p-6 text-center space-y-3">
-                <div className="mx-auto h-14 w-14 rounded-full bg-accent/10 flex items-center justify-center">
-                  <TrendingUp className="h-7 w-7 text-accent" />
-                </div>
-                <h2 className="text-base font-bold">Get Paid Over Streams</h2>
-                <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                  Earn money every time your music or video is played on ZedVevo. Stream royalties are coming soon for all verified artists.
-                </p>
-                <div className="inline-flex items-center gap-2 rounded-full bg-accent/10 border border-accent/20 px-4 py-1.5">
-                  <Lock className="h-3.5 w-3.5 text-accent" />
-                  <span className="text-xs font-semibold text-accent">Coming Soon</span>
-                </div>
-              </div>
-
-              {/* Teaser stats */}
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { label: 'Total Plays', value: songs.reduce((a, s) => a + (s.play_count || 0), 0).toLocaleString(), icon: BarChart2 },
-                  { label: 'Total Likes', value: songs.reduce((a, s) => a + (s.like_count || 0), 0).toLocaleString(), icon: TrendingUp },
-                  { label: 'Downloads', value: songs.reduce((a, s) => a + (s.download_count || 0), 0).toLocaleString(), icon: CreditCard },
-                ].map(({ label, value, icon: Icon }) => (
-                  <div key={label} className="bg-muted rounded-lg p-3 text-center">
-                    <Icon className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-                    <p className="text-sm font-bold">{value}</p>
-                    <p className="text-[10px] text-muted-foreground">{label}</p>
-                  </div>
-                ))}
-              </div>
-
-              <p className="text-[11px] text-center text-muted-foreground">
-                Keep uploading quality content — your stream count today determines your payout when earnings launch.
-              </p>
-            </div>
+            <ArtistEarningsOverview onRequestPayout={() => setWdDialog(true)} />
           </TabsContent>
 
           {/* Payments */}
@@ -468,6 +519,96 @@ export default function DashboardPage() {
             <Button variant="outline" onClick={() => setEditSong(null)}>Cancel</Button>
             <Button className="bg-accent hover:bg-accent/90 text-accent-foreground" onClick={handleEditSong} disabled={editLoading}>
               {editLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Request Withdrawal Dialog */}
+      <Dialog open={wdDialog} onOpenChange={setWdDialog}>
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg">
+          <DialogHeader><DialogTitle>Request Payout Withdrawal</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="bg-accent/5 p-3 rounded-lg border border-accent/20 text-xs">
+              <p className="font-bold text-accent">Available Balance: {formatCurrency(wallet?.available_balance || 0)}</p>
+              <p className="text-muted-foreground mt-0.5">Please fill in your recipient details accurately to prevent delayed processing.</p>
+            </div>
+
+            <div>
+              <Label>Amount (ZMW / K)</Label>
+              <Input 
+                type="number" 
+                placeholder="Minimum K50.00" 
+                className="mt-1" 
+                value={wdAmount} 
+                onChange={e => setWdAmount(e.target.value)} 
+              />
+            </div>
+
+            <div>
+              <Label>Payout Method</Label>
+              <select 
+                className="w-full mt-1 bg-background border border-input rounded-md px-3 h-10 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                value={wdMethod}
+                onChange={e => setWdMethod(e.target.value as any)}
+              >
+                <option value="mtn">MTN Mobile Money</option>
+                <option value="airtel">Airtel Money</option>
+                <option value="zamtel">Zamtel Kwacha</option>
+                <option value="bank">Direct Bank Transfer</option>
+              </select>
+            </div>
+
+            {wdMethod !== 'bank' ? (
+              <div>
+                <Label>Mobile Number (Registered Name must match)</Label>
+                <Input 
+                  placeholder="e.g. 097XXXXXXXX" 
+                  className="mt-1" 
+                  value={wdPhone} 
+                  onChange={e => setWdPhone(e.target.value)} 
+                />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <Label>Bank Name</Label>
+                  <Input 
+                    placeholder="e.g. FNB, ABSA, Atlas Mara" 
+                    className="mt-1" 
+                    value={wdBankName} 
+                    onChange={e => setWdBankName(e.target.value)} 
+                  />
+                </div>
+                <div>
+                  <Label>Account Number</Label>
+                  <Input 
+                    placeholder="Account Number" 
+                    className="mt-1" 
+                    value={wdAccountNo} 
+                    onChange={e => setWdAccountNo(e.target.value)} 
+                  />
+                </div>
+                <div>
+                  <Label>Account Holder Name (Full Registered Name)</Label>
+                  <Input 
+                    placeholder="Full Account Name" 
+                    className="mt-1" 
+                    value={wdAccountName} 
+                    onChange={e => setWdAccountName(e.target.value)} 
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWdDialog(false)}>Cancel</Button>
+            <Button 
+              className="bg-accent hover:bg-accent/90 text-accent-foreground" 
+              onClick={handleRequestWithdrawal} 
+              disabled={wdSubmitting}
+            >
+              {wdSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Submit Request
             </Button>
           </DialogFooter>
         </DialogContent>

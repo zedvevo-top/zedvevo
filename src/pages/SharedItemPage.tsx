@@ -31,7 +31,7 @@ export default function SharedItemPage() {
 
   const type: 'song' | 'video' | 'nominee' | '' = location.pathname.startsWith('/song')
     ? 'song'
-    : location.pathname.startsWith('/video')
+    : (location.pathname.startsWith('/video') || location.pathname.startsWith('/watch'))
     ? 'video'
     : location.pathname.startsWith('/nominee')
     ? 'nominee'
@@ -51,11 +51,14 @@ export default function SharedItemPage() {
         if (type === 'video') table = 'videos';
         if (type === 'nominee') table = 'nominees';
 
-        const { data: item, error: fetchErr } = await supabase
-          .from(table)
-          .select('*')
-          .eq('id', id)
-          .maybeSingle();
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        let query = supabase.from(table).select('*');
+        if (isUuid) {
+          query = query.eq('id', id);
+        } else {
+          query = query.eq('slug', id);
+        }
+        const { data: item, error: fetchErr } = await query.maybeSingle();
 
         if (fetchErr) throw fetchErr;
         if (!item) throw new Error(`${type} not found`);
@@ -212,6 +215,46 @@ export default function SharedItemPage() {
         <meta name="twitter:title" content={title} />
         <meta name="twitter:description" content={description} />
         <meta name="twitter:image" content={imageUrl} />
+        <script type="application/ld+json">
+          {JSON.stringify(
+            type === 'song'
+              ? {
+                  "@context": "https://schema.org",
+                  "@type": "MusicRecording",
+                  "name": data.title,
+                  "description": description,
+                  "image": imageUrl,
+                  "url": currentUrl,
+                  "genre": categoryName || "Zambian Music",
+                  "duration": data.duration ? `PT${Math.floor(data.duration / 60)}M${data.duration % 60}S` : undefined,
+                  "byArtist": {
+                    "@type": "MusicGroup",
+                    "name": data.artist_name || data.artist || "ZedVevo Artist"
+                  }
+                }
+              : type === 'video'
+              ? {
+                  "@context": "https://schema.org",
+                  "@type": "VideoObject",
+                  "name": data.title,
+                  "description": description,
+                  "thumbnailUrl": [imageUrl],
+                  "uploadDate": data.created_at || new Date().toISOString(),
+                  "contentUrl": data.video_url || currentUrl,
+                  "embedUrl": currentUrl,
+                  "duration": data.duration ? `PT${Math.floor(data.duration / 60)}M${data.duration % 60}S` : undefined
+                }
+              : {
+                  "@context": "https://schema.org",
+                  "@type": "Person",
+                  "name": data.name,
+                  "description": description,
+                  "image": imageUrl,
+                  "url": currentUrl,
+                  "award": categoryName || "ZedVevo Music Award"
+                }
+          )}
+        </script>
       </Helmet>
 
       {/* Video Player Modal if video type is playing */}

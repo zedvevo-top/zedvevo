@@ -174,35 +174,38 @@ export const lipilaService = {
           const data = await response.json()
           await supabase
             .from('payments')
-            .update({ external_id: data.paymentId || data.reference, status: 'completed', completed_at: new Date().toISOString() })
+            .update({ 
+              external_id: data.paymentId || data.reference, 
+              status: 'pending', 
+              updated_at: new Date().toISOString() 
+            })
             .eq('id', payment.id)
-
-          await handleSuccessfulPayment(payment.id, payment)
 
           return {
             success: true,
             paymentId: payment.id,
-            status: 'completed',
-            message: 'Payment approved successfully!',
+            status: 'pending',
+            message: 'Payment initiated successfully! Please check your mobile phone for a PIN prompt to authorize the transaction.',
           }
         }
       } catch (apiErr) {
-        console.warn('External Lipila API unreachable, completing fallback payment:', apiErr)
+        console.warn('External Lipila API unreachable, keeping payment as pending:', apiErr)
       }
 
-      // Complete payment and activate benefits
+      // Keep payment as pending so that polling can resolve it
       await supabase
         .from('payments')
-        .update({ status: 'completed', completed_at: new Date().toISOString() })
+        .update({ 
+          status: 'pending', 
+          updated_at: new Date().toISOString() 
+        })
         .eq('id', payment.id)
-
-      await handleSuccessfulPayment(payment.id, payment)
 
       return {
         success: true,
         paymentId: payment.id,
-        status: 'completed',
-        message: 'Payment approved successfully!',
+        status: 'pending',
+        message: 'Payment initiated successfully! Please check your mobile phone for a PIN prompt to authorize the transaction.',
       }
     } catch (error) {
       console.error('Error creating mobile money payment:', error)
@@ -223,53 +226,30 @@ export const lipilaService = {
       }
 
       // If already completed or failed in our system, return that status
-      if (payment.status === 'completed') {
+      if (payment.status === 'completed' || payment.status === 'successful') {
         return { success: true, status: 'completed', amount: payment.amount }
       }
       if (payment.status === 'failed') {
         return { success: false, status: 'failed', error: 'Payment was rejected or failed' }
       }
 
-      // Call Lipila API to check real-time status
-      const response = await fetch(
-        `${LIPILA_CONFIG.apiUrl}/payments/${payment.reference_id}/status`,
-        {
-          headers: {
-            'Authorization': `Bearer ${LIPILA_CONFIG.apiKey}`,
-            'X-API-Key': LIPILA_CONFIG.apiKey,
-          },
-        }
-      )
+      // Call secure backend verification API instead of directly querying Lipila from browser!
+      const response = await fetch(`/api/payments/verify?paymentId=${paymentId}`)
 
       if (!response.ok) {
-        // Return current status if API call fails
         return { 
           success: false, 
           status: payment.status as 'pending' | 'completed' | 'failed' | 'refunded',
-          error: 'Could not verify payment status'
+          error: 'Could not verify payment status securely'
         }
       }
 
       const data = await response.json()
 
-      // Update local payment status
-      const newStatus = data.status === 'completed' ? 'completed' 
+      const newStatus = data.status === 'completed' || data.status === 'successful' ? 'completed' 
         : data.status === 'failed' ? 'failed' 
         : data.status === 'refunded' ? 'refunded' 
         : 'pending'
-
-      await supabase
-        .from('payments')
-        .update({
-          status: newStatus,
-          completed_at: data.status === 'completed' ? new Date().toISOString() : null,
-        })
-        .eq('id', paymentId)
-
-      // Process successful payment
-      if (newStatus === 'completed' && payment.status !== 'completed') {
-        await handleSuccessfulPayment(paymentId, payment)
-      }
 
       return {
         success: newStatus === 'completed',

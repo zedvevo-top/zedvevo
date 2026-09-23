@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { supabase } from '@/db/supabase';
 import { Plus, Pencil, Trash2, Loader2, Bell, Download, Globe, Search, Share2, Sparkles, CheckCircle2, Copy, Image as ImageIcon, Upload, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -59,6 +60,95 @@ export default function AdminSettingsPage() {
   const [newVal, setNewVal] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newSaving, setNewSaving] = useState(false);
+
+  // SEO Audit State
+  const [auditSongsCount, setAuditSongsCount] = useState(0);
+  const [auditVideosCount, setAuditVideosCount] = useState(0);
+  const [auditArtistsCount, setAuditArtistsCount] = useState(0);
+  const [auditNomineesCount, setAuditNomineesCount] = useState(0);
+
+  const [missingSongCovers, setMissingSongCovers] = useState<any[]>([]);
+  const [missingSongDescriptions, setMissingSongDescriptions] = useState<any[]>([]);
+  const [missingVideoThumbnails, setMissingVideoThumbnails] = useState<any[]>([]);
+  const [missingVideoDescriptions, setMissingVideoDescriptions] = useState<any[]>([]);
+  const [missingArtistBios, setMissingArtistBios] = useState<any[]>([]);
+  const [missingArtistAvatars, setMissingArtistAvatars] = useState<any[]>([]);
+
+  const [checkingAudit, setCheckingAudit] = useState(false);
+  const [healthScore, setHealthScore] = useState(100);
+
+  const runSeoAudit = async () => {
+    setCheckingAudit(true);
+    try {
+      // 1. Songs audit
+      const { data: songsData } = await supabase
+        .from('songs')
+        .select('id, title, description, cover_url, slug')
+        .eq('status', 'approved');
+
+      const songs = songsData || [];
+      setAuditSongsCount(songs.length);
+
+      const missingCovers = songs.filter((s: any) => !s.cover_url);
+      const missingDescriptions = songs.filter((s: any) => !s.description || s.description.trim().length < 5);
+      setMissingSongCovers(missingCovers);
+      setMissingSongDescriptions(missingDescriptions);
+
+      // 2. Videos audit
+      const { data: videosData } = await supabase
+        .from('videos')
+        .select('id, title, description, thumbnail_url, slug');
+
+      const videos = videosData || [];
+      setAuditVideosCount(videos.length);
+
+      const missingThumbnails = videos.filter((v: any) => !v.thumbnail_url);
+      const missingVideoDescs = videos.filter((v: any) => !v.description || v.description.trim().length < 5);
+      setMissingVideoThumbnails(missingThumbnails);
+      setMissingVideoDescriptions(missingVideoDescs);
+
+      // 3. Artists audit
+      const { data: artistsData } = await supabase
+        .from('artists')
+        .select('id, stage_name, bio, cover_image_url');
+
+      const artists = artistsData || [];
+      setAuditArtistsCount(artists.length);
+
+      const missingBios = artists.filter((a: any) => !a.bio || a.bio.trim().length < 5);
+      const missingAvatars = artists.filter((a: any) => !a.cover_image_url);
+      setMissingArtistBios(missingBios);
+      setMissingArtistAvatars(missingAvatars);
+
+      // 4. Nominees count
+      const { data: nomineesData } = await supabase
+        .from('nominees')
+        .select('id');
+      setAuditNomineesCount((nomineesData || []).length);
+
+      // Calculate score out of 100
+      let totalChecks = 6;
+      let passedChecks = 0;
+
+      if (missingCovers.length === 0) passedChecks++;
+      if (missingDescriptions.length === 0) passedChecks++;
+      if (missingThumbnails.length === 0) passedChecks++;
+      if (missingVideoDescs.length === 0) passedChecks++;
+      if (missingBios.length === 0) passedChecks++;
+      if (missingAvatars.length === 0) passedChecks++;
+
+      const score = Math.round((passedChecks / totalChecks) * 100);
+      setHealthScore(score);
+    } catch (err) {
+      console.error('SEO audit error:', err);
+    } finally {
+      setCheckingAudit(false);
+    }
+  };
+
+  useEffect(() => {
+    runSeoAudit();
+  }, []);
 
   useEffect(() => {
     Promise.all([getAllPlans(), getAllBanners(), getSettings(), getAllDownloads(), getAllSettingsKeys()])
@@ -733,7 +823,100 @@ export default function AdminSettingsPage() {
         </TabsContent>
 
         {/* SEO & Google Search Discoverability Tab */}
-        <TabsContent value="seo" className="mt-4 space-y-4">
+        <TabsContent value="seo" className="mt-4 space-y-5">
+          {/* SEO Health Summary Indicator */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card className="border-accent/40 bg-card/40 flex flex-col justify-between">
+              <CardContent className="p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">SEO Audit Score</span>
+                  <Badge variant={healthScore > 80 ? 'default' : 'destructive'} className="text-[10px]">
+                    {healthScore > 80 ? 'Good' : 'Needs Optimization'}
+                  </Badge>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-4xl font-black text-accent">{healthScore}%</span>
+                  <span className="text-xs text-muted-foreground">Crawler Health</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Based on complete metadata check across songs, videos, and artist profiles in Supabase.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/60 bg-card/30 flex flex-col justify-between">
+              <CardContent className="p-4 space-y-2">
+                <span className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Database Page Index</span>
+                <div className="grid grid-cols-2 gap-1.5 pt-1">
+                  <div className="flex justify-between items-center bg-muted/40 px-2 py-1 rounded text-xs font-mono">
+                    <span className="text-muted-foreground">Songs:</span>
+                    <span className="font-bold text-foreground">{auditSongsCount}</span>
+                  </div>
+                  <div className="flex justify-between items-center bg-muted/40 px-2 py-1 rounded text-xs font-mono">
+                    <span className="text-muted-foreground">Videos:</span>
+                    <span className="font-bold text-foreground">{auditVideosCount}</span>
+                  </div>
+                  <div className="flex justify-between items-center bg-muted/40 px-2 py-1 rounded text-xs font-mono">
+                    <span className="text-muted-foreground">Artists:</span>
+                    <span className="font-bold text-foreground">{auditArtistsCount}</span>
+                  </div>
+                  <div className="flex justify-between items-center bg-muted/40 px-2 py-1 rounded text-xs font-mono">
+                    <span className="text-muted-foreground">Awards:</span>
+                    <span className="font-bold text-foreground">{auditNomineesCount}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-emerald-500/30 bg-card/30 flex flex-col justify-between">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  <span>Crawl Sitemap & Robots</span>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px] px-2.5 w-full justify-start font-mono text-muted-foreground relative overflow-hidden group"
+                      onClick={() => {
+                        navigator.clipboard.writeText('https://zedvevo.xyz/sitemap.xml');
+                        toast.success('Sitemap URL copied to clipboard!');
+                      }}
+                    >
+                      <Copy className="h-3 w-3 mr-1.5 text-accent" />
+                      sitemap.xml
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px] px-2.5 w-full justify-start font-mono text-muted-foreground"
+                      onClick={() => {
+                        navigator.clipboard.writeText('https://zedvevo.xyz/robots.txt');
+                        toast.success('robots.txt URL copied to clipboard!');
+                      }}
+                    >
+                      <Copy className="h-3 w-3 mr-1.5 text-accent" />
+                      robots.txt
+                    </Button>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  className="h-7 text-[10px] w-full font-bold uppercase tracking-wider"
+                  onClick={runSeoAudit}
+                  disabled={checkingAudit}
+                >
+                  {checkingAudit ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                  Refresh Crawler Audit
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Google Search Listing */}
             <Card className="md:col-span-2 border-accent/30 bg-card/60">
@@ -756,7 +939,7 @@ export default function AdminSettingsPage() {
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="font-semibold text-foreground">ZedVevo</span>
                     <span>›</span>
-                    <span className="truncate">{settings['site_url'] || 'https://zedvevo.com'}</span>
+                    <span className="truncate">{settings['site_url'] || 'https://zedvevo.xyz'}</span>
                   </div>
                   <p className="text-base sm:text-lg font-medium text-blue-400 hover:underline cursor-pointer truncate">
                     {settings['site_title'] || 'ZedVevo — Zambia’s Premier Music, Videos & Entertainment Platform'}
@@ -810,14 +993,14 @@ export default function AdminSettingsPage() {
                 <SettingRow
                   label="Default Social Share Image (OpenGraph Image URL)"
                   type="text"
-                  value={settings['og_image'] || 'https://zedvevo.com/icon-512.png'}
+                  value={settings['og_image'] || 'https://zedvevo.xyz/og-image.png'}
                   saving={!!settingSaving['og_image']}
                   onSave={v => saveSetting('og_image', v)}
                 />
                 <SettingRow
                   label="Canonical Base URL"
                   type="text"
-                  value={settings['site_url'] || 'https://zedvevo.com'}
+                  value={settings['site_url'] || 'https://zedvevo.xyz'}
                   saving={!!settingSaving['site_url']}
                   onSave={v => saveSetting('site_url', v)}
                 />
@@ -828,6 +1011,129 @@ export default function AdminSettingsPage() {
                   saving={!!settingSaving['twitter_handle']}
                   onSave={v => saveSetting('twitter_handle', v)}
                 />
+              </CardContent>
+            </Card>
+
+            {/* Crawlability Audit Details */}
+            <Card className="md:col-span-2">
+              <CardContent className="p-4 space-y-4">
+                <div className="flex items-center gap-1.5 border-b border-border/60 pb-2">
+                  <Globe className="h-4 w-4 text-accent" />
+                  <h4 className="text-sm font-semibold">SEO Indexing Audit Checklist (Actionable Diagnostics)</h4>
+                </div>
+
+                <div className="space-y-4 text-xs">
+                  {/* Songs Audit */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-foreground">1. Uploaded Music Tracks ({auditSongsCount})</span>
+                      <Badge variant={missingSongCovers.length === 0 && missingSongDescriptions.length === 0 ? 'secondary' : 'outline'} className="text-[10px]">
+                        {missingSongCovers.length === 0 && missingSongDescriptions.length === 0 ? '✓ Validated' : 'Warnings'}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-muted-foreground">
+                      <div className="bg-muted/30 p-2 rounded border border-border/40">
+                        <p className="font-semibold text-foreground mb-1">Missing Cover Images ({missingSongCovers.length})</p>
+                        {missingSongCovers.length === 0 ? (
+                          <p className="text-emerald-400">✓ All tracks have beautiful thumbnail covers.</p>
+                        ) : (
+                          <div className="max-h-20 overflow-y-auto font-mono text-[10px]">
+                            {missingSongCovers.map((s: any) => (
+                              <div key={s.id}>• {s.title}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="bg-muted/30 p-2 rounded border border-border/40">
+                        <p className="font-semibold text-foreground mb-1">Missing/Short Descriptions ({missingSongDescriptions.length})</p>
+                        {missingSongDescriptions.length === 0 ? (
+                          <p className="text-emerald-400">✓ All tracks have search-friendly descriptions.</p>
+                        ) : (
+                          <div className="max-h-20 overflow-y-auto font-mono text-[10px]">
+                            {missingSongDescriptions.map((s: any) => (
+                              <div key={s.id}>• {s.title}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Videos Audit */}
+                  <div className="space-y-1.5 pt-2 border-t border-border/40">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-foreground">2. Music Videos & Clips ({auditVideosCount})</span>
+                      <Badge variant={missingVideoThumbnails.length === 0 && missingVideoDescriptions.length === 0 ? 'secondary' : 'outline'} className="text-[10px]">
+                        {missingVideoThumbnails.length === 0 && missingVideoDescriptions.length === 0 ? '✓ Validated' : 'Warnings'}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-muted-foreground">
+                      <div className="bg-muted/30 p-2 rounded border border-border/40">
+                        <p className="font-semibold text-foreground mb-1">Missing Thumbnails ({missingVideoThumbnails.length})</p>
+                        {missingVideoThumbnails.length === 0 ? (
+                          <p className="text-emerald-400">✓ All videos have dynamic thumbnails.</p>
+                        ) : (
+                          <div className="max-h-20 overflow-y-auto font-mono text-[10px]">
+                            {missingVideoThumbnails.map((v: any) => (
+                              <div key={v.id}>• {v.title}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="bg-muted/30 p-2 rounded border border-border/40">
+                        <p className="font-semibold text-foreground mb-1">Missing/Short Descriptions ({missingVideoDescriptions.length})</p>
+                        {missingVideoDescriptions.length === 0 ? (
+                          <p className="text-emerald-400">✓ All videos have detailed meta descriptions.</p>
+                        ) : (
+                          <div className="max-h-20 overflow-y-auto font-mono text-[10px]">
+                            {missingVideoDescriptions.map((v: any) => (
+                              <div key={v.id}>• {v.title}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Artists Audit */}
+                  <div className="space-y-1.5 pt-2 border-t border-border/40">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-foreground">3. Artist Profiles ({auditArtistsCount})</span>
+                      <Badge variant={missingArtistBios.length === 0 && missingArtistAvatars.length === 0 ? 'secondary' : 'outline'} className="text-[10px]">
+                        {missingArtistBios.length === 0 && missingArtistAvatars.length === 0 ? '✓ Validated' : 'Warnings'}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-muted-foreground">
+                      <div className="bg-muted/30 p-2 rounded border border-border/40">
+                        <p className="font-semibold text-foreground mb-1">Missing Profiles/Bios ({missingArtistBios.length})</p>
+                        {missingArtistBios.length === 0 ? (
+                          <p className="text-emerald-400">✓ All artists have detailed biography content.</p>
+                        ) : (
+                          <div className="max-h-20 overflow-y-auto font-mono text-[10px]">
+                            {missingArtistBios.map((a: any) => (
+                              <div key={a.id}>• {a.stage_name}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="bg-muted/30 p-2 rounded border border-border/40">
+                        <p className="font-semibold text-foreground mb-1">Missing Avatar Images ({missingArtistAvatars.length})</p>
+                        {missingArtistAvatars.length === 0 ? (
+                          <p className="text-emerald-400">✓ All artists have official avatar covers.</p>
+                        ) : (
+                          <div className="max-h-20 overflow-y-auto font-mono text-[10px]">
+                            {missingArtistAvatars.map((a: any) => (
+                              <div key={a.id}>• {a.stage_name}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>

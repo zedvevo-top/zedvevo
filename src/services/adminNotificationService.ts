@@ -3,23 +3,85 @@ import { toast } from 'sonner';
 
 export type NotificationPermissionState = 'granted' | 'denied' | 'default' | 'unsupported';
 
-// Play subtle, non-intrusive sound chime when alert arrives
-function playNotificationChime() {
+// Play custom iPhone or Samsung sound chime when alert arrives
+export function playNotificationChime(soundTypeOverride?: 'iphone' | 'samsung') {
   try {
+    const soundPreference = soundTypeOverride || localStorage.getItem('zedvevo_notification_sound') || 'iphone';
+    if (soundPreference === 'none') return;
+
     const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
-    osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15); // A5
-    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.35);
-  } catch {
-    // AudioContext blocked or not supported
+    
+    if (soundPreference === 'iphone') {
+      // High-Fidelity iPhone Tri-Tone: G5 (784Hz) -> C6 (1046.5Hz) -> E6 (1318.5Hz)
+      const notes = [784.00, 1046.50, 1318.51];
+      const noteDurations = [0.12, 0.12, 0.25];
+      const startTimes = [0.0, 0.11, 0.22];
+
+      notes.forEach((freq, i) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime + startTimes[i]);
+        
+        // Classic metallic bell chime overtones
+        const oscOvertone = audioCtx.createOscillator();
+        const overtoneGain = audioCtx.createGain();
+        oscOvertone.type = 'sine';
+        oscOvertone.frequency.setValueAtTime(freq * 2.001, audioCtx.currentTime + startTimes[i]); // slight detune overtone
+        
+        // Envelope settings
+        gain.gain.setValueAtTime(0.0, audioCtx.currentTime + startTimes[i]);
+        gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + startTimes[i] + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + startTimes[i] + noteDurations[i]);
+
+        overtoneGain.gain.setValueAtTime(0.0, audioCtx.currentTime + startTimes[i]);
+        overtoneGain.gain.linearRampToValueAtTime(0.06, audioCtx.currentTime + startTimes[i] + 0.01);
+        overtoneGain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + startTimes[i] + noteDurations[i] * 0.7);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        
+        oscOvertone.connect(overtoneGain);
+        overtoneGain.connect(audioCtx.destination);
+
+        osc.start(audioCtx.currentTime + startTimes[i]);
+        oscOvertone.start(audioCtx.currentTime + startTimes[i]);
+        
+        osc.stop(audioCtx.currentTime + startTimes[i] + noteDurations[i]);
+        oscOvertone.stop(audioCtx.currentTime + startTimes[i] + noteDurations[i]);
+      });
+    } else if (soundPreference === 'samsung') {
+      // High-Fidelity Samsung Bubbly/Skyline Chime: 4 fast climbing bubbly bell tones
+      // Bb5 (932.33Hz) -> Eb6 (1244.51Hz) -> F6 (1396.91Hz) -> Bb6 (1864.66Hz)
+      const notes = [932.33, 1244.51, 1396.91, 1864.66];
+      const startTimes = [0.0, 0.06, 0.12, 0.18];
+      const noteDurations = [0.15, 0.15, 0.15, 0.3];
+
+      notes.forEach((freq, i) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        
+        // Triangle wave gives it a softer, bubblier characteristic, blended with sine wave
+        osc.type = i % 2 === 0 ? 'sine' : 'triangle';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime + startTimes[i]);
+        
+        // Add subtle pitch sweep (frequency modulation) to sound extra bubbly
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.05, audioCtx.currentTime + startTimes[i] + 0.05);
+
+        gain.gain.setValueAtTime(0.0, audioCtx.currentTime + startTimes[i]);
+        gain.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + startTimes[i] + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + startTimes[i] + noteDurations[i]);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        osc.start(audioCtx.currentTime + startTimes[i]);
+        osc.stop(audioCtx.currentTime + startTimes[i] + noteDurations[i]);
+      });
+    }
+  } catch (err) {
+    console.warn('Failed to play custom notification sound chime:', err);
   }
 }
 
@@ -125,11 +187,13 @@ export function startAdminNotificationMonitor(isAdmin: boolean) {
   let lastKnownSongId: string | null = null;
   let lastKnownNomineeId: string | null = null;
   let lastKnownVoteId: string | null = null;
+  let lastKnownUserId: string | null = null;
+  let lastKnownPaymentId: string | null = null;
   let isInitialCheck = true;
 
-  // 1. Supabase Realtime Channels
+  // 1. Supabase Realtime Channels for Admin
   const channel = supabase
-    .channel('admin-activity-popups')
+    .channel('admin-comprehensive-activity-popups')
     // Song uploads
     .on(
       'postgres_changes',
@@ -143,6 +207,58 @@ export function startAdminNotificationMonitor(isAdmin: boolean) {
           tag: `song-${song.id}`,
         });
         toast.info(`🎵 New song uploaded: "${song.title}" by ${song.artist_name}`);
+      }
+    )
+    // Video uploads
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'videos' },
+      (payload) => {
+        const video = payload.new as any;
+        if (!video) return;
+        showAdminPopNotification('🎬 New Video Uploaded!', {
+          body: `"${video.title || 'Untitled'}" by ${video.artist_name || 'Artist'} was uploaded.`,
+          tag: `video-${video.id}`,
+        });
+        toast.info(`🎬 New video uploaded: "${video.title}"`);
+      }
+    )
+    // New Users & Artists
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'users' },
+      (payload) => {
+        const u = payload.new as any;
+        if (!u) return;
+        lastKnownUserId = u.id;
+        const isArtist = u.is_artist || u.role === 'artist';
+        const title = isArtist ? '🎸 New Artist Registered!' : '👤 New User Registered!';
+        const body = `${u.full_name || u.username || u.email || 'A new user'} joined ZedVevo.`;
+        showAdminPopNotification(title, {
+          body,
+          tag: `user-${u.id}`,
+        });
+        toast.success(body);
+      }
+    )
+    // Every Payment
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'payments' },
+      (payload) => {
+        const p = payload.new as any;
+        if (!p) return;
+        lastKnownPaymentId = p.id;
+        const amount = p.amount;
+        const type = p.payment_type || 'transaction';
+        const status = p.status || 'completed';
+        const title = status === 'completed' || status === 'successful' ? `💰 New Payment Received!` : `⚠️ Payment Notice`;
+        const body = `ZMW ${amount} (${type}) transaction status: ${status}.`;
+        showAdminPopNotification(title, {
+          body,
+          tag: `payment-${p.id}`,
+        });
+        toast.info(body);
       }
     )
     // Award Nominees
@@ -178,45 +294,45 @@ export function startAdminNotificationMonitor(isAdmin: boolean) {
     )
     .subscribe();
 
-  // 2. High-reliability Polling Fallback (runs every 12 seconds)
-  // Ensures admin gets notified even if websocket disconnected while user was in another app
+  // 2. High-reliability Polling Fallback (runs every 10 seconds)
   const pollLatest = async () => {
     if (!active) return;
     try {
-      // Check latest song
-      const { data: latestSongs } = await supabase
-        .from('songs')
-        .select('id, title, artist_name, created_at')
+      // Check latest payment
+      const { data: latestPayments } = await supabase
+        .from('payments')
+        .select('id, amount, payment_type, status, created_at')
         .order('created_at', { ascending: false })
         .limit(1);
 
-      if (latestSongs && latestSongs.length > 0) {
-        const song = latestSongs[0];
-        if (!isInitialCheck && lastKnownSongId && song.id !== lastKnownSongId) {
-          showAdminPopNotification('🎵 New Song Uploaded!', {
-            body: `"${song.title || 'Untitled'}" by ${song.artist_name || 'Artist'} was submitted.`,
-            tag: `song-${song.id}`,
+      if (latestPayments && latestPayments.length > 0) {
+        const p = latestPayments[0];
+        if (!isInitialCheck && lastKnownPaymentId && p.id !== lastKnownPaymentId) {
+          showAdminPopNotification('💰 New Payment Received!', {
+            body: `ZMW ${p.amount} (${p.payment_type || 'transaction'}) completed.`,
+            tag: `payment-${p.id}`,
           });
         }
-        lastKnownSongId = song.id;
+        lastKnownPaymentId = p.id;
       }
 
-      // Check latest nominee
-      const { data: latestNominees } = await supabase
-        .from('nominees')
-        .select('id, name, song_title, created_at')
+      // Check latest user
+      const { data: latestUsers } = await supabase
+        .from('users')
+        .select('id, full_name, username, email, is_artist, created_at')
         .order('created_at', { ascending: false })
         .limit(1);
 
-      if (latestNominees && latestNominees.length > 0) {
-        const nominee = latestNominees[0];
-        if (!isInitialCheck && lastKnownNomineeId && nominee.id !== lastKnownNomineeId) {
-          showAdminPopNotification('🏆 New Award Nominee Submitted!', {
-            body: `${nominee.name || 'Nominee'} was entered for "${nominee.song_title || 'Award Entry'}"`,
-            tag: `nominee-${nominee.id}`,
+      if (latestUsers && latestUsers.length > 0) {
+        const u = latestUsers[0];
+        if (!isInitialCheck && lastKnownUserId && u.id !== lastKnownUserId) {
+          const isArtist = u.is_artist;
+          showAdminPopNotification(isArtist ? '🎸 New Artist Registered!' : '👤 New User Registered!', {
+            body: `${u.full_name || u.username || u.email || 'A user'} joined ZedVevo.`,
+            tag: `user-${u.id}`,
           });
         }
-        lastKnownNomineeId = nominee.id;
+        lastKnownUserId = u.id;
       }
 
       // Check latest vote
@@ -239,13 +355,12 @@ export function startAdminNotificationMonitor(isAdmin: boolean) {
 
       isInitialCheck = false;
     } catch {
-      // Ignore background fetch error
+      // Ignore
     }
   };
 
-  // Run initial poll
   pollLatest();
-  const timer = setInterval(pollLatest, 12000);
+  const timer = setInterval(pollLatest, 10000);
 
   return () => {
     active = false;

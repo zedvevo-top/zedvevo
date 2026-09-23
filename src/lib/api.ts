@@ -2045,3 +2045,173 @@ export async function requestLipilaWithdrawal(req: WithdrawalRequest): Promise<{
   };
 }
 
+// ============================================================
+// USER-FACING WALLET & WITHDRAWALS API
+// ============================================================
+export interface UserWallet {
+  id: string;
+  user_id: string;
+  available_balance: number;
+  pending_balance: number;
+  total_earnings: number;
+  total_withdrawn: number;
+  currency: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WalletTransaction {
+  id: string;
+  user_id: string;
+  type: 'streaming_earnings' | 'voting_earnings' | 'refunds' | 'withdrawals' | 'admin_adjustment' | 'other';
+  amount: number;
+  balance_before: number;
+  balance_after: number;
+  status: 'pending' | 'completed' | 'failed' | 'cancelled';
+  description: string;
+  payment_reference?: string;
+  created_at: string;
+}
+
+export interface UserWithdrawal {
+  id: string;
+  user_id: string;
+  amount: number;
+  currency: string;
+  status: 'requested' | 'processing' | 'approved' | 'paid' | 'failed' | 'rejected' | 'cancelled';
+  payment_method: 'mtn' | 'airtel' | 'zamtel' | 'bank';
+  account_details: {
+    phone?: string;
+    account_number?: string;
+    bank_name?: string;
+    account_name?: string;
+  };
+  reference_id: string;
+  external_id?: string;
+  admin_notes?: string;
+  failure_reason?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getUserWallet(userId: string): Promise<UserWallet | null> {
+  // Query wallet from user_wallets table
+  const { data, error } = await supabase
+    .from('user_wallets')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('Error fetching wallet from user_wallets table, returning fallback:', error.message);
+  }
+
+  if (data) return data as UserWallet;
+
+  // Fallback / Auto-initialize local wallet if table query fails or returns empty
+  return {
+    id: `wallet-${userId.substring(0, 8)}`,
+    user_id: userId,
+    available_balance: 0.00,
+    pending_balance: 0.00,
+    total_earnings: 0.00,
+    total_withdrawn: 0.00,
+    currency: 'ZMW',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+}
+
+export async function getUserWalletTransactions(userId: string): Promise<WalletTransaction[]> {
+  const { data, error } = await supabase
+    .from('wallet_transactions')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  if (error) {
+    console.warn('Error fetching wallet transactions:', error.message);
+    return [];
+  }
+  return Array.isArray(data) ? data as WalletTransaction[] : [];
+}
+
+export async function getUserWithdrawals(userId: string): Promise<UserWithdrawal[]> {
+  const { data, error } = await supabase
+    .from('withdrawals')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(30);
+
+  if (error) {
+    console.warn('Error fetching user withdrawals:', error.message);
+    return [];
+  }
+  return Array.isArray(data) ? data as UserWithdrawal[] : [];
+}
+
+export async function requestUserWithdrawal(payload: {
+  userId: string;
+  amount: number;
+  paymentMethod: 'mtn' | 'airtel' | 'zamtel' | 'bank';
+  accountDetails: {
+    phone?: string;
+    account_number?: string;
+    bank_name?: string;
+    account_name?: string;
+  };
+}): Promise<UserWithdrawal> {
+  const reference = `ZV-WD-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  // 1. Fetch current wallet to deduct available balance
+  const wallet = await getUserWallet(payload.userId);
+  if (!wallet || wallet.available_balance < payload.amount) {
+    throw new Error('Insufficient available balance to complete this withdrawal request.');
+  }
+
+  // 2. Begin transaction flow: Insert withdrawal request
+  const { data, error } = await supabase
+    .from('withdrawals')
+    .insert({
+      user_id: payload.userId,
+      amount: payload.amount,
+      currency: 'ZMW',
+      status: 'requested',
+      payment_method: payload.paymentMethod,
+      account_details: payload.accountDetails,
+      reference_id: reference
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  // 3. Deduct available balance and increase total withdrawn / pending balance
+  const newAvail = Number(wallet.available_balance) - payload.amount;
+  await supabase
+    .from('user_wallets')
+    .update({
+      available_balance: newAvail,
+      total_withdrawn: (Number(wallet.total_withdrawn) || 0) + payload.amount,
+      updated_at: new Date().toISOString()
+    })
+    .eq('user_id', payload.userId);
+
+  // 4. Create record in wallet transactions
+  await supabase.from('wallet_transactions').insert({
+    user_id: payload.userId,
+    type: 'withdrawals',
+    amount: -payload.amount,
+    balance_before: wallet.available_balance,
+    balance_after: newAvail,
+    status: 'completed',
+    description: `Withdrawal request submitted (${payload.paymentMethod.toUpperCase()})`,
+    payment_reference: reference
+  });
+
+  return data as UserWithdrawal;
+}
+
+

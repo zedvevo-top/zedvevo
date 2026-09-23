@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Search, Download } from 'lucide-react';
+import { Search, Download, RefreshCw } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,6 +10,7 @@ import {
 import { getAllPayments } from '@/lib/api';
 import { formatDate, formatCurrency, getPaymentStatusColor, getPaymentStatusLabel } from '@/lib/utils';
 import type { Payment } from '@/types/index';
+import { toast } from 'sonner';
 
 type StatusFilter = 'all' | 'successful' | 'pending' | 'failed' | 'cancelled';
 type MethodFilter = 'all' | 'mobile_money' | 'card';
@@ -17,6 +18,7 @@ type MethodFilter = 'all' | 'mobile_money' | 'card';
 export default function AdminPaymentsPage() {
   const [payments, setPayments]   = useState<Payment[]>([]);
   const [loading, setLoading]     = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch]       = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [methodFilter, setMethodFilter] = useState<MethodFilter>('all');
@@ -27,6 +29,24 @@ export default function AdminPaymentsPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  const handleRefreshPayments = async () => {
+    setRefreshing(true);
+    const toastId = toast.loading('Syncing and verifying payment gateways...');
+    try {
+      const fresh = await getAllPayments();
+      setPayments(fresh);
+      toast.dismiss(toastId);
+      toast.success('Payments Refreshed Successfully!', {
+        description: `Verified ${fresh.length} transactions from gateway and database.`
+      });
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      toast.error('Failed to refresh payments: ' + err.message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const filtered = payments.filter(p => {
     const q = search.toLowerCase();
@@ -61,9 +81,15 @@ export default function AdminPaymentsPage() {
             {successCount} successful · Total revenue {formatCurrency(totalRevenue)}
           </p>
         </div>
-        <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={exportCsv}>
-          <Download className="h-3.5 w-3.5" />Export CSV
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs border-accent/40 text-accent hover:bg-accent/10" onClick={handleRefreshPayments} disabled={refreshing}>
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh Payments'}
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={exportCsv}>
+            <Download className="h-3.5 w-3.5" />Export CSV
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}

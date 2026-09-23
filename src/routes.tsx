@@ -15,6 +15,7 @@ import PaymentSuccessPage from './pages/PaymentSuccessPage';
 import TermsPage from './pages/TermsPage';
 import PrivacyPage from './pages/PrivacyPage';
 import SharedItemPage from './pages/SharedItemPage';
+import ArtistPage from './pages/ArtistPage';
 
 export interface RouteConfig {
   name: string;
@@ -40,6 +41,8 @@ export const routes: RouteConfig[] = [
   { name: 'SharedSongs',    path: '/songs/:id',       component: SharedItemPage,     public: true },
   { name: 'SharedVideo',    path: '/video/:id',       component: SharedItemPage,     public: true },
   { name: 'SharedVideos',   path: '/videos/:id',      component: SharedItemPage,     public: true },
+  { name: 'WatchVideo',     path: '/watch/:id',       component: SharedItemPage,     public: true },
+  { name: 'ArtistDetail',   path: '/artist/:id',      component: ArtistPage,         public: true },
   { name: 'SharedNominee',  path: '/nominee/:id',     component: SharedItemPage,     public: true },
   { name: 'SharedNominees', path: '/nominees/:id',    component: SharedItemPage,     public: true },
   { name: 'Upload',         path: '/upload',          component: UploadPage,         public: false },

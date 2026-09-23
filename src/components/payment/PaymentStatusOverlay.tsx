@@ -49,6 +49,21 @@ export default function PaymentStatusOverlay({
         if (!error && data) {
           setDbStatus(data.status);
           setDbFailureReason(data.failure_reason);
+
+          // If payment is pending/processing, call secure backend verify to poll Lipila securely!
+          if (data.status === 'pending' || data.status === 'processing') {
+            try {
+              const res = await fetch(`/api/payments/verify?paymentId=${data.id}`);
+              if (res.ok) {
+                const verifiedData = await res.json();
+                if (verifiedData?.status) {
+                  setDbStatus(verifiedData.status);
+                }
+              }
+            } catch (vErr) {
+              console.warn('[Overlay Watcher] Backend verification call note:', vErr);
+            }
+          }
         }
       } catch (err) {
         console.warn('[Overlay Watcher] Error fetching status:', err);

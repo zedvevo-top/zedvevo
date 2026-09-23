@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { Sparkles, Music2, Award, DollarSign, CheckCircle2, XCircle, Bell, X, ExternalLink } from 'lucide-react';
-import { showAdminPopNotification, requestAdminNotificationPermission } from '@/services/adminNotificationService';
+import { showAdminPopNotification, requestAdminNotificationPermission, playNotificationChime } from '@/services/adminNotificationService';
 
 interface MobilePushNotification {
   id: string;
@@ -17,9 +17,10 @@ interface MobilePushNotification {
 export function UniversalNotificationListener() {
   const [activePush, setActivePush] = useState<MobilePushNotification | null>(null);
 
-  // Play subtle haptic feedback or sound if browser allows
+  // Play subtle haptic feedback and custom sound when alert arrives
   const triggerNotificationFeedback = () => {
     try {
+      playNotificationChime();
       if (typeof window !== 'undefined' && 'navigator' in window && 'vibrate' in navigator) {
         navigator.vibrate([100, 50, 100]);
       }
@@ -32,10 +33,7 @@ export function UniversalNotificationListener() {
     setActivePush(notif);
     triggerNotificationFeedback();
 
-    // Auto dismiss after 8 seconds
-    setTimeout(() => {
-      setActivePush((current) => (current?.id === notif.id ? null : current));
-    }, 8000);
+    // Sticky like Facebook / WhatsApp - does not auto-dismiss! The user must interact or swipe/X dismiss.
   };
 
   useEffect(() => {
@@ -108,6 +106,46 @@ export function UniversalNotificationListener() {
               </span>
             </div>
           ), { duration: 10000 });
+        }
+      )
+      .subscribe();
+
+    // Realtime Subscription for NEW VIDEOS
+    const videoChannel = supabase
+      .channel('realtime_universal_videos_broadcast')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'videos' },
+        (payload) => {
+          const newVideo = payload.new;
+          if (!newVideo) return;
+
+          const artistName = newVideo.artist_name || 'ZedVevo Artist';
+          const videoTitle = newVideo.title || 'New Video';
+          const thumbnail = newVideo.thumbnail_url || '/app-icon.png';
+          const videoSlug = newVideo.slug || newVideo.id;
+
+          const title = `🎬 NEW VIDEO UPLOADED!`;
+          const body = `"${videoTitle}" by ${artistName} is now live. Tap to watch!`;
+
+          // Native OS Push Notification
+          void showAdminPopNotification(title, {
+            body,
+            icon: thumbnail,
+            tag: `video-${newVideo.id}`,
+            data: { url: `/video/${videoSlug}` }
+          });
+
+          // Custom Mobile App Push Notification Overlay
+          pushMobileBanner({
+            id: `video-${newVideo.id}-${Date.now()}`,
+            title,
+            body,
+            type: 'song_release',
+            iconUrl: thumbnail,
+            actionUrl: `/video/${videoSlug}`,
+            timeText: 'Just now'
+          });
         }
       )
       .subscribe();
@@ -221,6 +259,7 @@ export function UniversalNotificationListener() {
       window.removeEventListener('click', handleFirstInteraction);
       window.removeEventListener('touchstart', handleFirstInteraction);
       void supabase.removeChannel(songChannel);
+      void supabase.removeChannel(videoChannel);
       void supabase.removeChannel(pmtChannel);
       void supabase.removeChannel(notifChannel);
     };

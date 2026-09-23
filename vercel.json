@@ -1,7 +1,16 @@
 {
+  "engines": {
+    "node": "18.x"
+  },
   "rewrites": [
+    { "source": "/api/payments/verify", "destination": "/api/verify-payment" },
+    { "source": "/api/lipila/webhook", "destination": "/api/webhook" },
+    { "source": "/robots.txt", "destination": "/api/robots" },
+    { "source": "/sitemap.xml", "destination": "/api/sitemap" },
     { "source": "/song/:id([a-zA-Z0-9_-]+)", "destination": "/api/song?slug=:id" },
     { "source": "/video/:id([a-zA-Z0-9_-]+)", "destination": "/api/video?slug=:id" },
+    { "source": "/watch/:id([a-zA-Z0-9_-]+)", "destination": "/api/video?slug=:id" },
+    { "source": "/artist/:id([a-zA-Z0-9_-]+)", "destination": "/api/artist?slug=:id" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
