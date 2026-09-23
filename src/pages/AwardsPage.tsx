@@ -19,7 +19,8 @@ import { generateIdempotencyKey, formatCurrency } from '@/lib/utils';
 import VoteDialog from '@/components/awards/VoteDialog';
 import ShareSheet from '@/components/common/ShareSheet';
 import AdBanner from '@/components/ads/AdBanner';
-import { processUnifiedPayment } from '@/lib/paymentProcessor';
+import { processUnifiedPayment, listenForPaymentStatus } from '@/lib/paymentProcessor';
+import PaymentStatusOverlay from '@/components/payment/PaymentStatusOverlay';
 
 export default function AwardsPage() {
   const { user } = useAuth();
@@ -38,6 +39,9 @@ export default function AwardsPage() {
   const [nomPhoto, setNomPhoto] = useState<File | null>(null);
   const [nomPayMethod, setNomPayMethod] = useState<'mobile_money' | 'card'>('mobile_money');
   const [nomLoading, setNomLoading] = useState(false);
+  const [nomStep, setNomStep] = useState<'form' | 'pending' | 'success' | 'failed'>('form');
+  const [nomFailureReason, setNomFailureReason] = useState('');
+  const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
 
   // Vote dialog
   const [voteDialog, setVoteDialog] = useState(false);
@@ -189,24 +193,60 @@ export default function AwardsPage() {
           .eq('id', newNominee.id);
 
         toast.error(result.error || 'Payment failed — Nominee registration rejected.');
+        setNomFailureReason(result.error || 'Payment failed.');
+        setNomStep('failed');
+        setNomLoading(false);
         return;
       }
 
-      // 3. Automatically approve nominee when payment is successful
-      await supabase
-        .from('nominees')
-        .update({
-          registration_status: 'completed',
-          nomination_status: 'approved'
-        })
-        .eq('id', newNominee.id);
+      if (result.status === 'completed' || result.status === 'successful') {
+        // 3. Automatically approve nominee when payment is successful
+        await supabase
+          .from('nominees')
+          .update({
+            registration_status: 'completed',
+            nomination_status: 'approved'
+          })
+          .eq('id', newNominee.id);
 
-      toast.success(`Congratulations! ${nomName} is now automatically approved as an official nominee.`);
-      setNomDialog(false);
-      setNomName(''); setNomPhone(''); setNomCategoryId(''); setNomAwardId(''); setNomPhoto(null);
+        toast.success(`Congratulations! ${nomName} is now automatically approved as an official nominee.`);
+        setNomStep('success');
+        setNomLoading(false);
+        return;
+      }
 
-      // Refresh list
-      loadAwards();
+      // STRICT PENDING STATE
+      setActivePaymentId(result.payment_id || null);
+      setNomStep('pending');
+      toast.info('Mobile Money PIN request sent! Please enter your PIN on your phone to approve nominee registration.');
+
+      listenForPaymentStatus(result.payment_id!, async (statusRes) => {
+        if (statusRes.status === 'completed') {
+          await supabase
+            .from('nominees')
+            .update({
+              registration_status: 'completed',
+              nomination_status: 'approved'
+            })
+            .eq('id', newNominee.id);
+
+          toast.success(`Payment Confirmed! ${nomName} is now registered and approved as a nominee.`);
+          setNomStep('success');
+        } else if (statusRes.status === 'failed') {
+          await supabase
+            .from('nominees')
+            .update({
+              registration_status: 'failed',
+              nomination_status: 'rejected'
+            })
+            .eq('id', newNominee.id);
+
+          setNomFailureReason(statusRes.failure_reason || 'Payment failed or declined.');
+          setNomStep('failed');
+          toast.error(statusRes.failure_reason || 'Payment failed or declined. Nominee registration rejected.');
+        }
+        setNomLoading(false);
+      });
     } catch (e: unknown) {
       toast.error((e as Error).message || 'Failed to process nominee payment');
     } finally { setNomLoading(false); }
@@ -379,97 +419,139 @@ export default function AwardsPage() {
       {/* Nomination Dialog — shows ALL awards + ALL their categories */}
       <Dialog open={nomDialog} onOpenChange={(open) => {
         setNomDialog(open);
-        if (!open) { setNomName(''); setNomPhone(''); setNomCategoryId(''); setNomAwardId(''); }
+        if (!open) {
+          setNomName(''); setNomPhone(''); setNomCategoryId(''); setNomAwardId('');
+          setNomStep('form'); setNomFailureReason(''); setActivePaymentId(null);
+        }
       }}>
-        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg">
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg p-6 max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Register as Nominee</DialogTitle>
-            <DialogDescription>
-              Registration fee: <strong>{formatCurrency(nomineeFee)}</strong>. Your nomination will be confirmed after successful payment.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            {/* Step 1 — pick an award */}
-            <div>
-              <Label>Award *</Label>
-              <Select value={nomAwardId} onValueChange={handleNomAwardChange}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Select award" />
-                </SelectTrigger>
-                <SelectContent>
-                  {awards.map(aw => (
-                    <SelectItem key={aw.id} value={aw.id}>{aw.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {/* Step 2 — pick a category (filtered to chosen award) */}
-            <div>
-              <Label>Category *</Label>
-              <Select
-                value={nomCategoryId}
-                onValueChange={setNomCategoryId}
-                disabled={!nomAwardId || nomCategories.length === 0}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder={
-                    !nomAwardId ? 'Select an award first' :
-                    nomCategories.length === 0 ? 'No categories available' :
-                    'Select category'
-                  } />
-                </SelectTrigger>
-                <SelectContent>
-                  {nomCategories.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Your Name / Artist Name *</Label>
-              <Input className="mt-1" value={nomName} onChange={e => setNomName(e.target.value)} placeholder="Enter your name" />
-            </div>
-            <div>
-              <Label>Photo (Optional)</Label>
-              <Input
-                type="file"
-                accept="image/*"
-                className="mt-1"
-                onChange={e => {
-                  if (e.target.files?.[0]) setNomPhoto(e.target.files[0]);
-                }}
-              />
-            </div>
-            <div>
-              <Label>Payment Method *</Label>
-              <Select value={nomPayMethod} onValueChange={v => setNomPayMethod(v as 'mobile_money' | 'card')}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="mobile_money">Mobile Money</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {nomPayMethod === 'mobile_money' && (
-              <div>
-                <Label>Phone Number *</Label>
-                <Input className="mt-1" value={nomPhone} onChange={e => setNomPhone(e.target.value)} placeholder="e.g. 0977123456" />
-              </div>
+            <DialogTitle>
+              {nomStep === 'form' ? 'Register as Nominee' :
+               nomStep === 'pending' ? 'Authorizing Nomination' :
+               nomStep === 'success' ? 'Registration Successful!' :
+               'Registration Failed'}
+            </DialogTitle>
+            {nomStep === 'form' && (
+              <DialogDescription>
+                Registration fee: <strong className="text-accent">{formatCurrency(nomineeFee)}</strong>. Your nomination will be confirmed after successful payment.
+              </DialogDescription>
             )}
-            <div className="flex items-start gap-2 bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
-              <AlertCircle className="h-4 w-4 shrink-0 text-accent mt-0.5" />
-              Your nomination will only be confirmed after Lipila verifies your payment.
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNomDialog(false)}>Cancel</Button>
-            <Button className="bg-accent hover:bg-accent/90 text-accent-foreground" onClick={handleNominate} disabled={nomLoading}>
-              {nomLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Pay {formatCurrency(nomineeFee)} & Register
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </DialogHeader>
+
+          {nomStep === 'form' && (
+            <>
+              <div className="space-y-3 py-2">
+                {/* Step 1 — pick an award */}
+                <div>
+                  <Label>Award *</Label>
+                  <Select value={nomAwardId} onValueChange={handleNomAwardChange}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Select award" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {awards.map(aw => (
+                        <SelectItem key={aw.id} value={aw.id}>{aw.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {/* Step 2 — pick a category (filtered to chosen award) */}
+                <div>
+                  <Label>Category *</Label>
+                  <Select
+                    value={nomCategoryId}
+                    onValueChange={setNomCategoryId}
+                    disabled={!nomAwardId || nomCategories.length === 0}
+                  >
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder={
+                        !nomAwardId ? 'Select an award first' :
+                        nomCategories.length === 0 ? 'No categories available' :
+                        'Select category'
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {nomCategories.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Your Name / Artist Name *</Label>
+                  <Input className="mt-1" value={nomName} onChange={e => setNomName(e.target.value)} placeholder="Enter your name" />
+                </div>
+                <div>
+                  <Label>Photo (Optional)</Label>
+                  <Input
+                    type="file"
+                    accept="image/*"
+                    className="mt-1"
+                    onChange={e => {
+                      if (e.target.files?.[0]) setNomPhoto(e.target.files[0]);
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label>Payment Method *</Label>
+                  <Select value={nomPayMethod} onValueChange={v => setNomPayMethod(v as 'mobile_money' | 'card')}>
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="mobile_money">Mobile Money</SelectItem>
+                      <SelectItem value="card">Card</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {nomPayMethod === 'mobile_money' && (
+                  <div>
+                    <Label>Phone Number *</Label>
+                    <Input className="mt-1" value={nomPhone} onChange={e => setNomPhone(e.target.value)} placeholder="e.g. 0977123456" />
+                  </div>
+                )}
+                <div className="flex items-start gap-2 bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-accent mt-0.5" />
+                  Your nomination will only be confirmed after Lipila verifies your payment.
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setNomDialog(false)}>Cancel</Button>
+                <Button className="bg-accent hover:bg-accent/90 text-accent-foreground font-semibold px-5" onClick={handleNominate} disabled={nomLoading}>
+                  {nomLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Pay {formatCurrency(nomineeFee)} & Register
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+
+        {/* Centralized Payment Status Overlay */}
+        {(nomStep === 'pending' || nomStep === 'success' || nomStep === 'failed') && (
+          <PaymentStatusOverlay
+            status={
+              nomStep === 'pending' ? 'pending' :
+              nomStep === 'success' ? 'success' :
+              'failed'
+            }
+            amount={nomineeFee}
+            description={`Nominee: ${nomName}`}
+            phone={nomPhone}
+            failureReason={nomFailureReason}
+            onClose={() => {
+              setNomDialog(false);
+              setNomName(''); setNomPhone(''); setNomCategoryId(''); setNomAwardId(''); setNomPhoto(null);
+              setNomStep('form');
+              setActivePaymentId(null);
+              loadAwards();
+            }}
+            onRetry={() => {
+              setNomStep('form');
+              setActivePaymentId(null);
+            }}
+            paymentId={activePaymentId || undefined}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
 
       {/* Voting Dialog with Lipila payment verification & states */}
       <VoteDialog

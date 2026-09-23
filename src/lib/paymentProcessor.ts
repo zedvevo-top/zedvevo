@@ -16,6 +16,12 @@ export interface UnifiedPaymentParams {
   vote_count?: number;
 }
 
+export interface PaymentStatusCallbackResult {
+  status: 'pending' | 'completed' | 'successful' | 'failed';
+  failure_reason?: string;
+  message?: string;
+}
+
 export async function processUnifiedPayment(params: UnifiedPaymentParams) {
   const {
     amount,
@@ -45,7 +51,7 @@ export async function processUnifiedPayment(params: UnifiedPaymentParams) {
 
     // Explicit Decline test numbers
     if (phone === '0970000000' || phone === '0770000000' || phone === '0000' || phone.endsWith('000000')) {
-      await supabase.from('payments').insert({
+      const { data: failedPmt } = await supabase.from('payments').insert({
         user_id: user_id || null,
         amount,
         currency: 'ZMW',
@@ -54,8 +60,20 @@ export async function processUnifiedPayment(params: UnifiedPaymentParams) {
         status: 'failed',
         failure_reason: 'Subscriber declined mobile money PIN request on phone.',
         metadata: { ...metadata, phone_number: phone }
-      });
-      return { success: false, error: 'Payment declined on phone by subscriber.' };
+      }).select().single();
+
+      // Create notification for user inbox
+      if (user_id) {
+        await supabase.from('notifications').insert({
+          user_id,
+          title: 'Payment Declined',
+          message: `Your mobile money payment of ZMW ${amount} was declined on your phone.`,
+          notification_type: 'payment_failed',
+          is_read: false
+        }).catch(() => {});
+      }
+
+      return { success: false, error: 'Payment declined on phone by subscriber.', payment_id: failedPmt?.id };
     }
   }
 
@@ -89,15 +107,15 @@ export async function processUnifiedPayment(params: UnifiedPaymentParams) {
         success: true,
         payment_id: data.payment_id || `LIP-${Date.now()}`,
         payment_url: data.payment_url,
-        status: data.status || 'completed',
-        message: data.message || 'Payment request processed successfully.'
+        status: data.status || 'pending',
+        message: data.message || 'Mobile Money PIN prompt sent to your phone! Please enter your PIN to confirm.'
       };
     }
   } catch (edgeErr) {
-    console.warn('Lipila edge function unavailable, executing client payment processor:', edgeErr);
+    console.warn('Lipila edge function unavailable, executing client payment request:', edgeErr);
   }
 
-  // 3. Fallback direct payment processing & immediate auto-approval
+  // 3. Fallback direct payment initiation — STRICTLY SET STATUS TO 'pending'
   const extTxnId = `LIP-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
   const { data: newPayment, error: insertError } = await supabase
@@ -108,7 +126,7 @@ export async function processUnifiedPayment(params: UnifiedPaymentParams) {
       currency: 'ZMW',
       payment_method: payment_method || 'mobile_money',
       payment_type,
-      status: 'completed',
+      status: 'pending', // ALWAYS PENDING INITIALLY
       lipila_transaction_id: extTxnId,
       lipila_reference: extTxnId,
       external_id: extTxnId,
@@ -118,28 +136,159 @@ export async function processUnifiedPayment(params: UnifiedPaymentParams) {
         phone_number: phone,
         description,
         plan_id: plan_id || metadata?.plan_id,
-        processed_at: new Date().toISOString()
+        initiated_at: new Date().toISOString()
       }
     })
     .select()
     .single();
 
   if (insertError || !newPayment) {
-    console.error('Failed to create payment record:', insertError);
-    return { success: false, error: insertError?.message || 'Could not process payment.' };
+    console.error('Failed to create pending payment record:', insertError);
+    return { success: false, error: insertError?.message || 'Could not initiate payment.' };
   }
 
-  // 4. Automatically apply payment benefits (votes, subscriptions, uploads, donations)
-  try {
-    await applyPaymentBenefits(newPayment.id);
-  } catch (benefitErr) {
-    console.error('Error applying payment benefits:', benefitErr);
+  // Create initial notification for user inbox
+  if (user_id) {
+    await supabase.from('notifications').insert({
+      user_id,
+      title: 'Payment Pending',
+      message: `Mobile Money PIN request sent for ZMW ${amount}. Please enter PIN on your phone.`,
+      notification_type: 'payment_pending',
+      is_read: false
+    }).catch(() => {});
   }
 
   return {
     success: true,
     payment_id: newPayment.id,
-    status: 'completed',
-    message: 'Payment approved successfully!'
+    status: 'pending',
+    message: 'Mobile Money PIN prompt sent to your phone! Please enter your PIN to confirm.'
+  };
+}
+
+/**
+ * Realtime Subscription & Polling Helper
+ * Listens for Lipila webhook / database updates to status ('completed' or 'failed')
+ */
+export function listenForPaymentStatus(
+  paymentId: string,
+  onStatusChange: (result: PaymentStatusCallbackResult) => void,
+  maxWaitSeconds: number = 120
+): () => void {
+  let isStopped = false;
+
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paymentId);
+
+  // Helper to fetch the current payment record safely
+  const fetchPaymentRecord = async () => {
+    try {
+      let query = supabase.from('payments').select('*');
+      if (isUuid) {
+        query = query.eq('id', paymentId);
+      } else {
+        query = query.or(`lipila_transaction_id.eq.${paymentId},lipila_reference.eq.${paymentId},external_id.eq.${paymentId}`);
+      }
+      const { data, error } = await query.maybeSingle();
+      if (error) {
+        console.warn('[listenForPaymentStatus] query error:', error);
+        return null;
+      }
+      return data;
+    } catch (err) {
+      console.warn('[listenForPaymentStatus] query exception:', err);
+      return null;
+    }
+  };
+
+  // Helper to process the matched payment state
+  const checkStatusResult = async (p: any) => {
+    if (!p || isStopped) return false;
+
+    if (p.status === 'completed' || p.status === 'successful') {
+      isStopped = true;
+      // Resolve UUID if possible for benefits application
+      const targetId = isUuid ? paymentId : p.id;
+      if (targetId) {
+        await applyPaymentBenefits(targetId).catch(() => {});
+      }
+      onStatusChange({
+        status: 'completed',
+        message: 'Payment confirmed! Action completed successfully.'
+      });
+      return true;
+    } else if (p.status === 'failed' || p.status === 'declined' || p.status === 'cancelled' || p.status === 'insufficient_funds') {
+      isStopped = true;
+      onStatusChange({
+        status: 'failed',
+        failure_reason: p.failure_reason || 'Payment was declined or failed on phone.',
+        message: p.failure_reason || 'Payment declined or failed.'
+      });
+      return true;
+    }
+    return false;
+  };
+
+  // 1. Setup Supabase Realtime listener
+  let channel: any;
+  if (isUuid) {
+    channel = supabase
+      .channel(`payment_watch_${paymentId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'payments',
+          filter: `id=eq.${paymentId}`,
+        },
+        async (payload) => {
+          if (isStopped) return;
+          const p = payload.new as any;
+          if (p) {
+            await checkStatusResult(p);
+          }
+        }
+      )
+      .subscribe();
+  }
+
+  // 2. Perform IMMEDIATE check on start
+  fetchPaymentRecord().then((p) => {
+    if (p) {
+      checkStatusResult(p);
+    }
+  });
+
+  // 3. Setup Polling as fallback (every 3 seconds)
+  const intervalId = setInterval(async () => {
+    if (isStopped) {
+      clearInterval(intervalId);
+      return;
+    }
+    const p = await fetchPaymentRecord();
+    if (p) {
+      await checkStatusResult(p);
+    }
+  }, 3000);
+
+  // 4. Timeout handler after maxWaitSeconds
+  const timeoutId = setTimeout(() => {
+    if (!isStopped) {
+      isStopped = true;
+      clearInterval(intervalId);
+      if (channel) supabase.removeChannel(channel);
+      onStatusChange({
+        status: 'failed',
+        failure_reason: 'Payment timed out waiting for PIN confirmation on phone.',
+        message: 'Payment request timed out. Please try again.'
+      });
+    }
+  }, maxWaitSeconds * 1000);
+
+  return () => {
+    isStopped = true;
+    clearInterval(intervalId);
+    clearTimeout(timeoutId);
+    if (channel) supabase.removeChannel(channel);
   };
 }

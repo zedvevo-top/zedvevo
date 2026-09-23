@@ -19,7 +19,8 @@ import { generateIdempotencyKey, formatCurrency, formatDate, snakeCaseFileName }
 import { Navigate, useNavigate } from 'react-router-dom';
 import CardPaymentForm from '@/components/payment/CardPaymentForm';
 import FreshTunesPortalModal from '@/components/distribution/FreshTunesPortalModal';
-import { processUnifiedPayment } from '@/lib/paymentProcessor';
+import { processUnifiedPayment, listenForPaymentStatus } from '@/lib/paymentProcessor';
+import PaymentStatusOverlay from '@/components/payment/PaymentStatusOverlay';
 
 type PayMethod = 'mobile_money' | 'card';
 
@@ -37,6 +38,7 @@ export default function UploadPage() {
   const [phone, setPhone] = useState('');
   const [payLoading, setPayLoading] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null);
+  const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
   const [showFreshTunesModal, setShowFreshTunesModal] = useState(false);
 
@@ -268,6 +270,7 @@ export default function UploadPage() {
     setPayMethod('mobile_money');
     setPhone('');
     setPaymentStatus(null);
+    setActivePaymentId(null);
     setPaymentUrl(null);
     setPayDialog(true);
   };
@@ -291,18 +294,43 @@ export default function UploadPage() {
       if (!result.success) {
         setPaymentStatus('failed');
         toast.error(result.error || 'Payment failed.');
+        setPayLoading(false);
         return;
       }
 
-      setPaymentStatus('completed');
-      toast.success('Payment approved! Your upload plan is now active.');
-      setPayDialog(false);
-      fetchSubscription();
+      if (result.status === 'completed' || result.status === 'successful') {
+        setPaymentStatus('completed');
+        toast.success('Payment approved! Your upload plan is now active.');
+        setPayDialog(false);
+        fetchSubscription();
+        setPayLoading(false);
+        return;
+      }
+
+      // STRICT PENDING STATE
+      setActivePaymentId(result.payment_id || null);
+      setPaymentStatus('pending');
+      toast.info('Mobile Money prompt sent to your phone! Enter your PIN on your phone to confirm.');
+
+      // Realtime listener for Lipila confirmation
+      listenForPaymentStatus(result.payment_id!, (statusRes) => {
+        if (statusRes.status === 'completed') {
+          setPaymentStatus('completed');
+          toast.success('Lipila confirmed payment! Your upload plan is now active.');
+          setPayDialog(false);
+          fetchSubscription();
+        } else if (statusRes.status === 'failed') {
+          setPaymentStatus('failed');
+          toast.error(statusRes.failure_reason || 'Payment failed or was declined on phone.');
+        }
+        setPayLoading(false);
+      });
     } catch (e: unknown) {
       console.error('[payment] unexpected error:', e);
       toast.error((e as Error).message || 'Payment failed. Please try again.');
       setPaymentStatus('failed');
-    } finally { setPayLoading(false); }
+      setPayLoading(false);
+    }
   };
 
   const handleUpload = async () => {
@@ -619,7 +647,7 @@ export default function UploadPage() {
 
       {/* ── Payment Dialog ────────────────────────────────────────── */}
       <Dialog open={payDialog} onOpenChange={open => { if (!payLoading) setPayDialog(open); }}>
-        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-md">
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg p-6 max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {selectedPlan ? `Pay for ${selectedPlan.name}` : 'Choose Payment'}
@@ -631,41 +659,25 @@ export default function UploadPage() {
             )}
           </DialogHeader>
 
-          {/* Pending state inside dialog */}
-          {paymentStatus === 'pending' ? (
-            <div className="py-6 text-center space-y-3">
-              <Clock className="h-12 w-12 mx-auto text-yellow-500 animate-pulse" />
-              <p className="font-semibold">Waiting for Confirmation</p>
-              <p className="text-sm text-muted-foreground">
-                {payMethod === 'mobile_money'
-                  ? 'Check your phone and confirm the Mobile Money prompt.'
-                  : 'Complete your payment in the opened tab.'}
-              </p>
-              {paymentUrl && (
-                <Button variant="outline" size="sm" onClick={() => window.open(paymentUrl, '_blank')}>
-                  Re-open Payment Page
-                </Button>
-              )}
-              <p className="text-xs text-muted-foreground">This will update automatically once verified.</p>
-            </div>
-          ) : paymentStatus === 'insufficient_funds' || paymentStatus === 'failed' || paymentStatus === 'cancelled' ? (
-            <div className="py-6 text-center space-y-3">
-              <XCircle className="h-12 w-12 mx-auto text-destructive" />
-              <p className="font-semibold">
-                {paymentStatus === 'insufficient_funds' ? 'Insufficient Funds' : `Payment ${paymentStatus}`}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {paymentStatus === 'insufficient_funds'
-                  ? 'Please add sufficient funds to your account and try again.'
-                  : 'Your plan was not activated. Please try again.'}
-              </p>
-              <Button
-                className="bg-accent hover:bg-accent/90 text-accent-foreground"
-                onClick={() => setPaymentStatus(null)}
-              >
-                Try Again
-              </Button>
-            </div>
+          {/* Centralized Payment Status Overlay */}
+          {(paymentStatus === 'pending' || paymentStatus === 'completed' || paymentStatus === 'successful' || paymentStatus === 'insufficient_funds' || paymentStatus === 'failed' || paymentStatus === 'cancelled') ? (
+            <PaymentStatusOverlay
+              status={
+                paymentStatus === 'pending' ? 'pending' :
+                (paymentStatus === 'completed' || paymentStatus === 'successful') ? 'success' :
+                'failed'
+              }
+              amount={selectedPlan?.price || 0}
+              description={`Plan: ${selectedPlan?.name || 'Upload Plan'}`}
+              phone={phone}
+              failureReason={paymentStatus === 'insufficient_funds' ? 'Insufficient funds. Please top up your wallet.' : 'Payment declined or timed out.'}
+              onClose={() => {
+                setPayDialog(false);
+                setPaymentStatus(null);
+              }}
+              onRetry={() => setPaymentStatus(null)}
+              paymentId={activePaymentId || undefined}
+            />
           ) : (
             <div className="space-y-4 py-2">
               {/* Amount summary */}

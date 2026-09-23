@@ -17,7 +17,8 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/db/supabase';
 import { applyPaymentBenefits } from '@/lib/api';
-import { processUnifiedPayment } from '@/lib/paymentProcessor';
+import { processUnifiedPayment, listenForPaymentStatus } from '@/lib/paymentProcessor';
+import PaymentStatusOverlay from '@/components/payment/PaymentStatusOverlay';
 import { generateIdempotencyKey, formatCurrency } from '@/lib/utils';
 import CardPaymentForm from '@/components/payment/CardPaymentForm';
 import type { Nominee } from '@/types/index';
@@ -118,10 +119,32 @@ export default function VoteDialog({
         return;
       }
 
-      setFlowState('successful');
-      setStatusMessage('Payment successful — votes confirmed.');
-      toast.success(`Thank you! ${voteCount} vote(s) confirmed for ${nominee.name}.`);
-      onVoteSuccess?.();
+      if (result.status === 'completed' || result.status === 'successful') {
+        setFlowState('successful');
+        setStatusMessage('Payment successful — votes confirmed.');
+        toast.success(`Thank you! ${voteCount} vote(s) confirmed for ${nominee.name}.`);
+        onVoteSuccess?.();
+        return;
+      }
+
+      // STRICT PENDING STATE
+      setActivePaymentId(result.payment_id || null);
+      setFlowState('checking');
+      setStatusMessage('📱 PIN prompt sent to your phone. Please confirm on your mobile device...');
+      toast.info('Check your phone! Enter your Mobile Money PIN to authorize payment.');
+
+      listenForPaymentStatus(result.payment_id!, (statusRes) => {
+        if (statusRes.status === 'completed') {
+          setFlowState('successful');
+          setStatusMessage('Payment confirmed — votes added!');
+          toast.success(`Thank you! ${voteCount} vote(s) confirmed for ${nominee.name}.`);
+          onVoteSuccess?.();
+        } else if (statusRes.status === 'failed') {
+          setFlowState('failed');
+          setStatusMessage(statusRes.failure_reason || 'Payment failed or was declined on phone.');
+          toast.error(statusRes.failure_reason || 'Payment failed or was declined.');
+        }
+      });
     } catch (err: unknown) {
       setFlowState('failed');
       const msg = (err as Error).message || 'Failed to process payment';
@@ -215,7 +238,7 @@ export default function VoteDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-md p-6 rounded-2xl">
+      <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg p-6 rounded-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader className="space-y-2">
           <div className="flex items-center gap-2 text-accent">
             <Trophy className="h-5 w-5" />
@@ -381,54 +404,23 @@ export default function VoteDialog({
           </div>
         )}
 
-        {/* Checking Payment State */}
-        {flowState === 'checking' && (
-          <div className="py-8 text-center space-y-4">
-            <div className="relative h-14 w-14 mx-auto flex items-center justify-center">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent/20 opacity-75" />
-              <Loader2 className="h-8 w-8 animate-spin text-accent relative z-10" />
-            </div>
-            <div>
-              <h3 className="font-bold text-base text-foreground">Checking payment...</h3>
-              <p className="text-xs text-muted-foreground mt-1">
-                Please approve the mobile prompt on your phone for {formatCurrency(totalAmount)}.
-              </p>
-            </div>
-            <div className="p-3 bg-muted/50 rounded-xl text-xs text-muted-foreground border border-border/50 max-w-xs mx-auto">
-              Votes are only counted after Lipila confirms your payment server-side.
-            </div>
-          </div>
-        )}
-
-        {/* Successful State */}
-        {flowState === 'successful' && (
-          <div className="py-8 text-center space-y-3">
-            <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto" />
-            <h3 className="font-bold text-lg text-foreground">Payment successful — votes confirmed.</h3>
-            <p className="text-xs text-muted-foreground">
-              {voteCount} vote(s) for <strong>{nominee.name}</strong> have been recorded in Supabase.
-            </p>
-          </div>
-        )}
-
-        {/* Failed State */}
-        {flowState === 'failed' && (
-          <div className="py-8 text-center space-y-3">
-            <XCircle className="h-12 w-12 text-destructive mx-auto" />
-            <h3 className="font-bold text-base text-destructive">Payment failed — no votes were added.</h3>
-            <p className="text-xs text-muted-foreground px-4">{statusMessage}</p>
-          </div>
-        )}
-
-        {/* Pending / Timed Out State */}
-        {flowState === 'pending' && (
-          <div className="py-8 text-center space-y-3">
-            <Clock className="h-12 w-12 text-amber-500 mx-auto" />
-            <h3 className="font-bold text-base text-amber-500">Payment pending — votes are not counted yet.</h3>
-            <p className="text-xs text-muted-foreground px-4">
-              If your payment succeeds on your phone shortly, Supabase will automatically record the votes via webhook.
-            </p>
-          </div>
+        {/* Centralized Payment Status Overlay */}
+        {(flowState === 'checking' || flowState === 'successful' || flowState === 'failed' || flowState === 'pending') && (
+          <PaymentStatusOverlay
+            status={
+              flowState === 'checking' ? 'pending' :
+              flowState === 'successful' ? 'success' :
+              flowState === 'failed' ? 'failed' :
+              flowState === 'pending' ? 'pending' : null
+            }
+            amount={totalAmount}
+            description={`Vote: ${voteCount} vote(s) for ${nominee.name}`}
+            phone={phone}
+            failureReason={statusMessage}
+            onClose={handleClose}
+            onRetry={() => setFlowState('idle')}
+            paymentId={activePaymentId || undefined}
+          />
         )}
 
         <DialogFooter className="gap-2 sm:gap-0">
@@ -443,37 +435,6 @@ export default function VoteDialog({
                 onClick={handleStartVote}
               >
                 Pay {formatCurrency(totalAmount)} & Cast {voteCount} {voteCount === 1 ? 'Vote' : 'Votes'}
-              </Button>
-            </>
-          )}
-
-          {flowState === 'checking' && (
-            <Button variant="outline" size="sm" className="w-full" onClick={handleClose}>
-              Check in Background
-            </Button>
-          )}
-
-          {flowState === 'successful' && (
-            <Button
-              size="sm"
-              className="bg-accent hover:bg-accent/90 text-accent-foreground w-full"
-              onClick={handleClose}
-            >
-              Done
-            </Button>
-          )}
-
-          {(flowState === 'failed' || flowState === 'pending') && (
-            <>
-              <Button variant="outline" size="sm" onClick={handleClose}>
-                Close
-              </Button>
-              <Button
-                size="sm"
-                className="bg-accent hover:bg-accent/90 text-accent-foreground"
-                onClick={() => setFlowState('idle')}
-              >
-                Try Again
               </Button>
             </>
           )}
