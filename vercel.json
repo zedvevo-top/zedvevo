@@ -1,6 +1,6 @@
 {
   "engines": {
-    "node": "18.x"
+    "node": "20.x"
   },
   "rewrites": [
     { "source": "/api/payments/verify", "destination": "/api/verify-payment" },
@@ -30,11 +30,5 @@
   ],
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "installCommand": "npm install --include=dev --legacy-peer-deps",
-  "framework": "vite",
-  "functions": {
-    "api/*.js": {
-      "includeFiles": "dist/index.html"
-    }
-  }
+  "installCommand": "npm install --legacy-peer-deps"
 }
