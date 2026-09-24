@@ -1,0 +1,6 @@
+# Ignore Supabase Edge Functions in Vercel build
+supabase/functions
+supabase/migrations
+.git
+node_modules
+dist

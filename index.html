@@ -2,37 +2,130 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ZedVevo — Zambian Music &amp; Video</title>
-    <meta name="description" content="Stream and discover the best Zambian music and videos on ZedVevo." />
+    <link id="dynamic-favicon" rel="icon" type="image/png" href="/app-icon.png" />
+    <link id="dynamic-apple-favicon" rel="apple-touch-icon" href="/app-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <script>
+      (function() {
+        try {
+          var fav = localStorage.getItem('zed_setting_app_favicon_url') || localStorage.getItem('zed_setting_favicon_url');
+          if (fav) {
+            var icon = document.getElementById('dynamic-favicon');
+            var appleIcon = document.getElementById('dynamic-apple-favicon');
+            if (icon) icon.href = fav;
+            if (appleIcon) appleIcon.href = fav;
+          }
+        } catch(e) {}
+      })();
+    </script>
+    <!-- Android Viewport Transformation & Layout Scaling Script -->
+    <script>
+      (function() {
+        try {
+          var ua = navigator.userAgent || navigator.vendor || window.opera;
+          var isAndroid = /android/i.test(ua);
+          if (isAndroid) {
+            document.documentElement.classList.add('is-android-device');
+            function applyAndroidViewportFit() {
+              var root = document.getElementById('root');
+              if (!root) return;
+              var screenWidth = window.innerWidth || document.documentElement.clientWidth;
+              if (screenWidth < 480 && screenWidth > 0) {
+                root.style.transformOrigin = 'top center';
+                root.style.width = '100%';
+                root.style.maxWidth = '100vw';
+                root.style.overflowX = 'hidden';
+                root.style.overflowY = 'visible';
+                document.documentElement.style.overflowY = 'auto';
+                document.body.style.overflowY = 'auto';
+              }
+            }
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', applyAndroidViewportFit);
+            } else {
+              applyAndroidViewportFit();
+            }
+            window.addEventListener('resize', applyAndroidViewportFit);
+            window.addEventListener('orientationchange', applyAndroidViewportFit);
+          }
+        } catch(e) {}
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>ZedVevo — Zambian Music &amp; Video Streaming</title>
+    <meta name="description" content="Stream, discover, and download authentic Zambian music, official music videos, and charts on ZedVevo." />
+    <meta name="keywords" content="ZedVevo, Zambian music, download Zambian songs, Zed music videos, Zambia music app, Yo Maps, Slapdee, Macky 2, Chef 187, Zambian mp3 download" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <link rel="canonical" href="https://zedvevo.xyz/" />
+    <meta name="theme-color" content="#09090b" />
+    <meta name="application-name" content="ZedVevo" />
+    <meta name="apple-mobile-web-app-title" content="ZedVevo" />
 
-    <!-- Open Graph / Facebook / WhatsApp -->
-    <meta property="og:type"        content="website" />
-    <meta property="og:site_name"   content="ZedVevo" />
-    <meta property="og:title"       content="ZedVevo — Zambian Music &amp; Video" />
-    <meta property="og:description" content="Stream and discover the best Zambian music and videos on ZedVevo." />
-    <meta property="og:image"       content="https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/og-default.png" />
-    <meta property="og:image:secure_url" content="https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/og-default.png" />
-    <meta property="og:image:width"  content="1200" />
+    <!-- Google Search Schema.org Structured Data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://zedvevo.xyz/#website",
+          "url": "https://zedvevo.xyz/",
+          "name": "ZedVevo",
+          "description": "Stream, discover, and download authentic Zambian music, official music videos, and charts on ZedVevo.",
+          "publisher": {
+            "@type": "Organization",
+            "name": "ZedVevo Entertainment",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://zedvevo.xyz/app-icon.png"
+            }
+          },
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://zedvevo.xyz/music?q={search_term_string}",
+            "query-input": "required name=search_term_string"
+          }
+        },
+        {
+          "@type": "WebApplication",
+          "@id": "https://zedvevo.xyz/#webapp",
+          "name": "ZedVevo - Zambian Music & Video Platform",
+          "url": "https://zedvevo.xyz/",
+          "applicationCategory": "MultimediaApplication",
+          "operatingSystem": "Android, iOS, Web",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "ZMW"
+          }
+        }
+      ]
+    }
+    </script>
+
+    <!-- OpenGraph / Facebook / WhatsApp -->
+    <meta property="og:site_name" content="ZedVevo" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="ZedVevo — Zambian Music &amp; Video Streaming" />
+    <meta property="og:description" content="Stream, discover, and download authentic Zambian music, official music videos, and charts on ZedVevo." />
+    <meta property="og:image" content="https://zedvevo.vercel.app/og-image.png" />
+    <meta property="og:image:secure_url" content="https://zedvevo.vercel.app/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt"   content="ZedVevo — Zambian Music &amp; Video" />
-    <meta property="og:url"         content="https://zedvevo.com" />
+    <meta property="og:image:alt" content="ZedVevo — Zambian Music &amp; Video Platform" />
 
-    <!-- Twitter / X card -->
-    <meta name="twitter:card"        content="summary_large_image" />
-    <meta name="twitter:site"        content="@ZedVevo" />
-    <meta name="twitter:title"       content="ZedVevo — Zambian Music &amp; Video" />
-    <meta name="twitter:description" content="Stream and discover the best Zambian music and videos on ZedVevo." />
-    <meta name="twitter:image"       content="https://dgugpfpotxwyoiycracf.supabase.co/storage/v1/object/public/thumbnails/og-default.png" />
-    <meta name="twitter:url"         content="https://zedvevo.com" />
-
-    <!-- WhatsApp / iMessage prefer og: tags — already set above -->
-    <!-- NOTE: For nominee/song/video deep-links, dynamic OG tags are injected
-         by useOgMeta() hook client-side AND served by the /share Edge Function
-         for social crawlers that fetch server-side HTML. -->
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@ZedVevo" />
+    <meta name="twitter:title" content="ZedVevo — Zambian Music &amp; Video Streaming" />
+    <meta name="twitter:description" content="Stream, discover, and download authentic Zambian music, official music videos, and charts on ZedVevo." />
+    <meta name="twitter:image" content="https://zedvevo.vercel.app/og-image.png" />
   </head>
-  <body>
+  <body class="bg-background text-foreground antialiased selection:bg-accent/30 selection:text-foreground">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

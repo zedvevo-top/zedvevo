@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
-  Video as VideoIcon, Loader2, Share2, ThumbsUp, BookmarkPlus, Gauge,
+  Video as VideoIcon, Loader2, Share2, ThumbsUp, BookmarkPlus, Gauge, Heart,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -11,6 +11,7 @@ import { formatDuration } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import ShareSheet from '@/components/common/ShareSheet';
+import ZedVevoWatermark from '@/components/common/ZedVevoWatermark';
 
 interface VideoPlayerProps {
   video: Video;
@@ -38,6 +39,8 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
   const [playbackRate, setPlaybackRate] = useState<SpeedOption>(1);
   const [error, setError] = useState<string | null>(null);
   const [liked, setLiked] = useState(video.liked ?? false);
+  const [likeCount, setLikeCount] = useState(video.like_count || 0);
+  const [isPopAnimating, setIsPopAnimating] = useState(false);
   const [saved, setSaved] = useState(video.saved ?? false);
   const [shareOpen, setShareOpen] = useState(false);
   const countedRef = useRef(false);
@@ -85,9 +88,12 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
     const onCanPlay  = () => { setBuffering(false); v.playbackRate = playbackRate; };
     const onError    = () => { setError('Unable to play this video.'); setPlaying(false); };
     const onProgress = () => {
-      if (v.currentTime >= 10 && !countedRef.current) {
+      if (v.currentTime >= 2 && !countedRef.current) {
         countedRef.current = true;
         incrementViewCount(video.id).catch(() => {});
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('zedvevo:video-viewed', { detail: { videoId: video.id } }));
+        }
       }
     };
     const onFsChange = () => setFullscreen(!!document.fullscreenElement);
@@ -185,10 +191,17 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
   };
 
   const handleLike = async () => {
-    if (!user) { toast.error('Sign in to like videos'); return; }
+    if (!user) {
+      toast.error('Please sign in to like videos');
+      return;
+    }
+    setIsPopAnimating(true);
+    setTimeout(() => setIsPopAnimating(false), 800);
+
     try {
       const result = await toggleLike(user.id, video.id, 'video');
       setLiked(result);
+      setLikeCount((prev) => (result ? prev + 1 : Math.max(0, prev - 1)));
       toast.success(result ? 'Liked!' : 'Removed from liked');
     } catch { toast.error('Failed to update'); }
   };
@@ -242,6 +255,9 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
           </div>
         ) : (
           <>
+            {/* ZedVevo Watermark on video stream */}
+            <ZedVevoWatermark size="md" className="top-3 left-3 shadow-xl" />
+
             {/* Video element — clicking video surface toggles play */}
             <video
               ref={videoRef}
@@ -409,11 +425,21 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
           <Button
             variant="ghost"
             size="sm"
-            className={`gap-1.5 rounded-full border border-border h-8 px-3 text-xs ${liked ? 'text-accent border-accent bg-accent/5' : ''}`}
+            className={`relative gap-1.5 rounded-full border border-border h-8 px-3 text-xs ${
+              liked ? 'text-accent border-accent bg-accent/5' : ''
+            }`}
             onClick={handleLike}
           >
-            <ThumbsUp className={`h-3.5 w-3.5 ${liked ? 'fill-accent' : ''}`} />
-            Like
+            {/* Floating Heart Particle */}
+            {isPopAnimating && (
+              <Heart className="absolute -top-3 left-3 h-4 w-4 fill-rose-500 text-rose-500 animate-heart-float pointer-events-none" />
+            )}
+            <Heart
+              className={`h-3.5 w-3.5 transition-transform duration-200 ${
+                liked ? 'fill-accent text-accent' : ''
+              } ${isPopAnimating ? 'animate-heart-pop text-rose-500' : ''}`}
+            />
+            Like {likeCount > 0 ? `(${likeCount.toLocaleString()})` : ''}
           </Button>
 
           <Button

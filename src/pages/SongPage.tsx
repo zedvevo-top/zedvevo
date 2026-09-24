@@ -1,104 +1,275 @@
-import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { getSongById } from '@/lib/api';
-import type { Song } from '@/types/index';
-import { usePlayer } from '@/contexts/PlayerContext';
-import { useOgMeta } from '@/hooks/use-og-meta';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Button } from '@/components/ui/button';
-import { Play, ArrowLeft, Music2 } from 'lucide-react';
-import BackToHome from '@/components/common/BackToHome';
+import { useParams, Link } from 'react-router-dom'
+import { motion } from 'motion/react'
+import { Play, Pause, Heart, Share2, Download, MoreHorizontal, Clock, User } from 'lucide-react'
+import { Helmet } from 'react-helmet-async'
+import { useSong, useArtistSongs, useFavoriteSong } from '@/hooks'
+import { usePlayerStore } from '@/store'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { UserAvatar } from '@/components/ui/avatar'
+import { formatDuration, formatNumber, formatDate } from '@/utils'
+import { useToast } from '@/components/ui/use-toast'
+import AdBanner from '@/components/ads/AdBanner'
 
 export default function SongPage() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const { playSong } = usePlayer();
-  const [song, setSong] = useState<Song | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const { slug } = useParams<{ slug: string }>()
+  const { data: song, isLoading, error } = useSong(slug!)
+  const { data: relatedSongs } = useArtistSongs(song?.artist_id || '')
+  const { playSong, currentSong, isPlaying, setIsPlaying } = usePlayerStore()
+  const { toast } = useToast()
+  const isFavorite = false
 
-  useEffect(() => {
-    if (!id) { setNotFound(true); setLoading(false); return; }
-    getSongById(id)
-      .then(s => { if (s) setSong(s); else setNotFound(true); })
-      .catch(() => setNotFound(true))
-      .finally(() => setLoading(false));
-  }, [id]);
+  const handlePlay = () => {
+    if (currentSong?.id === song?.id) {
+      setIsPlaying(!isPlaying)
+    } else if (song) {
+      playSong(song, relatedSongs || [])
+    }
+  }
 
-  const artistLabel = song?.featured_artists
-    ? `${song.artist_name} ft. ${song.featured_artists}`
-    : song?.artist_name ?? '';
+  const handleFavorite = async () => {
+    toast({
+      title: 'Demo Mode',
+      description: 'Connect Supabase to enable favorites',
+      variant: 'default',
+    })
+  }
 
-  useOgMeta({
-    title: song ? `${song.title} — ${artistLabel} | ZedVevo` : 'ZedVevo — Zambian Music',
-    description: song
-      ? `Listen to "${song.title}" by ${artistLabel} on ZedVevo — Zambia's music platform.`
-      : 'Discover Zambian music on ZedVevo.',
-    imageUrl: song?.cover_url ?? undefined,
-    pageUrl: song
-      ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/share?song=${song.id}`
-      : undefined,
-  });
+  const artistName = (song as any)?.artist?.stage_name || (song as any)?.artist_name || 'ZedVevo Artist';
 
-  if (loading) return (
-    <div className="min-h-screen flex flex-col">
-      <BackToHome />
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="w-full max-w-sm space-y-4">
-          <Skeleton className="aspect-square w-full rounded-xl" />
-          <Skeleton className="h-6 w-3/4" />
-          <Skeleton className="h-4 w-1/2" />
+  const handleShare = async () => {
+    const shareText = `🎵 "${song?.title}" by ${artistName}\nStream & download on ZedVevo:`;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `${song?.title} - ${artistName}`,
+          text: shareText,
+          url: window.location.href,
+        })
+      } catch (e) {}
+    } else {
+      await navigator.clipboard.writeText(`${shareText}\n${window.location.href}`)
+      toast({ title: 'Song link copied to clipboard' })
+    }
+  }
+
+  if (error) {
+    return (
+      <div className="container px-4 py-16 text-center">
+        <h1 className="text-2xl font-bold text-white mb-4">Song not found</h1>
+        <Link to="/music">
+          <Button>Back to Music</Button>
+        </Link>
+      </div>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="container px-4 py-8">
+        <div className="flex gap-8">
+          <Skeleton className="w-64 h-64" />
+          <div className="flex-1">
+            <Skeleton className="w-48 h-8 mb-4" />
+            <Skeleton className="w-32 h-6 mb-2" />
+            <Skeleton className="w-64 h-4" />
+          </div>
         </div>
       </div>
-    </div>
-  );
+    )
+  }
 
-  if (notFound || !song) return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-8 text-center">
-      <Music2 className="h-12 w-12 text-muted-foreground/30" />
-      <p className="text-muted-foreground">Song not found.</p>
-      <Button variant="outline" onClick={() => navigate('/music')}>
-        <ArrowLeft className="h-4 w-4 mr-2" /> Browse Music
-      </Button>
-    </div>
-  );
+  if (!song) return null
+
+  const pageTitle = `${song.title} by ${artistName} — ZedVevo`;
+  const pageDescription = `Stream and download "${song.title}" by ${artistName} on ZedVevo.${song.album ? ` From the album ${song.album.title}.` : ''}`;
+  const rawCover = song.cover_url || '';
+  const absoluteCoverUrl = rawCover.startsWith('http://') || rawCover.startsWith('https://')
+    ? rawCover
+    : (rawCover ? `${typeof window !== 'undefined' ? window.location.origin : ''}${rawCover.startsWith('/') ? '' : '/'}${rawCover}` : `${typeof window !== 'undefined' ? window.location.origin : ''}/og-image.png`);
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <BackToHome />
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="w-full max-w-sm space-y-5">
-          {/* Cover */}
-          <div className="aspect-square w-full rounded-xl overflow-hidden bg-muted shadow-sm">
-            {song.cover_url
-              ? <img src={song.cover_url} alt={song.title} className="w-full h-full object-cover" />
-              : <div className="w-full h-full flex items-center justify-center">
-                  <Music2 className="h-16 w-16 text-muted-foreground/30" />
-                </div>
+    <>
+      <Helmet>
+        <title>{pageTitle}</title>
+        <meta name="description" content={pageDescription} />
+        <meta property="og:site_name" content="ZedVevo" />
+        <meta property="og:type" content="music.song" />
+        <meta property="og:title" content={pageTitle} />
+        <meta property="og:description" content={pageDescription} />
+        <meta property="og:image" content={absoluteCoverUrl} />
+        <meta property="og:image:secure_url" content={absoluteCoverUrl} />
+        <meta property="og:url" content={typeof window !== 'undefined' ? window.location.href : ''} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:site" content="@ZedVevo" />
+        <meta name="twitter:title" content={pageTitle} />
+        <meta name="twitter:description" content={pageDescription} />
+        <meta name="twitter:image" content={absoluteCoverUrl} />
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "MusicRecording",
+            "name": song.title,
+            "byArtist": {
+              "@type": "MusicGroup",
+              "name": artistName,
+            },
+            "image": absoluteCoverUrl,
+            "url": typeof window !== 'undefined' ? window.location.href : '',
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "ZMW",
+              "availability": "https://schema.org/InStock",
             }
+          })}
+        </script>
+      </Helmet>
+      <div className="min-h-screen">
+      {/* Hero */}
+      <div className="relative bg-gradient-to-b from-electric-blue/20 to-transparent py-12">
+        <div className="container px-4">
+          <div className="flex flex-col md:flex-row gap-8">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="relative w-48 h-48 md:w-64 md:h-64 flex-shrink-0 mx-auto md:mx-0"
+            >
+              <img
+                src={song.cover_url || '/placeholder.jpg'}
+                alt={song.title}
+                className="w-full h-full object-cover rounded-lg shadow-2xl"
+              />
+              {song.access === 'premium' && (
+                <Badge variant="default" className="absolute top-4 right-4 bg-amber-500 text-black">
+                  Premium
+                </Badge>
+              )}
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex-1 text-center md:text-left"
+            >
+              <p className="text-sm text-gray-400 uppercase tracking-wider mb-2">Song</p>
+              <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">{song.title}</h1>
+              
+              <Link to={`/artist/${song.artist?.id}`} className="flex items-center gap-3 justify-center md:justify-start mb-6">
+                <UserAvatar
+                  name={song.artist?.stage_name}
+                  image={song.artist?.user?.avatar_url}
+                  size="md"
+                />
+                <div>
+                  <p className="font-semibold text-white hover:text-electric">
+                    {song.artist?.stage_name || 'Unknown Artist'}
+                  </p>
+                  {song.artist?.verified && (
+                    <Badge variant="default" className="text-xs">Verified</Badge>
+                  )}
+                </div>
+              </Link>
+
+              {song.album && (
+                <Link
+                  to={`/album/${song.album.slug}`}
+                  className="text-gray-400 hover:text-electric mb-4 block"
+                >
+                  Album: {song.album.title}
+                </Link>
+              )}
+
+              <div className="flex items-center justify-center md:justify-start gap-4 text-sm text-gray-400 mb-6">
+                <span>{formatNumber(song.play_count)} plays</span>
+                <span>•</span>
+                <span>{formatDuration(song.duration)}</span>
+                <span>•</span>
+                <span>{formatDate(song.created_at)}</span>
+              </div>
+
+              <div className="flex items-center justify-center md:justify-start gap-3">
+                <Button onClick={handlePlay} size="lg">
+                  {currentSong?.id === song.id && isPlaying ? (
+                    <>
+                      <Pause className="mr-2 h-5 w-5" /> Pause
+                    </>
+                  ) : (
+                    <>
+                      <Play className="mr-2 h-5 w-5" /> Play
+                    </>
+                  )}
+                </Button>
+                <Button variant="outline" onClick={handleFavorite}>
+                  <Heart className={`mr-2 h-5 w-5 ${isFavorite ? 'fill-red-500 text-red-500' : ''}`} />
+                  {isFavorite ? 'Liked' : 'Like'}
+                </Button>
+                <Button variant="outline" onClick={handleShare}>
+                  <Share2 className="mr-2 h-5 w-5" />
+                  Share
+                </Button>
+                <Button variant="outline">
+                  <Download className="mr-2 h-5 w-5" />
+                  Download
+                </Button>
+              </div>
+            </motion.div>
           </div>
-
-          {/* Meta */}
-          <div className="space-y-1">
-            <h1 className="text-xl font-semibold leading-tight">{song.title}</h1>
-            <p className="text-sm text-muted-foreground">{artistLabel}</p>
-            {song.genre && <p className="text-xs text-muted-foreground">{song.genre}</p>}
-          </div>
-
-          {/* Play */}
-          <Button
-            className="w-full gap-2"
-            onClick={() => { playSong(song); navigate('/music?id=' + song.id); }}
-          >
-            <Play className="h-4 w-4 fill-current" />
-            Play Song
-          </Button>
-
-          <Button variant="outline" className="w-full" onClick={() => navigate('/music')}>
-            <ArrowLeft className="h-4 w-4 mr-2" /> All Music
-          </Button>
         </div>
       </div>
-    </div>
-  );
+
+      {/* Content */}
+      <div className="container px-4 py-8">
+        <AdBanner position="music" format="leaderboard" />
+
+        {/* Lyrics */}
+        {song.lyrics && (
+          <section className="mb-12">
+            <h2 className="text-2xl font-bold text-white mb-4">Lyrics</h2>
+            <Card>
+              <CardContent className="p-6">
+                <pre className="whitespace-pre-wrap text-gray-300 font-sans">
+                  {song.lyrics}
+                </pre>
+              </CardContent>
+            </Card>
+          </section>
+        )}
+
+        {/* More from Artist */}
+        {relatedSongs && relatedSongs.length > 0 && (
+          <section>
+            <h2 className="text-2xl font-bold text-white mb-4">More from {song.artist?.stage_name}</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {relatedSongs.filter(s => s.id !== song.id).slice(0, 5).map((s) => (
+                <Card
+                  key={s.id}
+                  className="group cursor-pointer"
+                  onClick={() => playSong(s, relatedSongs || [])}
+                >
+                  <div className="relative aspect-square overflow-hidden">
+                    <img
+                      src={s.cover_url || '/placeholder.jpg'}
+                      alt={s.title}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center">
+                      <Play className="h-8 w-8 text-white" />
+                    </div>
+                  </div>
+                  <CardContent className="p-3">
+                    <h3 className="font-medium text-white truncate text-sm">{s.title}</h3>
+                    <p className="text-xs text-gray-400">{formatDuration(s.duration)}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+      </div>
+    </>
+  )
 }

@@ -1,20 +1,21 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Song } from '@/types/index';
-import { getSongs, getSongById } from '@/lib/api';
+import { getSongs } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import MusicCard from '@/components/music/MusicCard';
 import BackToHome from '@/components/common/BackToHome';
+import AdBanner from '@/components/ads/AdBanner';
 import { usePlayer } from '@/contexts/PlayerContext';
-import { useOgMeta } from '@/hooks/use-og-meta';
-import { useVisitorTracking } from '@/hooks/use-visitor-tracking';
-import { useSearchParams } from 'react-router-dom';
 
 const GENRES = ['All', 'Afrobeats', 'Hip-Hop', 'R&B', 'Gospel', 'Traditional', 'Pop', 'Dance'];
 
 export default function MusicPage() {
+  const [searchParams] = useSearchParams();
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -22,27 +23,6 @@ export default function MusicPage() {
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const { currentSong, playSong } = usePlayer();
-  const [searchParams] = useSearchParams();
-  const [focusSong, setFocusSong] = useState<Song | null>(null);
-
-  // Fetch focused song from ?id= and inject OG meta for share previews
-  useEffect(() => {
-    const id = searchParams.get('id');
-    if (!id) { setFocusSong(null); return; }
-    getSongById(id).then(s => { if (s) setFocusSong(s); }).catch(() => {});
-  }, [searchParams]);
-
-  useOgMeta(focusSong ? {
-    title: `${focusSong.title} — ${focusSong.featured_artists ? `${focusSong.artist_name} ft. ${focusSong.featured_artists}` : focusSong.artist_name} | ZedVevo MP3`,
-    description: `Listen to "${focusSong.title}" by ${focusSong.featured_artists ? `${focusSong.artist_name} ft. ${focusSong.featured_artists}` : focusSong.artist_name} on ZedVevo — Zambia's music platform.`,
-    imageUrl: focusSong.cover_url ?? undefined,
-    pageUrl: `${window.location.origin}/song/${focusSong.id}`,
-  } : {
-    title: 'ZedVevo — Zambian Music & Video',
-    description: 'Stream and discover the best Zambian music on ZedVevo.',
-  });
-
-  useVisitorTracking('/music');
 
   const LIMIT = 24;
 
@@ -58,6 +38,32 @@ export default function MusicPage() {
   };
 
   useEffect(() => { setOffset(0); load(true); }, []);
+
+  // Listen to ?id= search parameter to immediately play the shared song
+  useEffect(() => {
+    const targetId = searchParams.get('id');
+    if (!targetId) return;
+
+    const existing = songs.find(s => s.id === targetId);
+    if (existing) {
+      playSong(existing, [existing]);
+    } else {
+      (async () => {
+        try {
+          const { data, error } = await supabase
+            .from('songs')
+            .select('*')
+            .eq('id', targetId)
+            .maybeSingle();
+          if (!error && data) {
+            playSong(data as Song, [data as Song]);
+          }
+        } catch (e) {
+          console.error('Failed to load shared song by id:', e);
+        }
+      })();
+    }
+  }, [searchParams, songs]);
 
   const filtered = songs.filter(s => {
     const matchSearch = !search || s.title.toLowerCase().includes(search.toLowerCase()) || s.artist_name.toLowerCase().includes(search.toLowerCase());
@@ -116,13 +122,19 @@ export default function MusicPage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-            {filtered.map(song => (
-              <MusicCard
-                key={song.id}
-                song={song}
-                isPlaying={currentSong?.id === song.id}
-                onPlay={s => playSong(s, filtered)}
-              />
+            {filtered.map((song, index) => (
+              <React.Fragment key={song.id}>
+                <MusicCard
+                  song={song}
+                  isPlaying={currentSong?.id === song.id}
+                  onPlay={s => playSong(s, filtered)}
+                />
+                {(index + 1) % 10 === 0 && (
+                    <div className="col-span-1 aspect-square">
+                        <AdBanner position="music" format="compact" className="h-full w-full" />
+                    </div>
+                )}
+              </React.Fragment>
             ))}
           </div>
         )}

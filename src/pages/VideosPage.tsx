@@ -1,20 +1,21 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Video } from '@/types/index';
-import { getVideos, getVideoById } from '@/lib/api';
+import { getVideos } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import VideoCard from '@/components/video/VideoCard';
 import VideoPlayer from '@/components/video/VideoPlayer';
 import BackToHome from '@/components/common/BackToHome';
-import { useOgMeta } from '@/hooks/use-og-meta';
-import { useVisitorTracking } from '@/hooks/use-visitor-tracking';
-import { useSearchParams } from 'react-router-dom';
+import AdBanner from '@/components/ads/AdBanner';
 
 const GENRES = ['All', 'Music Video', 'Live', 'Lyric', 'Behind the Scenes', 'Documentary'];
 
 export default function VideosPage() {
+  const [searchParams] = useSearchParams();
   const [videos, setVideos] = useState<Video[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -22,27 +23,6 @@ export default function VideosPage() {
   const [currentVideo, setCurrentVideo] = useState<Video | null>(null);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
-  const [searchParams] = useSearchParams();
-  const [focusVideo, setFocusVideo] = useState<Video | null>(null);
-
-  // Fetch focused video from ?id= and inject OG meta for share previews
-  useEffect(() => {
-    const id = searchParams.get('id');
-    if (!id) { setFocusVideo(null); return; }
-    getVideoById(id).then(v => { if (v) setFocusVideo(v); }).catch(() => {});
-  }, [searchParams]);
-
-  useOgMeta(focusVideo ? {
-    title: `${focusVideo.title} — ${focusVideo.featured_artists ? `${focusVideo.artist_name} ft. ${focusVideo.featured_artists}` : focusVideo.artist_name} | ZedVevo MP4`,
-    description: `Watch "${focusVideo.title}" by ${focusVideo.featured_artists ? `${focusVideo.artist_name} ft. ${focusVideo.featured_artists}` : focusVideo.artist_name} on ZedVevo — Zambia's video platform.`,
-    imageUrl: focusVideo.thumbnail_url ?? undefined,
-    pageUrl: `${window.location.origin}/video/${focusVideo.id}`,
-  } : {
-    title: 'ZedVevo — Zambian Music Videos',
-    description: 'Watch the best Zambian music videos on ZedVevo.',
-  });
-
-  useVisitorTracking('/videos');
 
   const LIMIT = 20;
 
@@ -58,6 +38,34 @@ export default function VideosPage() {
   };
 
   useEffect(() => { setOffset(0); load(true); }, []);
+
+  // Listen to ?id= search parameter to immediately open the shared video
+  useEffect(() => {
+    const targetId = searchParams.get('id');
+    if (!targetId) return;
+
+    const existing = videos.find(v => v.id === targetId);
+    if (existing) {
+      setCurrentVideo(existing);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      (async () => {
+        try {
+          const { data, error } = await supabase
+            .from('videos')
+            .select('*')
+            .eq('id', targetId)
+            .maybeSingle();
+          if (!error && data) {
+            setCurrentVideo(data as Video);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        } catch (e) {
+          console.error('Failed to load shared video by id:', e);
+        }
+      })();
+    }
+  }, [searchParams, videos]);
 
   const filtered = videos.filter(v => {
     const matchSearch = !search || v.title.toLowerCase().includes(search.toLowerCase()) || v.artist_name.toLowerCase().includes(search.toLowerCase());
@@ -110,6 +118,9 @@ export default function VideosPage() {
             ))}
           </div>
         </div>
+
+        {/* Native Sponsor Ad Banner */}
+        <AdBanner position="videos" format="leaderboard" />
 
         {loading && videos.length === 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">

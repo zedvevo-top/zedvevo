@@ -1,41 +1,36 @@
 import BackToHome from '@/components/common/BackToHome';
 import { useState, useEffect, useCallback } from 'react';
-import { Upload, Music2, Video, CreditCard, Phone, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Rocket } from 'lucide-react';
+import { Upload, Music2, Video, CreditCard, Phone, Loader2, CheckCircle2, XCircle, Clock, AlertCircle, Rocket, Globe, ExternalLink, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { UserAvatar } from '@/components/ui/avatar';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import type { UploadPlan, UserSubscription, PaymentStatus } from '@/types/index';
-import { getActivePlans, getUserActiveSubscription, uploadFile } from '@/lib/api';
+import { getActivePlans, getUserActiveSubscription, uploadFile, applyPaymentBenefits, checkUploadEntitlement } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/db/supabase';
 import { generateIdempotencyKey, formatCurrency, formatDate, snakeCaseFileName } from '@/lib/utils';
 import { Navigate, useNavigate } from 'react-router-dom';
+import CardPaymentForm from '@/components/payment/CardPaymentForm';
+import FreshTunesPortalModal from '@/components/distribution/FreshTunesPortalModal';
+import { processUnifiedPayment, listenForPaymentStatus } from '@/lib/paymentProcessor';
+import PaymentStatusOverlay from '@/components/payment/PaymentStatusOverlay';
 
 type PayMethod = 'mobile_money' | 'card';
 
 export default function UploadPage() {
-  const { user, profile, refreshProfile } = useAuth();
+  const { user, profile } = useAuth();
   const navigate = useNavigate();
   const [plans, setPlans] = useState<UploadPlan[]>([]);
   const [subscription, setSubscription] = useState<UserSubscription | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Show any payment-failure message stored before a reload
-  useEffect(() => {
-    const msg = sessionStorage.getItem('payment_fail_msg');
-    if (msg) {
-      sessionStorage.removeItem('payment_fail_msg');
-      // Small delay so the page is fully mounted before toast fires
-      setTimeout(() => toast.error(msg), 150);
-    }
-  }, []);
 
   // Payment dialog state
   const [payDialog, setPayDialog] = useState(false);
@@ -44,12 +39,22 @@ export default function UploadPage() {
   const [phone, setPhone] = useState('');
   const [payLoading, setPayLoading] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null);
+  const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [showFreshTunesModal, setShowFreshTunesModal] = useState(false);
 
   // Upload form
   const [uploadType, setUploadType] = useState<'song' | 'video'>('song');
   const [title, setTitle] = useState('');
   const [artistName, setArtistName] = useState('');
+  const [registeredInfo, setRegisteredInfo] = useState<{
+    displayName: string;
+    fullName?: string;
+    username?: string;
+    email?: string;
+    phone?: string;
+    stageName?: string;
+  } | null>(null);
   const [album, setAlbum] = useState('');
   const [genre, setGenre] = useState('');
   const [featuredArtists, setFeaturedArtists] = useState('');
@@ -59,74 +64,253 @@ export default function UploadPage() {
   const [autoThumb, setAutoThumb] = useState<string | null>(null); // base64 data URL
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(profile);
+
+  const fetchSubscription = useCallback(async () => {
+    if (!user) return null;
+    try {
+      // 1. Fetch fresh profile directly from database
+      const { data: freshProf } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+      if (freshProf) {
+        setCurrentProfile(freshProf);
+      }
+      // 2. Evaluate entitlement with payment check
+      const sub = await getUserActiveSubscription(user.id);
+      setSubscription(sub);
+      return sub;
+    } catch (err) {
+      console.error('Error fetching subscription:', err);
+      return null;
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
-    // Admins always skip plan check; all other roles (artist, user) must load subscription
-    const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
-    if (isAdmin) { setLoading(false); return; }
 
-    // Artists AND regular users both need their subscription loaded —
-    // artists get canUpload because role='artist' is always entitled
-    Promise.all([getActivePlans(), getUserActiveSubscription(user.id)])
-      .then(([p, s]) => { setPlans(p); setSubscription(s); })
+    // 1. Gather all registered details from profile and auth
+    const effectiveProf = currentProfile || profile;
+    const regDisplayName = effectiveProf?.display_name || '';
+    const regFullName = (effectiveProf as any)?.full_name || user.user_metadata?.full_name || '';
+    const regUsername = effectiveProf?.username || user.user_metadata?.username || '';
+    const regEmail = user.email || '';
+    const regPhone = effectiveProf?.phone || (user as any)?.phone || '';
+
+    // Primary artist name from registration details
+    const primaryRegisteredName = regDisplayName || regFullName || regUsername || (regEmail ? regEmail.split('@')[0] : '') || 'Artist';
+
+    // Query artists table for stage_name
+    supabase.from('artists').select('stage_name, name').eq('user_id', user.id).maybeSingle()
+      .then(({ data: artistRecord }) => {
+        const bestStageName = artistRecord?.stage_name || artistRecord?.name || primaryRegisteredName;
+        setArtistName(prev => (prev.trim() === '' ? bestStageName : prev));
+        setRegisteredInfo({
+          displayName: regDisplayName,
+          fullName: regFullName,
+          username: regUsername,
+          email: regEmail,
+          phone: regPhone,
+          stageName: bestStageName
+        });
+      })
+      .catch(() => {
+        setArtistName(prev => (prev.trim() === '' ? primaryRegisteredName : prev));
+        setRegisteredInfo({
+          displayName: regDisplayName,
+          fullName: regFullName,
+          username: regUsername,
+          email: regEmail,
+          phone: regPhone,
+          stageName: primaryRegisteredName
+        });
+      });
+
+    // Admins skip plan check entirely
+    if ((effectiveProf?.role === 'admin' || effectiveProf?.role === 'super_admin')) { setLoading(false); return; }
+    Promise.all([getActivePlans(), fetchSubscription()])
+      .then(([p]) => { setPlans(p); })
       .catch(console.error)
       .finally(() => setLoading(false));
 
     // Realtime: re-fetch subscription whenever a user_subscriptions row changes for this user
-    // This fires instantly when admin grants a plan, so UI unlocks without page refresh.
-    const channel = supabase
-      .channel(`user_sub_${user.id}`)
+    const channelSub = supabase
+      .channel(`user_sub_${user.id}_${Math.random().toString(36).slice(2, 9)}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'user_subscriptions', filter: `user_id=eq.${user.id}` },
         () => {
-          getUserActiveSubscription(user.id).then(s => setSubscription(s)).catch(console.error);
+          fetchSubscription();
         }
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [user, profile]);
+    // Realtime: re-fetch subscription whenever profiles row changes (e.g., admin approvals / trigger)
+    const channelProfile = supabase
+      .channel(`user_profile_${user.id}_${Math.random().toString(36).slice(2, 9)}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        () => {
+          fetchSubscription();
+        }
+      )
+      .subscribe();
 
-  // Generate thumbnail from a video file by seeking to 1 second and snapshotting
+    // Realtime: re-fetch subscription whenever payments row changes for this user (e.g., admin approves payment)
+    const channelPayments = supabase
+      .channel(`user_payments_sub_${user.id}_${Math.random().toString(36).slice(2, 9)}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'payments', filter: `user_id=eq.${user.id}` },
+        () => {
+          fetchSubscription();
+        }
+      )
+      .subscribe();
+
+    return () => { 
+      supabase.removeChannel(channelSub); 
+      supabase.removeChannel(channelProfile);
+      supabase.removeChannel(channelPayments);
+    };
+  }, [user, profile, fetchSubscription]);
+
+  // Create a stylized graphic cover if thumbnail extraction fails or user has no cover image
+  const generateDefaultCover = useCallback((itemTitle: string, itemArtist: string, type: 'song' | 'video'): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = type === 'song' ? 600 : 800;
+    canvas.height = type === 'song' ? 600 : 450;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+
+    // Gradient background
+    const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    if (type === 'video') {
+      grad.addColorStop(0, '#0f172a');
+      grad.addColorStop(0.5, '#1e1b4b');
+      grad.addColorStop(1, '#0f766e');
+    } else {
+      grad.addColorStop(0, '#18181b');
+      grad.addColorStop(0.5, '#312e81');
+      grad.addColorStop(1, '#0284c7');
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Decorative circle
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, canvas.height / 2 - 30, type === 'song' ? 100 : 80, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fill();
+
+    // Brand badge
+    ctx.fillStyle = '#06b6d4';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('ZEDVEVO', canvas.width / 2, 60);
+
+    // Track/Video Title
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 32px sans-serif';
+    ctx.textAlign = 'center';
+    const displayTitle = itemTitle || (type === 'video' ? 'Music Video' : 'New Single');
+    ctx.fillText(displayTitle.length > 25 ? displayTitle.slice(0, 25) + '...' : displayTitle, canvas.width / 2, canvas.height / 2 + 50);
+
+    // Artist name
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '500 22px sans-serif';
+    const displayArtist = itemArtist || 'ZedVevo Artist';
+    ctx.fillText(displayArtist.length > 30 ? displayArtist.slice(0, 30) + '...' : displayArtist, canvas.width / 2, canvas.height / 2 + 90);
+
+    return canvas.toDataURL('image/jpeg', 0.85);
+  }, []);
+
+  // Robust video thumbnail generator with seeked listener, metadata checks, and fallback
   const generateVideoThumbnail = useCallback((videoFile: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
+      let resolved = false;
       const url = URL.createObjectURL(videoFile);
       const vid = document.createElement('video');
-      vid.preload = 'metadata';
+      vid.preload = 'auto';
       vid.muted = true;
       vid.playsInline = true;
-      vid.src = url;
-      vid.currentTime = 1;
-      vid.onloadeddata = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = vid.videoWidth || 640;
-        canvas.height = vid.videoHeight || 360;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { URL.revokeObjectURL(url); reject(new Error('Canvas not available')); return; }
-        ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        URL.revokeObjectURL(url);
-        resolve(dataUrl);
+      vid.crossOrigin = 'anonymous';
+
+      const cleanup = () => {
+        try { URL.revokeObjectURL(url); } catch {}
       };
-      vid.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Video load error')); };
+
+      const captureFrame = () => {
+        if (resolved) return;
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = vid.videoWidth || 640;
+          canvas.height = vid.videoHeight || 360;
+          const ctx = canvas.getContext('2d');
+          if (ctx && vid.videoWidth > 0 && vid.videoHeight > 0) {
+            ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            resolved = true;
+            cleanup();
+            resolve(dataUrl);
+            return;
+          }
+        } catch (e) {
+          console.warn('Could not snapshot canvas frame:', e);
+        }
+
+        // Fallback to stylized cover
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          resolve(generateDefaultCover(title || videoFile.name.replace(/\.[^/.]+$/, ''), artistName, 'video'));
+        }
+      };
+
+      vid.onloadedmetadata = () => {
+        const seekTime = Math.min(1.0, (vid.duration || 1) / 2);
+        vid.currentTime = seekTime;
+      };
+
+      vid.onseeked = captureFrame;
+      vid.onloadeddata = () => {
+        if (!resolved && vid.currentTime > 0) captureFrame();
+      };
+
+      vid.onerror = () => {
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          resolve(generateDefaultCover(title || videoFile.name.replace(/\.[^/.]+$/, ''), artistName, 'video'));
+        }
+      };
+
+      // Timeout fallback after 3.5 seconds
+      setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          resolve(generateDefaultCover(title || videoFile.name.replace(/\.[^/.]+$/, ''), artistName, 'video'));
+        }
+      }, 3500);
+
+      vid.src = url;
+      vid.load();
     });
-  }, []);
+  }, [artistName, generateDefaultCover, title]);
 
   const handleVideoFileChange = async (selectedFile: File) => {
     setFile(selectedFile);
     setAutoThumb(null);
     try {
       const thumb = await generateVideoThumbnail(selectedFile);
-      setAutoThumb(thumb);
-    } catch { /* silently ignore — user can add manual cover */ }
+      if (thumb) setAutoThumb(thumb);
+    } catch { /* safely fallback */ }
   };
 
   // Convert base64 dataURL to a Blob/File for upload
   const dataUrlToFile = (dataUrl: string, filename: string): File => {
     const arr = dataUrl.split(',');
-    const mime = arr[0].match(/:(.*?);/)![1];
+    const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
     const bstr = atob(arr[1]);
     let n = bstr.length;
     const u8arr = new Uint8Array(n);
@@ -137,18 +321,6 @@ export default function UploadPage() {
   // Poll payment status
   const pollPayment = async (paymentId: string) => {
     let attempts = 0;
-
-    // Retry helper: poll for active subscription up to maxTries × interval ms
-    const waitForSubscription = async (uid: string, maxTries = 8, intervalMs = 1500): Promise<UserSubscription | null> => {
-      for (let i = 0; i < maxTries; i++) {
-        const sub = await getUserActiveSubscription(uid);
-        if (sub) return sub;
-        await new Promise(r => setTimeout(r, intervalMs));
-      }
-      return null;
-    };
-
-    // Poll every 5s for up to 10 minutes (120 attempts)
     const interval = setInterval(async () => {
       attempts++;
       try {
@@ -156,90 +328,33 @@ export default function UploadPage() {
         if (data?.status && data.status !== 'pending') {
           clearInterval(interval);
           setPaymentStatus(data.status as PaymentStatus);
-          if (data.status === 'successful') {
-            // Refresh session first so new JWT role claim is included
-            await supabase.auth.refreshSession();
-            // Wait for webhook to set role=artist + insert new subscription (up to ~12s)
-            const [sub] = await Promise.all([
-              waitForSubscription(user!.id),
-              refreshProfile(),
-            ]);
-            setSubscription(sub);
+          if (data.status === 'completed' || data.status === 'successful') {
+            await applyPaymentBenefits(paymentId).catch(() => {});
+            await fetchSubscription();
             setPayDialog(false);
-            const planType = selectedPlan?.plan_type;
-            const planMsg = planType === 'k10_single'
-              ? '🎵 Access granted! You have 1 upload ready.'
-              : planType === 'k100_weekly'
-              ? '🎵 Weekly plan active! Upload freely for 7 days.'
-              : planType === 'k300_yearly'
-              ? '🎵 Yearly plan active! Upload freely for 365 days.'
-              : '🎵 Your artist account is active. Start uploading!';
-            toast.success(planMsg);
-            setTimeout(() => window.location.reload(), 200);
+            
+            const isAllPlatforms = (selectedPlan?.plan_type === 'k100_weekly' ||
+              selectedPlan?.plan_type === 'k300_yearly' ||
+              selectedPlan?.name?.toLowerCase().includes('streaming') ||
+              selectedPlan?.name?.toLowerCase().includes('fresh')) &&
+              selectedPlan?.plan_type !== 'k10_single' &&
+              (selectedPlan?.price || 0) >= 100;
+
+            if (isAllPlatforms) {
+              setShowFreshTunesModal(true);
+              toast.success('All Streaming Platforms plan activated! Opening in-app frame...');
+            } else {
+              toast.success('Payment verified! You can now upload content.');
+            }
+          } else if (data.status === 'insufficient_funds') {
+            toast.error('Insufficient funds. Please top up and try again.');
           } else {
-            const errMsg = data.status === 'insufficient_funds'
-              ? 'Payment failed: Insufficient funds. Please top up your account and try again.'
-              : data.status === 'failed'
-              ? 'Payment failed. Please check your details and try again.'
-              : data.status === 'cancelled'
-              ? 'Payment was cancelled. Please try again.'
-              : `Payment ${data.status}. Please try again.`;
-            sessionStorage.setItem('payment_fail_msg', errMsg);
-            window.location.reload();
+            toast.error(`Payment ${data.status}. Please try again.`);
           }
         }
       } catch { /* ignore polling errors */ }
-      if (attempts >= 120) { clearInterval(interval); setPaymentStatus('review'); }
+      if (attempts >= 30) { clearInterval(interval); setPaymentStatus('failed'); }
     }, 5000);
-
-    // Also listen via Realtime for instant notification when webhook fires
-    const channel = supabase
-      .channel(`payment_status_${paymentId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'payments', filter: `id=eq.${paymentId}` },
-        async (payload) => {
-          const newStatus = (payload.new as { status: string }).status;
-          if (newStatus && newStatus !== 'pending') {
-            clearInterval(interval);
-            supabase.removeChannel(channel);
-            setPaymentStatus(newStatus as PaymentStatus);
-            if (newStatus === 'successful') {
-              // Refresh session first so new JWT role claim is included
-              await supabase.auth.refreshSession();
-              // Wait for webhook to set role=artist + insert new subscription (up to ~12s)
-              const [sub] = await Promise.all([
-                waitForSubscription(user!.id),
-                refreshProfile(),
-              ]);
-              setSubscription(sub);
-              setPayDialog(false);
-              const planType = selectedPlan?.plan_type;
-              const planMsg = planType === 'k10_single'
-                ? '🎵 Access granted! You have 1 upload ready.'
-                : planType === 'k100_weekly'
-                ? '🎵 Weekly plan active! Upload freely for 7 days.'
-                : planType === 'k300_yearly'
-                ? '🎵 Yearly plan active! Upload freely for 365 days.'
-                : '🎵 Your artist account is active. Start uploading!';
-              toast.success(planMsg);
-              setTimeout(() => window.location.reload(), 200);
-            } else {
-              // Store the error message so it survives the reload
-              const errMsg = newStatus === 'insufficient_funds'
-                ? 'Payment failed: Insufficient funds. Please top up your account and try again.'
-                : newStatus === 'failed'
-                ? 'Payment failed. Please check your details and try again.'
-                : newStatus === 'cancelled'
-                ? 'Payment was cancelled. Please try again.'
-                : `Payment ${newStatus}. Please try again.`;
-              sessionStorage.setItem('payment_fail_msg', errMsg);
-              window.location.reload();
-            }
-          }
-        }
-      )
-      .subscribe();
   };
 
   const openPayDialog = (plan: UploadPlan) => {
@@ -247,6 +362,7 @@ export default function UploadPage() {
     setPayMethod('mobile_money');
     setPhone('');
     setPaymentStatus(null);
+    setActivePaymentId(null);
     setPaymentUrl(null);
     setPayDialog(true);
   };
@@ -256,164 +372,237 @@ export default function UploadPage() {
     if (payMethod === 'mobile_money' && !phone) { toast.error('Enter your phone number'); return; }
     setPayLoading(true);
     try {
-      // Always get the live session token so the edge function can identify the user
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-
-      const idempotencyKey = generateIdempotencyKey();
-      const { data, error } = await supabase.functions.invoke('lipila-payment', {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        body: {
-          amount: selectedPlan.price,
-          payment_method: payMethod,
-          phone_number: payMethod === 'mobile_money' ? phone : undefined,
-          description: `ZedVevo ${selectedPlan.name} Upload Plan`,
-          idempotency_key: idempotencyKey,
-          payment_type: 'plan',
-          plan_id: selectedPlan.id,
-          user_id: user!.id,
-          metadata: { user_id: user!.id, plan_type: selectedPlan.plan_type }
-        }
+      const result = await processUnifiedPayment({
+        amount: selectedPlan.price,
+        payment_method: payMethod,
+        phone_number: payMethod === 'mobile_money' ? phone : undefined,
+        description: `ZedVevo ${selectedPlan.name} Upload Plan`,
+        payment_type: 'plan',
+        plan_id: selectedPlan.id,
+        user_id: user!.id,
+        metadata: { user_id: user!.id, plan_type: selectedPlan.plan_type, plan_id: selectedPlan.id }
       });
 
-      console.log('[payment] invoke result — data:', JSON.stringify(data), 'error:', error?.message);
-
-      // Prefer data.error over the invoke error object (function always returns JSON)
-      if (data?.status === 'insufficient_funds') {
-        setPaymentStatus('insufficient_funds');
-        toast.error('Insufficient funds. Please top up your mobile money and try again.');
+      if (!result.success) {
+        setPaymentStatus('failed');
+        toast.error(result.error || 'Payment failed.');
+        setPayLoading(false);
         return;
       }
 
-      if (data?.error) {
-        setPaymentStatus('failed');
-        toast.error(data.error);
+      if (result.status === 'completed' || result.status === 'successful') {
+        setPaymentStatus('completed');
+        if (result.payment_id) {
+          await applyPaymentBenefits(result.payment_id).catch(() => {});
+        }
+        await fetchSubscription();
+        setPayDialog(false);
+        setPayLoading(false);
+        toast.success('Payment approved! Your upload plan is now active.');
         return;
       }
 
-      if (error) {
-        // Network / CORS / deploy error — extract as much detail as possible
-        let msg = error.message || 'Payment initiation failed. Please try again.';
-        try {
-          const ctx = (error as { context?: { json?: () => Promise<{ error?: string }> } }).context;
-          if (ctx?.json) { const b = await ctx.json(); msg = b?.error ?? msg; }
-        } catch { /* ignore */ }
-        toast.error(msg);
-        setPaymentStatus('failed');
-        return;
-      }
+      // STRICT PENDING STATE
+      setActivePaymentId(result.payment_id || null);
+      setPaymentStatus('pending');
+      toast.info('Mobile Money prompt sent to your phone! Enter your PIN on your phone to confirm.');
 
-      if (data?.payment_id) {
-        if (data.payment_url) setPaymentUrl(data.payment_url);
-        setPaymentStatus('pending');
-        pollPayment(data.payment_id);
-        if (data.payment_url) window.open(data.payment_url, '_blank');
-        else toast.info('Request sent! Check your phone for the Mobile Money PIN prompt.');
-      } else {
-        toast.error('No payment ID returned. Please try again.');
-        setPaymentStatus('failed');
-      }
+      // Realtime listener for Lipila confirmation
+      listenForPaymentStatus(result.payment_id!, async (statusRes) => {
+        if (statusRes.status === 'completed' || statusRes.status === 'successful') {
+          setPaymentStatus('completed');
+          if (result.payment_id) {
+            await applyPaymentBenefits(result.payment_id).catch(() => {});
+          }
+          await fetchSubscription();
+          setPayDialog(false);
+          toast.success('Lipila confirmed payment! Your upload plan is now active.');
+        } else if (statusRes.status === 'failed') {
+          setPaymentStatus('failed');
+          toast.error(statusRes.failure_reason || 'Payment failed or was declined on phone.');
+        }
+        setPayLoading(false);
+      });
     } catch (e: unknown) {
       console.error('[payment] unexpected error:', e);
       toast.error((e as Error).message || 'Payment failed. Please try again.');
       setPaymentStatus('failed');
-    } finally { setPayLoading(false); }
+      setPayLoading(false);
+    }
   };
 
   const handleUpload = async () => {
     if (!title || !artistName || !file) { toast.error('Fill in all required fields'); return; }
-    if (uploadType === 'song' && !coverFile) { toast.error('Song cover image is required'); return; }
-    const isAdminUser = profile?.role === 'admin' || profile?.role === 'super_admin';
-    // Expired plan blocks everyone (including artists); admins always pass
-    if (!isAdminUser && !hasValidSub) {
-      toast.error('No active upload plan. Please purchase a plan to continue.');
-      return;
+    const isAdmin = (profile?.role === 'admin' || profile?.role === 'super_admin');
+    const hasUploadAccess = profile?.upload_access === 'active' || (profile?.is_artist && profile?.upload_access !== 'inactive');
+    const hasValidSub = !!subscription && subscription.is_active && !subscription.consumed;
+    if (!isAdmin && !hasUploadAccess && !hasValidSub) { 
+      toast.error('No active upload plan or your previous upload token has expired.'); 
+      return; 
     }
     setUploading(true);
     setUploadProgress(0);
     try {
       const ext = file.name.split('.').pop();
       const bucket = uploadType === 'song' ? 'songs' : 'videos';
-      const fileName = `${user!.id}/${snakeCaseFileName(title)}_${Date.now()}.${ext}`;
+      const fileName = `${user.id}/${snakeCaseFileName(title)}_${Date.now()}.${ext}`;
       setUploadProgress(20);
       const fileUrl = await uploadFile(bucket, fileName, file);
+      if (!fileUrl) throw new Error('Failed to upload file to storage');
       setUploadProgress(60);
 
       let coverUrl: string | undefined;
       if (coverFile) {
         const coverExt = coverFile.name.split('.').pop();
-        const coverPath = `${user!.id}/cover_${Date.now()}.${coverExt}`;
+        const coverPath = `${user.id}/cover_${Date.now()}.${coverExt}`;
         coverUrl = await uploadFile('thumbnails', coverPath, coverFile);
       } else if (uploadType === 'video' && autoThumb) {
         // Always upload the auto-generated canvas thumbnail for videos
         const thumbFile = dataUrlToFile(autoThumb, `thumb_${Date.now()}.jpg`);
-        coverUrl = await uploadFile('thumbnails', `${user!.id}/thumb_${Date.now()}.jpg`, thumbFile);
+        coverUrl = await uploadFile('thumbnails', `${user.id}/thumb_${Date.now()}.jpg`, thumbFile);
       }
       // If still no thumbail and it's a video, retry generating one more time from the file
       if (uploadType === 'video' && !coverUrl && file) {
         try {
           const retryThumb = await generateVideoThumbnail(file);
           const thumbFile = dataUrlToFile(retryThumb, `thumb_retry_${Date.now()}.jpg`);
-          coverUrl = await uploadFile('thumbnails', `${user!.id}/thumb_${Date.now()}.jpg`, thumbFile);
+          coverUrl = await uploadFile('thumbnails', `${user.id}/thumb_${Date.now()}.jpg`, thumbFile);
+        } catch { /* best-effort */ }
+      } else if (uploadType === 'song' && !coverUrl) {
+        try {
+          const defaultSongCover = generateDefaultCover(title, artistName, 'song');
+          if (defaultSongCover) {
+            const thumbFile = dataUrlToFile(defaultSongCover, `cover_${Date.now()}.jpg`);
+            coverUrl = await uploadFile('thumbnails', `${user.id}/cover_${Date.now()}.jpg`, thumbFile);
+          }
         } catch { /* best-effort */ }
       }
       setUploadProgress(80);
 
-      // Admin uploads default to approved; artists & regular users to pending
-      // Admins and artists get auto-approved; regular users go to pending review
-      const isAdminUpload = profile?.role === 'admin' || profile?.role === 'super_admin' || profile?.role === 'artist';
-      const uploadStatus = isAdminUpload ? 'approved' : 'pending';
-
-      if (uploadType === 'song') {
-        await supabase.from('songs').insert({
-          user_id: user!.id, title, artist_name: artistName,
-          album: album || null, genre: genre || null,
-          featured_artists: featuredArtists || null,
-          producer: producer || null,
-          file_url: fileUrl, cover_url: coverUrl || null,
-          status: uploadStatus,
-        });
-      } else {
-        await supabase.from('videos').insert({
-          user_id: user!.id, title, artist_name: artistName,
-          genre: genre || null,
-          featured_artists: featuredArtists || null,
-          producer: producer || null,
-          file_url: fileUrl,
-          thumbnail_url: coverUrl || null,
-          status: uploadStatus,
-        });
+      // Synchronize artist record in database
+      const finalArtistName = artistName.trim() || registeredInfo?.stageName || registeredInfo?.displayName || registeredInfo?.fullName || registeredInfo?.username || 'Artist';
+      try {
+        await supabase.from('artists').upsert({
+          user_id: user.id,
+          name: finalArtistName,
+          stage_name: finalArtistName,
+          bio: profile?.bio || undefined,
+          avatar_url: profile?.avatar_url || undefined,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+      } catch (e) {
+        console.warn('Artist record upsert fallback:', e);
       }
 
-      // Deduct allowance for non-admin plans — deactivate after use/expiry
-      if (!isAdminUpload && subscription) {
-        if (subscription.plan_type === 'k10_single') {
-          // K10: deactivate immediately after the single upload is consumed
-          await supabase.from('user_subscriptions')
-            .update({ uploads_used: (subscription.uploads_used || 0) + 1, is_active: false })
-            .eq('id', subscription.id);
+      // Confirm file write and insert record to database (always approved immediately)
+      const uploadStatus = 'approved';
+      const recordPayload = uploadType === 'song' ? {
+        user_id: user.id, title, artist_name: finalArtistName,
+        album: album || null, genre: genre || null,
+        featured_artists: featuredArtists || null,
+        producer: producer || null,
+        file_url: fileUrl, cover_url: coverUrl || null,
+        status: uploadStatus,
+      } : {
+        user_id: user.id, title, artist_name: finalArtistName,
+        genre: genre || null,
+        featured_artists: featuredArtists || null,
+        producer: producer || null,
+        file_url: fileUrl,
+        thumbnail_url: coverUrl || null,
+        status: uploadStatus,
+      };
+
+      const { error: insertErr } = uploadType === 'song'
+        ? await supabase.from('songs').insert(recordPayload)
+        : await supabase.from('videos').insert(recordPayload);
+
+      if (insertErr) {
+        throw new Error('Database insert failed: ' + insertErr.message);
+      }
+
+      // ONLY AFTER FILE WRITE & DATABASE CONFIRMATION:
+      // For one-time upload plans, mark entitlement as expired / inactive (consumed=true)
+      if (!isAdmin && subscription) {
+        const isOneTime = subscription.plan_type === 'k10_single' || 
+                          subscription.uploads_allowed === 1 || 
+                          subscription.upload_plans?.name?.toLowerCase().includes('single') ||
+                          subscription.upload_plans?.name?.toLowerCase().includes('basic');
+
+        const newUsed = (subscription.uploads_used || 0) + 1;
+
+        if (isOneTime) {
+          // Token consumed: set consumed = true, is_active = false, status = 'inactive'
+          if (!subscription.id.startsWith('pay-') && !subscription.id.startsWith('profile-')) {
+            await supabase.from('user_subscriptions')
+              .update({ 
+                uploads_used: newUsed, 
+                consumed: true, 
+                is_active: false, 
+                status: 'inactive' 
+              })
+              .eq('id', subscription.id);
+          }
+
+          await supabase.from('artist_subscriptions')
+            .update({ 
+              upload_count: newUsed, 
+              status: 'expired' 
+            })
+            .eq('user_id', user.id);
+
+          // Update profile upload_access to inactive
+          await supabase.from('profiles')
+            .update({ upload_access: 'inactive' })
+            .eq('id', user.id);
+
           setSubscription(null);
+          setCurrentProfile(prev => prev ? { ...prev, upload_access: 'inactive' } : null);
+
+          // Notify user their single upload token has been consumed and expired
           await supabase.from('notifications').insert({
-            user_id: user!.id,
-            title: 'Upload Complete',
-            message: 'Your K10 single upload has been used. Your access expires in 1 day. Purchase a new plan to upload more.',
+            user_id: user.id,
+            title: 'Single Upload Consumed',
+            message: 'Your single upload has been successfully published. Your one-time upload token has expired. Purchase a new plan to upload more content.',
             type: 'info',
             notification_type: 'package_expiry',
           });
         } else {
-          // K100 / K300: just increment usage counter; expiry handled by expires_at
-          await supabase.from('user_subscriptions')
-            .update({ uploads_used: (subscription.uploads_used || 0) + 1 })
-            .eq('id', subscription.id);
+          // Multi-upload or subscription plan
+          const hasReachedLimit = subscription.uploads_allowed !== null && newUsed >= subscription.uploads_allowed;
+          if (!subscription.id.startsWith('pay-') && !subscription.id.startsWith('profile-')) {
+            await supabase.from('user_subscriptions')
+              .update({ 
+                uploads_used: newUsed,
+                is_active: !hasReachedLimit,
+                status: hasReachedLimit ? 'inactive' : 'active',
+                consumed: hasReachedLimit
+              })
+              .eq('id', subscription.id);
+          }
+
+          await supabase.from('artist_subscriptions')
+            .update({ upload_count: newUsed })
+            .eq('user_id', user.id);
+
+          if (hasReachedLimit) {
+            setSubscription(null);
+            setCurrentProfile(prev => prev ? { ...prev, upload_access: 'inactive' } : null);
+          } else {
+            setSubscription(prev => prev ? { ...prev, uploads_used: newUsed } : null);
+          }
         }
+      } else if (!isAdmin && hasUploadAccess) {
+        // Expire direct upload access after single upload confirmation
+        await supabase.from('profiles')
+          .update({ upload_access: 'inactive' })
+          .eq('id', user.id);
+        setCurrentProfile(prev => prev ? { ...prev, upload_access: 'inactive' } : null);
+        setSubscription(null);
       }
 
       setUploadProgress(100);
-      toast.success(
-        isAdminUpload
-          ? 'Upload published successfully!'
-          : 'Upload submitted! It will go live once approved by Admin.'
-      );
+      toast.success('Upload approved and published live immediately on ZedVevo!');
       setTitle(''); setArtistName(''); setAlbum(''); setGenre('');
       setFeaturedArtists(''); setProducer('');
       setFile(null); setCoverFile(null); setAutoThumb(null);
@@ -425,20 +614,56 @@ export default function UploadPage() {
     } finally { setUploading(false); }
   };
 
-  const now = new Date();
-  const isAdminRole = profile?.role === 'admin' || profile?.role === 'super_admin';
-  const isArtistRole = profile?.role === 'artist';
-  const subExpired = subscription?.expires_at ? new Date(subscription.expires_at) <= now : false;
-  const hasValidSub = !!(
-    subscription &&
-    subscription.is_active &&
-    !subExpired &&
-    (subscription.plan_type !== 'k10_single' || (subscription.uploads_used || 0) < 1)
+  const effectiveProf = currentProfile || profile;
+  const isAdmin = (effectiveProf?.role === 'admin' || effectiveProf?.role === 'super_admin');
+  const hasUploadAccess = effectiveProf?.upload_access === 'active' || (effectiveProf?.is_artist && effectiveProf?.upload_access !== 'inactive');
+  const hasValidSub = !!subscription && subscription.is_active && !subscription.consumed && (subscription.uploads_allowed === null || (subscription.uploads_used || 0) < subscription.uploads_allowed);
+  const canUpload = isAdmin || hasUploadAccess || hasValidSub;
+
+  // 1. Strict check: is this a 1 song / single upload plan?
+  const isOneSongUploadPlan = Boolean(
+    subscription?.plan_type === 'k10_single' ||
+    subscription?.plan_type === 'daily' ||
+    subscription?.plan_type === 'single' ||
+    subscription?.plan_type === '1_song' ||
+    subscription?.plan_type === 'single_upload' ||
+    subscription?.uploads_allowed === 1 ||
+    subscription?.upload_plans?.uploads_allowed === 1 ||
+    subscription?.upload_plans?.plan_type === 'k10_single' ||
+    subscription?.upload_plans?.plan_type === 'daily' ||
+    (subscription?.upload_plans?.price != null && subscription.upload_plans.price < 100) ||
+    subscription?.upload_plans?.name?.toLowerCase().includes('single') ||
+    subscription?.upload_plans?.name?.toLowerCase().includes('1 upload') ||
+    subscription?.upload_plans?.name?.toLowerCase().includes('one upload') ||
+    subscription?.upload_plans?.name?.toLowerCase().includes('1 song') ||
+    subscription?.upload_plans?.name?.toLowerCase().includes('daily') ||
+    subscription?.upload_plans?.name?.toLowerCase().includes('basic') ||
+    (!subscription && (hasUploadAccess || !isAdmin))
   );
-  // Admins: always allowed.
-  // Artists: allowed only when they have a non-expired active subscription.
-  // Regular users: need a valid active subscription.
-  const canUpload = isAdminRole || (isArtistRole && hasValidSub) || (!isArtistRole && hasValidSub);
+
+  // 2. Multi-platform distribution (FreshTunes) is ONLY unlocked when user explicitly holds an active K100/K300 plan.
+  // When the user's plan is for 1 song upload, all streaming platform buttons MUST NEVER be shown under any circumstances.
+  const isMultiPlatformPlanOrAdmin = Boolean(
+    !isOneSongUploadPlan &&
+    subscription &&
+    (
+      subscription.plan_type === 'k100_weekly' ||
+      subscription.plan_type === 'k300_yearly' ||
+      subscription.plan_type === 'weekly' ||
+      subscription.plan_type === 'annual' ||
+      subscription.plan_type === 'yearly' ||
+      subscription.upload_plans?.plan_type === 'k100_weekly' ||
+      subscription.upload_plans?.plan_type === 'k300_yearly' ||
+      (subscription.upload_plans?.price != null && subscription.upload_plans.price >= 100) ||
+      (subscription.amount != null && subscription.amount >= 100)
+    )
+  );
+
+  const handleOpenFreshTunes = useCallback(() => {
+    if (!isMultiPlatformPlanOrAdmin) return;
+    // Open in app frame without redirecting
+    setShowFreshTunesModal(true);
+  }, [isMultiPlatformPlanOrAdmin]);
 
   if (!user) return <Navigate to="/login" replace />;
 
@@ -457,59 +682,110 @@ export default function UploadPage() {
           <p className="text-sm text-muted-foreground">Share your music and videos with Zambia</p>
         </div>
 
-        {/* Active plan banner */}
-        {subscription && (
-          <Card className={`mb-6 ${subExpired ? 'border-destructive/30 bg-destructive/5' : 'border-accent/30 bg-accent/5'}`}>
-            <CardContent className="flex items-center gap-3 py-3">
-              {subExpired
-                ? <XCircle className="h-5 w-5 text-destructive shrink-0" />
-                : <CheckCircle2 className="h-5 w-5 text-accent shrink-0" />
-              }
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">
-                  {subExpired ? 'Plan expired: ' : 'Active plan: '}
-                  {subscription.upload_plans?.name}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {subExpired
-                    ? 'Your plan has expired. Purchase a new plan to upload again.'
-                    : subscription.plan_type === 'k10_single'
-                    ? `${1 - (subscription.uploads_used || 0)} upload(s) remaining${subscription.expires_at ? ` · Valid until ${formatDate(subscription.expires_at)}` : ''}`
-                    : `Unlimited uploads${subscription.expires_at ? ` · Expires ${formatDate(subscription.expires_at)}` : ''}`
-                  }
-                </p>
+        {/* Active plan banner — displays all registered artist details */}
+        {canUpload && (
+          <Card className="mb-6 border-accent/30 bg-accent/5">
+            <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3 px-4">
+              <div className="flex items-start gap-3">
+                <UserAvatar 
+                  src={profile?.avatar_url} 
+                  name={artistName || registeredInfo?.stageName || registeredInfo?.displayName || registeredInfo?.fullName || registeredInfo?.username || 'Artist'} 
+                  size="md"
+                  className="mt-0.5"
+                />
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold text-foreground">
+                      {subscription?.upload_plans?.name || (profile?.role === 'artist' ? 'Artist Plan Active' : 'Upload Access Active')}
+                    </p>
+                    <Badge variant="outline" className="text-[10px] bg-accent/15 text-accent border-accent/40 font-semibold uppercase tracking-wider">
+                      Artist Active
+                    </Badge>
+                    {isMultiPlatformPlanOrAdmin && (
+                      <Badge className="text-[10px] bg-emerald-500/15 text-emerald-500 border border-emerald-500/40 font-semibold uppercase tracking-wider flex items-center gap-1">
+                        <Sparkles className="h-2.5 w-2.5" /> All Streaming Unlocked
+                      </Badge>
+                    )}
+                  </div>
+                  
+                  {/* Show registered details clearly */}
+                  <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span>
+                      Artist Name:{' '}
+                      <strong className="text-foreground font-semibold">
+                        {artistName || registeredInfo?.stageName || registeredInfo?.displayName || registeredInfo?.fullName || registeredInfo?.username || 'Registered Artist'}
+                      </strong>
+                    </span>
+                    {registeredInfo?.username && (
+                      <span>Username: <strong className="text-foreground">@{registeredInfo.username}</strong></span>
+                    )}
+                    {registeredInfo?.email && (
+                      <span>Email: <strong className="text-foreground">{registeredInfo.email}</strong></span>
+                    )}
+                    {registeredInfo?.phone && (
+                      <span>Phone: <strong className="text-foreground">{registeredInfo.phone}</strong></span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-accent font-medium">
+                    ✓ Your artist account and upload plan are active. You can upload content now!
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:items-end gap-2 shrink-0">
+                {subscription && (
+                  <div className="text-left sm:text-right">
+                    <span className="text-xs font-semibold text-foreground block">
+                      {subscription.plan_type === 'k10_single' || subscription.uploads_allowed === 1
+                        ? '1 of 1 Upload Active'
+                        : 'Unlimited Uploads'}
+                    </span>
+                    {subscription.expires_at && (
+                      <span className="text-[10px] text-muted-foreground block">
+                        Expires {formatDate(subscription.expires_at)}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {isMultiPlatformPlanOrAdmin && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleOpenFreshTunes}
+                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1.5 shadow-xs"
+                  >
+                    <Globe className="h-3.5 w-3.5" />
+                    <span>All Streaming Upload</span>
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* Plans grid — shown when no active sub and not admin/super_admin */}
-        {!canUpload && !isAdminRole && (
+        {/* Plans grid — ONLY shown when no active plan or after plan expires */}
+        {!canUpload && !isAdmin && (
           <div className="space-y-4 mb-6">
             <h2 className="text-base font-semibold">Choose an Upload Plan</h2>
+            <p className="text-xs text-muted-foreground -mt-2 mb-3">
+              Your previous upload token has expired or you do not have an active upload plan. Choose a plan to unlock uploads.
+            </p>
             <div className="grid gap-3">
-              {plans.map(plan => {
-                const limitLabel =
-                  plan.plan_type === 'k10_single'  ? '1 upload (song or video)' :
-                  plan.plan_type === 'k100_weekly' ? 'Unlimited uploads · 7 days' :
-                  plan.plan_type === 'k300_yearly' ? 'Unlimited uploads · 365 days' :
-                  plan.description ?? '';
-                return (
-                  <button
-                    key={plan.id}
-                    onClick={() => openPayDialog(plan)}
-                    className="text-left w-full border border-border rounded-lg p-4 transition-colors hover:border-accent focus:outline-none focus:border-accent"
-                  >
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <p className="font-semibold">{plan.name}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{limitLabel}</p>
-                      </div>
-                      <p className="text-xl font-bold text-accent shrink-0">{formatCurrency(plan.price)}</p>
+              {plans.map(plan => (
+                <button
+                  key={plan.id}
+                  onClick={() => openPayDialog(plan)}
+                  className="text-left w-full border border-border rounded-lg p-4 transition-colors hover:border-accent focus:outline-none focus:border-accent"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold">{plan.name}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{plan.description}</p>
                     </div>
-                  </button>
-                );
-              })}
+                    <p className="text-xl font-bold text-accent shrink-0 ml-4">{formatCurrency(plan.price)}</p>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
         )}
@@ -522,48 +798,99 @@ export default function UploadPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Type toggle */}
-              <div className="grid grid-cols-2 gap-2">
+              <div className={`grid gap-2 ${isMultiPlatformPlanOrAdmin ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-2'}`}>
                 <button
+                  type="button"
                   onClick={() => setUploadType('song')}
                   className={`flex items-center justify-center gap-2 p-3 rounded-lg border text-sm font-medium transition-colors ${uploadType === 'song' ? 'border-accent bg-accent/5 text-accent' : 'border-border'}`}
                 >
                   <Music2 className="h-4 w-4" /> Song (MP3)
                 </button>
                 <button
+                  type="button"
                   onClick={() => setUploadType('video')}
                   className={`flex items-center justify-center gap-2 p-3 rounded-lg border text-sm font-medium transition-colors ${uploadType === 'video' ? 'border-accent bg-accent/5 text-accent' : 'border-border'}`}
                 >
                   <Video className="h-4 w-4" /> Video (MP4)
                 </button>
+                {isMultiPlatformPlanOrAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleOpenFreshTunes}
+                    className="flex items-center justify-center gap-2 p-3 rounded-lg border border-emerald-500/60 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 text-sm font-semibold transition-all shadow-xs group"
+                  >
+                    <Globe className="h-4 w-4 transition-transform group-hover:rotate-12" />
+                    <span>All Streaming (FreshTunes)</span>
+                  </button>
+                )}
               </div>
 
-              {/* Distribution coming-soon banner — always visible, highlighted for video */}
-              <div className={`rounded-lg border px-4 py-3 flex gap-3 items-start transition-colors ${
-                uploadType === 'video'
-                  ? 'border-accent/40 bg-accent/5'
-                  : 'border-border bg-muted/40'
-              }`}>
-                <Rocket className={`h-4 w-4 mt-0.5 shrink-0 ${uploadType === 'video' ? 'text-accent' : 'text-muted-foreground'}`} />
-                <div className="min-w-0">
-                  <p className={`text-xs font-semibold mb-0.5 ${uploadType === 'video' ? 'text-accent' : 'text-foreground'}`}>
-                    Distribution coming soon 🚀
-                  </p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Videos uploaded to ZedVevo will soon be automatically distributed to{' '}
-                    <span className="font-medium text-foreground">YouTube</span> and{' '}
-                    <span className="font-medium text-foreground">TikTok</span> — giving your content a wider audience at no extra cost.
-                    Upload now to be first in line when we launch!
-                  </p>
+              {/* Distribution section - Strictly hidden for 1 song upload plans */}
+              {isMultiPlatformPlanOrAdmin ? (
+                <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 px-4 py-3.5 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+                  <div className="flex gap-3 items-start">
+                    <Globe className="h-5 w-5 mt-0.5 shrink-0 text-emerald-500" />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                        <p className="text-xs font-bold text-foreground">
+                          All Streaming Platforms Distribution Active 🌍
+                        </p>
+                        <Badge className="text-[10px] bg-emerald-500 text-white border-0 py-0 px-1.5 font-bold uppercase">
+                          VIP FreshTunes
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Your plan unlocks global distribution to Spotify, Apple Music, YouTube Music, Deezer, Boomplay, TikTok & Amazon via FreshTunes with 100% royalties kept.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={handleOpenFreshTunes}
+                    size="sm"
+                    className="shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Globe className="h-3.5 w-3.5" />
+                    <span>Open In-App Frame</span>
+                  </Button>
                 </div>
-              </div>
+              ) : uploadType === 'video' ? (
+                <div className="rounded-lg border px-4 py-3 flex gap-3 items-start border-accent/40 bg-accent/5">
+                  <Rocket className="h-4 w-4 mt-0.5 shrink-0 text-accent" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold mb-0.5 text-accent">
+                      Video Distribution coming soon 🚀
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Music videos uploaded to ZedVevo will be featured across the ZedVevo music network and video charts.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
 
               <div>
                 <Label>Title *</Label>
                 <Input className="mt-1" value={title} onChange={e => setTitle(e.target.value)} placeholder="Enter title" />
               </div>
               <div>
-                <Label>Artist Name *</Label>
-                <Input className="mt-1" value={artistName} onChange={e => setArtistName(e.target.value)} placeholder="Artist or band name" />
+                <div className="flex items-center justify-between mb-1">
+                  <Label>Artist Name *</Label>
+                  {registeredInfo && (
+                    <span className="text-[11px] text-muted-foreground">
+                      Registered name: <span className="text-accent font-medium">{registeredInfo.stageName || registeredInfo.displayName || registeredInfo.fullName || registeredInfo.username}</span>
+                      {registeredInfo.username && ` (@${registeredInfo.username})`}
+                    </span>
+                  )}
+                </div>
+                <Input 
+                  className="mt-1" 
+                  value={artistName} 
+                  onChange={e => setArtistName(e.target.value)} 
+                  placeholder="Artist or band name" 
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Auto-populated with your registered artist details. This is the artist credited on ZedVevo.
+                </p>
               </div>
               {uploadType === 'song' && (
                 <div className="grid grid-cols-2 gap-3">
@@ -618,20 +945,13 @@ export default function UploadPage() {
               )}
 
               <div>
-                <Label>
-                  {uploadType === 'song' ? 'Cover Image *' : 'Custom Thumbnail (optional)'}
-                </Label>
+                <Label>{uploadType === 'song' ? 'Cover Art (optional)' : 'Custom Thumbnail (optional)'}</Label>
                 <Input
                   type="file"
                   accept="image/*"
                   className="mt-1 cursor-pointer"
                   onChange={e => setCoverFile(e.target.files?.[0] || null)}
                 />
-                {uploadType === 'song' && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Required. Used as music card, player, search and trending image.
-                  </p>
-                )}
                 {uploadType === 'video' && (
                   <p className="text-xs text-muted-foreground mt-1">
                     {autoThumb ? 'Thumbnail auto-generated from video. Upload a custom one to override.' : 'A thumbnail will be generated from your video automatically.'}
@@ -648,16 +968,29 @@ export default function UploadPage() {
                 </div>
               )}
 
-              <Button
-                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
-                onClick={handleUpload}
-                disabled={uploading}
-              >
-                {uploading
-                  ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Uploading...</>
-                  : <><Upload className="h-4 w-4 mr-2" />Upload</>
-                }
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+                <Button
+                  className="flex-1 bg-accent hover:bg-accent/90 text-accent-foreground font-semibold h-11"
+                  onClick={handleUpload}
+                  disabled={uploading}
+                >
+                  {uploading
+                    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Uploading...</>
+                    : <><Upload className="h-4 w-4 mr-2" />Upload {uploadType === 'song' ? 'Song to ZedVevo' : 'Video to ZedVevo'}</>
+                  }
+                </Button>
+                {isMultiPlatformPlanOrAdmin && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleOpenFreshTunes}
+                    className="border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/20 text-foreground font-semibold h-11 flex items-center justify-center gap-1.5"
+                  >
+                    <Globe className="h-4 w-4 text-emerald-500" />
+                    <span>All Streaming Upload (FreshTunes)</span>
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}
@@ -665,7 +998,7 @@ export default function UploadPage() {
 
       {/* ── Payment Dialog ────────────────────────────────────────── */}
       <Dialog open={payDialog} onOpenChange={open => { if (!payLoading) setPayDialog(open); }}>
-        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-md">
+        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg p-6 max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {selectedPlan ? `Pay for ${selectedPlan.name}` : 'Choose Payment'}
@@ -677,58 +1010,25 @@ export default function UploadPage() {
             )}
           </DialogHeader>
 
-          {/* Pending / waiting state */}
-          {paymentStatus === 'pending' ? (
-            <div className="py-6 text-center space-y-3">
-              <Clock className="h-12 w-12 mx-auto text-yellow-500 animate-pulse" />
-              <p className="font-semibold">Waiting for Confirmation</p>
-              <p className="text-sm text-muted-foreground">
-                {payMethod === 'mobile_money'
-                  ? 'Check your phone and enter your Mobile Money PIN to confirm payment.'
-                  : 'Complete your payment in the opened tab.'}
-              </p>
-              {paymentUrl && (
-                <Button variant="outline" size="sm" onClick={() => window.open(paymentUrl, '_blank')}>
-                  Re-open Payment Page
-                </Button>
-              )}
-              <p className="text-xs text-muted-foreground">
-                Your plan will activate automatically as soon as Lipila confirms your payment.
-              </p>
-            </div>
-          ) : paymentStatus === 'review' ? (
-            <div className="py-6 text-center space-y-3">
-              <Clock className="h-12 w-12 mx-auto text-muted-foreground" />
-              <p className="font-semibold">Under Review</p>
-              <p className="text-sm text-muted-foreground">
-                We could not confirm your payment automatically. The ZedVevo team will review
-                your payment and activate your plan manually within a few hours.
-              </p>
-              <p className="text-xs text-muted-foreground">
-                If you have any questions, please contact the ZedVevo team.
-              </p>
-              <Button variant="outline" size="sm" onClick={() => setPayDialog(false)}>
-                Close
-              </Button>
-            </div>
-          ) : paymentStatus === 'insufficient_funds' || paymentStatus === 'failed' || paymentStatus === 'cancelled' ? (
-            <div className="py-6 text-center space-y-3">
-              <XCircle className="h-12 w-12 mx-auto text-destructive" />
-              <p className="font-semibold">
-                {paymentStatus === 'insufficient_funds' ? 'Insufficient Funds' : `Payment ${paymentStatus}`}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {paymentStatus === 'insufficient_funds'
-                  ? 'Please add sufficient funds to your account and try again.'
-                  : 'Your plan was not activated. Please try again.'}
-              </p>
-              <Button
-                className="bg-accent hover:bg-accent/90 text-accent-foreground"
-                onClick={() => setPaymentStatus(null)}
-              >
-                Try Again
-              </Button>
-            </div>
+          {/* Centralized Payment Status Overlay */}
+          {(paymentStatus === 'pending' || paymentStatus === 'completed' || paymentStatus === 'successful' || paymentStatus === 'insufficient_funds' || paymentStatus === 'failed' || paymentStatus === 'cancelled') ? (
+            <PaymentStatusOverlay
+              status={
+                paymentStatus === 'pending' ? 'pending' :
+                (paymentStatus === 'completed' || paymentStatus === 'successful') ? 'success' :
+                'failed'
+              }
+              amount={selectedPlan?.price || 0}
+              description={`Plan: ${selectedPlan?.name || 'Upload Plan'}`}
+              phone={phone}
+              failureReason={paymentStatus === 'insufficient_funds' ? 'Insufficient funds. Please top up your wallet.' : 'Payment declined or timed out.'}
+              onClose={() => {
+                setPayDialog(false);
+                setPaymentStatus(null);
+              }}
+              onRetry={() => setPaymentStatus(null)}
+              paymentId={activePaymentId || undefined}
+            />
           ) : (
             <div className="space-y-4 py-2">
               {/* Amount summary */}
@@ -762,66 +1062,108 @@ export default function UploadPage() {
                   >
                     <CreditCard className="h-4 w-4 shrink-0" />
                     <span>Card</span>
-                    <Badge className="absolute -top-2 -right-2 text-[9px] px-1.5 py-0 bg-muted text-muted-foreground border border-border">
-                      Soon
+                    <Badge className="absolute -top-2 -right-2 text-[9px] px-1.5 py-0 bg-accent text-accent-foreground border border-accent animate-pulse">
+                      Visa/MC
                     </Badge>
                   </button>
                 </div>
               </div>
 
-              {/* Card coming soon notice */}
-              {payMethod === 'card' && (
-                <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3">
-                  <AlertCircle className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium">Card payments coming soon</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Card payments are not yet available. Please use Mobile Money to complete your purchase.
-                    </p>
-                  </div>
-                </div>
-              )}
+              {payMethod === 'card' ? (
+                <div className="pt-2 border-t border-border/50">
+                  <CardPaymentForm
+                    amount={selectedPlan?.price || 0}
+                    paymentType="plan"
+                    metadata={{
+                      user_id: user!.id,
+                      plan_id: selectedPlan?.id,
+                      plan_type: selectedPlan?.plan_type,
+                    }}
+                    onSuccess={async (paymentId) => {
+                      setPaymentStatus('successful');
+                      setPayDialog(false);
 
-              {/* Mobile money phone input */}
-              {payMethod === 'mobile_money' && (
-                <div>
-                  <Label>Phone Number *</Label>
-                  <Input
-                    className="mt-1"
-                    value={phone}
-                    onChange={e => setPhone(e.target.value)}
-                    placeholder="e.g. 0977123456"
-                    type="tel"
+                      const isAllPlatforms = (selectedPlan?.plan_type === 'k100_weekly' ||
+                        selectedPlan?.plan_type === 'k300_yearly' ||
+                        selectedPlan?.name?.toLowerCase().includes('streaming') ||
+                        selectedPlan?.name?.toLowerCase().includes('fresh')) &&
+                        selectedPlan?.plan_type !== 'k10_single' &&
+                        (selectedPlan?.price || 0) >= 100;
+
+                      if (user?.id) {
+                        try {
+                          const sub = await getUserActiveSubscription(user.id);
+                          setSubscription(sub);
+                        } catch {
+                          // Ignore fetch error
+                        }
+                      }
+
+                      if (isAllPlatforms) {
+                        setShowFreshTunesModal(true);
+                        toast.success('All Streaming Platforms Plan Activated! Opening in-app frame...');
+                      } else {
+                        toast.success('Your plan is now active! You can start uploading right now.');
+                      }
+                    }}
+                    onCancel={() => setPayDialog(false)}
+                    buttonLabel={`Pay ${selectedPlan ? formatCurrency(selectedPlan.price) : ''} & Activate`}
                   />
                 </div>
+              ) : (
+                <>
+                  {/* Mobile money phone input */}
+                  {payMethod === 'mobile_money' && (
+                    <div>
+                      <Label>Phone Number *</Label>
+                      <Input
+                        className="mt-1"
+                        value={phone}
+                        onChange={e => setPhone(e.target.value)}
+                        placeholder="e.g. 0977123456"
+                        type="tel"
+                      />
+                    </div>
+                  )}
+
+                  {/* Security note */}
+                  <div className="flex items-start gap-2 bg-muted/40 rounded-lg p-3 text-xs text-muted-foreground">
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0 text-accent mt-0.5" />
+                    Your plan activates only after Lipila verifies your payment server-side.
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-2 pt-1">
+                    <Button variant="outline" className="flex-1" onClick={() => setPayDialog(false)} disabled={payLoading}>
+                      Cancel
+                    </Button>
+                    <Button
+                      className="flex-1 bg-accent hover:bg-accent/90 text-accent-foreground"
+                      onClick={handlePayment}
+                      disabled={payLoading}
+                    >
+                      {payLoading
+                        ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Processing…</>
+                        : `Pay ${selectedPlan ? formatCurrency(selectedPlan.price) : ''}`
+                      }
+                    </Button>
+                  </div>
+                </>
               )}
-
-              {/* Security note */}
-              <div className="flex items-start gap-2 bg-muted/40 rounded-lg p-3 text-xs text-muted-foreground">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0 text-accent mt-0.5" />
-                Your plan activates only after Lipila verifies your payment server-side.
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-2 pt-1">
-                <Button variant="outline" className="flex-1" onClick={() => setPayDialog(false)} disabled={payLoading}>
-                  Cancel
-                </Button>
-                <Button
-                  className="flex-1 bg-accent hover:bg-accent/90 text-accent-foreground"
-                  onClick={handlePayment}
-                  disabled={payLoading || payMethod === 'card'}
-                >
-                  {payLoading
-                    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Processing…</>
-                    : `Pay ${selectedPlan ? formatCurrency(selectedPlan.price) : ''}`
-                  }
-                </Button>
-              </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* FreshTunes Distribution Portal Modal (Opens Real Web with App Theme) */}
+      <FreshTunesPortalModal
+        open={showFreshTunesModal}
+        onOpenChange={setShowFreshTunesModal}
+        onProceedToUpload={() => {
+          setShowFreshTunesModal(false);
+          window.scrollTo({ top: 300, behavior: 'smooth' });
+        }}
+      />
     </div>
   );
 }

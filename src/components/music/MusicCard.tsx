@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Play, Pause, Heart, BookmarkPlus, Share2, Music, Download, X, Clock, BarChart2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import type { Song } from '@/types/index';
 import { useAuth } from '@/contexts/AuthContext';
-import { toggleLike, toggleSave, recordDownload, incrementSongDownloadCount } from '@/lib/api';
+import { toggleLike, toggleSave, recordDownload, incrementSongDownloadCount, getLikedContentIds } from '@/lib/api';
 import { formatDuration } from '@/lib/utils';
 import ShareSheet from '@/components/common/ShareSheet';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import ZedVevoWatermark from '@/components/common/ZedVevoWatermark';
 
 interface MusicCardProps {
   song: Song;
@@ -20,24 +21,40 @@ interface MusicCardProps {
 export default function MusicCard({ song, isPlaying, onPlay, compact = false }: MusicCardProps) {
   const { user } = useAuth();
   const [liked, setLiked] = useState(song.liked ?? false);
+  const [likeCount, setLikeCount] = useState(song.like_count || 0);
+  const [isPopAnimating, setIsPopAnimating] = useState(false);
   const [saved, setSaved] = useState(song.saved ?? false);
   const [downloading, setDownloading] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
 
   const shareUrl = `${window.location.origin}/song/${song.id}`;
-  // Build artist label: "Artist ft. Featured1, Featured2"
-  const artistLabel = song.featured_artists
-    ? `${song.artist_name} ft. ${song.featured_artists}`
-    : song.artist_name;
-  const shareText = `Listen to "${song.title}" by ${artistLabel} on ZedVevo — ${shareUrl}`;
+  const shareTitle = `${song.title} by ${song.artist_name}`;
+  const shareText = `🎵 "${song.title}" by ${song.artist_name}\nStream & download on ZedVevo:`;
+
+  useEffect(() => {
+    if (user && song.id && song.liked === undefined) {
+      getLikedContentIds(user.id, 'song').then((ids) => {
+        setLiked(ids.includes(song.id));
+      }).catch(() => {});
+    }
+  }, [user?.id, song.id, song.liked]);
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!user) { toast.error('Sign in to like songs'); return; }
+    if (!user) {
+      toast.error('Please sign in to like songs');
+      return;
+    }
+    
+    // Trigger heart popping animation
+    setIsPopAnimating(true);
+    setTimeout(() => setIsPopAnimating(false), 800);
+
     try {
       const result = await toggleLike(user.id, song.id, 'song');
       setLiked(result);
+      setLikeCount(prev => result ? prev + 1 : Math.max(0, prev - 1));
       toast.success(result ? 'Added to liked' : 'Removed from liked');
     } catch { toast.error('Failed to update like'); }
   };
@@ -128,6 +145,9 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
       >
         {/* Cover */}
         <div className="relative aspect-square bg-muted overflow-hidden">
+          {/* ZedVevo Watermark on artwork */}
+          <ZedVevoWatermark size="sm" />
+
           {song.cover_url ? (
             <img src={song.cover_url} alt={song.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
           ) : (
@@ -150,7 +170,7 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
             </div>
           </div>
           {song.is_trending && (
-            <span className="absolute top-2 left-2 bg-accent text-accent-foreground text-[10px] font-semibold px-2 py-0.5 rounded-full">
+            <span className="absolute top-2 right-2 bg-accent text-accent-foreground text-[10px] font-semibold px-2 py-0.5 rounded-full shadow-md">
               Trending
             </span>
           )}
@@ -163,8 +183,23 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
           <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
             <span className="text-xs text-muted-foreground">{song.play_count.toLocaleString()} plays</span>
             <div className="flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleLike}>
-                <Heart className={`h-3.5 w-3.5 ${liked ? 'fill-destructive text-destructive' : ''}`} />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="relative h-7 px-1.5 gap-1 text-xs"
+                onClick={handleLike}
+                title={`${likeCount} Likes`}
+              >
+                {/* Floating Heart Particle on Click */}
+                {isPopAnimating && (
+                  <Heart className="absolute -top-3 left-1.5 h-4 w-4 fill-rose-500 text-rose-500 animate-heart-float pointer-events-none" />
+                )}
+                <Heart
+                  className={`h-3.5 w-3.5 transition-transform duration-200 ${
+                    liked ? 'fill-destructive text-destructive' : ''
+                  } ${isPopAnimating ? 'animate-heart-pop text-rose-500' : ''}`}
+                />
+                <span>{likeCount.toLocaleString()}</span>
               </Button>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleSave}>
                 <BookmarkPlus className={`h-3.5 w-3.5 ${saved ? 'fill-accent text-accent' : ''}`} />
@@ -252,7 +287,7 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
                 </p>
               </div>
               <div className="bg-muted rounded-lg py-2 px-1">
-                <p className="text-sm font-bold">{song.like_count.toLocaleString()}</p>
+                <p className="text-sm font-bold">{likeCount.toLocaleString()}</p>
                 <p className="text-[10px] text-muted-foreground flex items-center justify-center gap-0.5 mt-0.5">
                   <Heart className="h-3 w-3" />Likes
                 </p>
@@ -272,7 +307,7 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         url={shareUrl}
-        title={`${song.title} — ${artistLabel}`}
+        title={shareTitle}
         text={shareText}
         thumbnailUrl={song.cover_url}
         embedId={song.id}

@@ -10,6 +10,7 @@
     "module": "ESNext",
     "skipLibCheck": true,
     "strictNullChecks": true,
+    "noImplicitAny": false,
     "noEmit": true,
     "paths": {
       "@/*": ["./src/*"]

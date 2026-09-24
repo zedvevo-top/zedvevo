@@ -30,18 +30,17 @@ Deno.serve(async (req) => {
 
     const { data: payment, error } = await supabase
       .from("payments")
-      .select("id, status, amount, payment_method, payment_type, lipila_transaction_id, failure_reason, metadata")
+      .select("id, status, amount, payment_method, lipila_transaction_id, failure_reason, metadata")
       .eq("id", payment_id)
       .maybeSingle();
 
     if (error || !payment) return json({ error: "Payment not found" }, 404);
 
-    const verified = payment.status === "successful";
+    const verified = payment.status === "completed" || payment.status === "successful";
     return json({
       verified,
       status: payment.status,
       payment_id: payment.id,
-      payment_type: payment.payment_type ?? null,
       amount: payment.amount,
       currency: "ZMW",
       transaction_id: payment.lipila_transaction_id ?? null,

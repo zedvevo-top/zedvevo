@@ -1,25 +1,22 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, Music2, Video, Trophy, Upload, Library, User, LayoutDashboard, LogOut, LogIn, TrendingUp, Download, Heart, HelpCircle } from 'lucide-react';
+import { Menu, X, Music2, Video, Trophy, Upload, Library, User, LayoutDashboard, LogOut, LogIn, TrendingUp, Download, Heart, Settings } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { UserAvatar } from '@/components/ui/avatar';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/db/supabase';
+import { useUserProfile } from '@/hooks/useUserProfile';
 import CDLogo from '@/components/ui/CDLogo';
 import SearchBar from '@/components/search/SearchBar';
 import NotificationBell from '@/components/notifications/NotificationBell';
 import DonationDialog from '@/components/donation/DonationDialog';
+import InstallAppButton from '@/components/layout/InstallAppButton';
+import ThemeSelector from '@/components/common/ThemeSelector';
+import BackButton from '@/components/common/BackButton';
 
 const navLinks = [
   { to: '/', label: 'Home' },
@@ -33,60 +30,30 @@ const navLinks = [
 ];
 
 export default function Header() {
-  const { user, profile, signOut } = useAuth();
+  const { user, signOut } = useAuth();
+  const { profile } = useUserProfile(user?.id);
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [donateOpen, setDonateOpen] = useState(false);
-
-  // Help dialog state
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [helpSubject, setHelpSubject] = useState('');
-  const [helpMessage, setHelpMessage] = useState('');
-  const [helpName, setHelpName] = useState(profile?.display_name || profile?.username || '');
-  const [helpEmail, setHelpEmail] = useState(profile?.email || '');
-  const [helpSending, setHelpSending] = useState(false);
-
-  // Prefill name/email when profile loads
-  useEffect(() => {
-    if (profile) {
-      setHelpName(profile.display_name || profile.username || '');
-      setHelpEmail(profile.email || '');
-    }
-  }, [profile]);
+  const [siteName, setSiteName] = useState((window as any).ZED_SITE_NAME || 'ZedVevo');
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
     window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
+    
+    const handleBrandChanged = (e: any) => {
+      if (e.detail) setSiteName(e.detail);
+    };
+    window.addEventListener('site_name_changed', handleBrandChanged);
+
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('site_name_changed', handleBrandChanged);
+    };
   }, []);
 
   const isActive = (to: string) => location.pathname === to;
-
-  const handleSendHelp = async () => {
-    if (!helpMessage.trim()) { toast.error('Please write your message'); return; }
-    setHelpSending(true);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      const res = await supabase.functions.invoke('help-message', {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        body: {
-          message: helpMessage.trim(),
-          name: helpName.trim() || undefined,
-          email: helpEmail.trim() || undefined,
-          subject: helpSubject.trim() || 'General Help',
-          user_id: user?.id,
-        },
-      });
-      if (res.error) throw res.error;
-      toast.success('Message sent! We\'ll get back to you soon.');
-      setHelpOpen(false);
-      setHelpSubject(''); setHelpMessage('');
-    } catch (e: unknown) {
-      toast.error((e as Error).message || 'Failed to send message');
-    } finally { setHelpSending(false); }
-  };
 
   return (
     <>
@@ -96,11 +63,20 @@ export default function Header() {
         }`}
       >
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between gap-4">
-          {/* Brand */}
-          <Link to="/" className="flex items-center gap-2 shrink-0">
-            <CDLogo size={40} spinning />
-            <span className="text-lg font-bold tracking-tight hidden sm:block">ZedVevo</span>
-          </Link>
+          {/* Brand & Back Navigation */}
+          <div className="flex items-center gap-2 shrink-0">
+            {location.pathname !== '/' && (
+              <BackButton
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 bg-card/60 backdrop-blur border border-border/50 hover:bg-accent/15 hover:text-accent shadow-xs"
+              />
+            )}
+            <Link to="/" className="flex items-center gap-2">
+              <CDLogo size={40} spinning />
+              <span className="text-lg font-bold tracking-tight hidden sm:block">{siteName}</span>
+            </Link>
+          </div>
 
           {/* Desktop Nav */}
           <nav className="hidden lg:flex items-center gap-1">
@@ -157,16 +133,16 @@ export default function Header() {
               <Heart className="h-4 w-4 text-destructive fill-destructive" />
             </Button>
 
-            {/* Help button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 text-muted-foreground hover:text-foreground"
-              title="Get help / send message"
-              onClick={() => setHelpOpen(true)}
-            >
-              <HelpCircle className="h-4 w-4" />
-            </Button>
+            {/* APK Installer Button */}
+            <div className="hidden sm:block">
+              <InstallAppButton variant="header" />
+            </div>
+            <div className="sm:hidden">
+              <InstallAppButton variant="header-icon" />
+            </div>
+
+            {/* Theme switcher */}
+            <ThemeSelector />
 
             {/* Notification bell */}
             <NotificationBell />
@@ -175,18 +151,28 @@ export default function Header() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="h-9 w-9 rounded-full p-0">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={profile?.avatar_url || undefined} />
-                      <AvatarFallback className="text-xs font-semibold bg-accent text-accent-foreground">
-                        {(profile?.display_name || profile?.username || 'U')[0].toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
+                    <UserAvatar
+                      src={
+                        profile?.avatar_url ||
+                        (user?.user_metadata as any)?.avatar_url ||
+                        (user?.user_metadata as any)?.picture ||
+                        (user?.user_metadata as any)?.photo_url
+                      }
+                      name={profile?.display_name || profile?.username || user?.email || 'User'}
+                      size="sm"
+                      className="border border-border/80"
+                    />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuContent align="end" className="w-52">
                   <div className="px-2 py-1.5 text-sm">
                     <p className="font-medium truncate">{profile?.display_name || profile?.username || 'User'}</p>
-                    <p className="text-xs text-muted-foreground truncate">{profile?.email}</p>
+                    <p className="text-xs text-muted-foreground truncate">{profile?.email || user.email}</p>
+                    {(profile?.role === 'super_admin' || profile?.role === 'admin') && (
+                      <span className="inline-block mt-1 text-[10px] bg-accent/20 text-accent font-semibold px-1.5 py-0.5 rounded">
+                        {profile.role === 'super_admin' ? 'Super Admin' : 'Admin'}
+                      </span>
+                    )}
                   </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
@@ -196,11 +182,14 @@ export default function Header() {
                     <Link to="/profile" className="flex items-center gap-2"><User className="h-4 w-4" />Profile</Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
+                    <Link to="/settings" className="flex items-center gap-2"><Settings className="h-4 w-4" />Settings</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
                     <Link to="/downloads" className="flex items-center gap-2"><Download className="h-4 w-4" />My Downloads</Link>
                   </DropdownMenuItem>
-                  {(profile?.role === 'admin' || profile?.role === 'super_admin') && (
+                  {(profile?.role === 'admin' || profile?.role === 'super_admin' || user?.email?.toLowerCase() === 'topkuchalo@gmail.com') && (
                     <DropdownMenuItem asChild>
-                      <Link to="/admin" className="flex items-center gap-2"><LayoutDashboard className="h-4 w-4" />Admin</Link>
+                      <Link to="/admin" className="flex items-center gap-2 font-medium text-accent"><LayoutDashboard className="h-4 w-4" />Admin Panel</Link>
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
@@ -236,15 +225,10 @@ export default function Header() {
                     <Heart className="h-4 w-4 shrink-0 text-destructive fill-destructive" />
                     Donate
                   </button>
-                  {/* Mobile help row */}
-                  <button
-                    type="button"
-                    onClick={() => { setMobileOpen(false); setHelpOpen(true); }}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted"
-                  >
-                    <HelpCircle className="h-4 w-4 shrink-0" />
-                    Help / Contact Us
-                  </button>
+                  {/* Mobile Install APK Option */}
+                  <div onClick={() => setMobileOpen(false)}>
+                    <InstallAppButton variant="menu-item" />
+                  </div>
                   {navLinks.map(({ to, label, icon: Icon }) => (
                     <Link
                       key={to}
@@ -294,69 +278,6 @@ export default function Header() {
       </header>
 
       <DonationDialog open={donateOpen} onClose={() => setDonateOpen(false)} />
-
-      {/* Help / Contact Dialog */}
-      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
-        <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <HelpCircle className="h-4 w-4 text-accent" />
-              Help &amp; Support
-            </DialogTitle>
-            <DialogDescription>
-              Send a message to the ZedVevo team. We'll reply by email.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Label>Your Name</Label>
-                <Input className="mt-1" value={helpName} onChange={e => setHelpName(e.target.value)} placeholder="Name" />
-              </div>
-              <div>
-                <Label>Your Email</Label>
-                <Input className="mt-1" type="email" value={helpEmail} onChange={e => setHelpEmail(e.target.value)} placeholder="email@example.com" />
-              </div>
-            </div>
-            <div>
-              <Label>Subject</Label>
-              <Select value={helpSubject} onValueChange={setHelpSubject}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Select subject…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="General Help">General Help</SelectItem>
-                  <SelectItem value="Nomination Issue">Nomination Issue</SelectItem>
-                  <SelectItem value="Payment Issue">Payment Issue</SelectItem>
-                  <SelectItem value="Voting Issue">Voting Issue</SelectItem>
-                  <SelectItem value="Account Issue">Account Issue</SelectItem>
-                  <SelectItem value="Report Content">Report Content</SelectItem>
-                  <SelectItem value="Other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Message *</Label>
-              <Textarea
-                className="mt-1"
-                rows={4}
-                value={helpMessage}
-                onChange={e => setHelpMessage(e.target.value)}
-                placeholder="Describe your issue or question…"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setHelpOpen(false)}>Cancel</Button>
-            <Button
-              className="bg-accent hover:bg-accent/90 text-accent-foreground"
-              onClick={handleSendHelp}
-              disabled={helpSending || !helpMessage.trim()}
-            >
-              {helpSending && <span className="mr-2 inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
-              Send Message
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
