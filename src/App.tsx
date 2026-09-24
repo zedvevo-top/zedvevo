@@ -174,8 +174,10 @@ const GlobalScriptsAndTheme: React.FC = () => {
 
   // 2. Immediate Ad Loading mechanism: inject ad scripts as soon as the app opens
   React.useEffect(() => {
-    const codeToInject = adHeaderCode || `<script async="async" data-cfasync="false" src="https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js"></script><div id="container-29a990e051b1bc82dfb7d8c83a9a64af"></div>`;
+    if (!adHeaderCode) return; // Only inject if dynamic ad code is provided, don't re-inject the main script
 
+    const codeToInject = adHeaderCode;
+    
     const injectImmediately = () => {
       let container = document.getElementById('dynamic-header-scripts');
       if (!container) {
@@ -208,7 +210,7 @@ const GlobalScriptsAndTheme: React.FC = () => {
 
     // Run synchronously on mount
     injectImmediately();
-  }, [adHeaderCode, location.pathname]);
+  }, [adHeaderCode]); // Removed location.pathname to avoid re-injecting on every route change
 
   return null;
 };

@@ -9,7 +9,12 @@ export function playNotificationChime(soundTypeOverride?: 'iphone' | 'samsung') 
     const soundPreference = soundTypeOverride || localStorage.getItem('zedvevo_notification_sound') || 'iphone';
     if (soundPreference === 'none') return;
 
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) {
+      console.warn('AudioContext not supported in this browser.');
+      return;
+    }
+    const audioCtx = new AudioContext();
     
     if (soundPreference === 'iphone') {
       // High-Fidelity iPhone Tri-Tone: G5 (784Hz) -> C6 (1046.5Hz) -> E6 (1318.5Hz)

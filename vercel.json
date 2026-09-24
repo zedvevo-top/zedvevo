@@ -1,17 +1,13 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "vite",
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/payments/verify", "destination": "/api/verify-payment" },
-    { "source": "/api/lipila/webhook", "destination": "/api/webhook" },
-    { "source": "/robots.txt", "destination": "/api/robots" },
-    { "source": "/sitemap.xml", "destination": "/api/sitemap" },
-    { "source": "/song/:id([a-zA-Z0-9_-]+)", "destination": "/api/song?slug=:id" },
-    { "source": "/video/:id([a-zA-Z0-9_-]+)", "destination": "/api/video?slug=:id" },
-    { "source": "/watch/:id([a-zA-Z0-9_-]+)", "destination": "/api/video?slug=:id" },
-    { "source": "/artist/:id([a-zA-Z0-9_-]+)", "destination": "/api/artist?slug=:id" },
+    { "source": "/api/payments/verify", "destination": "/api/verify-payment.js" },
+    { "source": "/api/lipila/webhook", "destination": "/api/webhook.js" },
+    { "source": "/robots.txt", "destination": "/api/robots.js" },
+    { "source": "/sitemap.xml", "destination": "/api/sitemap.js" },
+    { "source": "/song/:id", "destination": "/api/song.js?slug=:id" },
+    { "source": "/video/:id", "destination": "/api/video.js?slug=:id" },
+    { "source": "/watch/:id", "destination": "/api/video.js?slug=:id" },
+    { "source": "/artist/:id", "destination": "/api/artist.js?slug=:id" },
     { "source": "/((?!api/|assets/|sw\\.js|firebase-messaging-sw\\.js|manifest\\.json|favicon|app-icon).*)", "destination": "/index.html" }
   ],
   "headers": [

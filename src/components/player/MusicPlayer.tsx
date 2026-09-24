@@ -58,7 +58,7 @@ export function MusicPlayer() {
     if (audioRef.current && currentSong) {
       audioRef.current.src = currentSong.audio_url
       if (isPlaying) {
-        audioRef.current.play().catch(console.error)
+        audioRef.current.play().catch((err) => console.warn('Audio play prevented:', err));
       }
     }
   }, [currentSong])
@@ -66,7 +66,7 @@ export function MusicPlayer() {
   useEffect(() => {
     if (audioRef.current) {
       if (isPlaying) {
-        audioRef.current.play().catch(console.error)
+        audioRef.current.play().catch((err) => console.warn('Audio play prevented:', err));
       } else {
         audioRef.current.pause()
       }

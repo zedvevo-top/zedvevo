@@ -134,7 +134,7 @@ export default function RegisterPage() {
           id: signUpData.user.id,
           email: data.email,
           full_name: data.fullName,
-          username: data.fullName.toLowerCase().replace(/\s+/g, '_'),
+          username: data.fullName.toLowerCase().trim(),
           avatar_url: avatarUrl,
         })
 

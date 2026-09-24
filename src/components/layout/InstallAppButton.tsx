@@ -55,9 +55,17 @@ export const InstallAppButton: React.FC<InstallAppButtonProps> = ({
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+          
+          // Use setTimeout for cleanup to be safe
+          setTimeout(() => {
+            try {
+              URL.revokeObjectURL(blobUrl);
+            } catch (e) {
+              console.warn('Revoke error:', e);
+            }
+          }, 30000);
 
-          toast.success('Downloading ZedVevo Android APK (1.6 MB)...', {
+          toast.success('Downloading ZedVevo Android APK...', {
             description: "Tap 'Open' and 'Install' once the download completes.",
             duration: 7000,
           });
@@ -80,7 +88,8 @@ export const InstallAppButton: React.FC<InstallAppButtonProps> = ({
       });
     } catch (err) {
       console.error('Download error:', err);
-      window.location.href = '/ZedVevo.apk';
+      // Fallback
+      window.open('/ZedVevo.apk', '_blank');
     } finally {
       setTimeout(() => setIsDownloading(false), 2000);
     }
