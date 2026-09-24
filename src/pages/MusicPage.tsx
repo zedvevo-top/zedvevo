@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -109,9 +109,6 @@ export default function MusicPage() {
           </div>
         </div>
 
-        {/* Native Sponsor Ad Banner */}
-        <AdBanner position="music" format="leaderboard" />
-
         {/* Grid */}
         {loading && songs.length === 0 ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
@@ -125,13 +122,19 @@ export default function MusicPage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-            {filtered.map(song => (
-              <MusicCard
-                key={song.id}
-                song={song}
-                isPlaying={currentSong?.id === song.id}
-                onPlay={s => playSong(s, filtered)}
-              />
+            {filtered.map((song, index) => (
+              <React.Fragment key={song.id}>
+                <MusicCard
+                  song={song}
+                  isPlaying={currentSong?.id === song.id}
+                  onPlay={s => playSong(s, filtered)}
+                />
+                {(index + 1) % 10 === 0 && (
+                    <div className="col-span-1 aspect-square">
+                        <AdBanner position="music" format="compact" className="h-full w-full" />
+                    </div>
+                )}
+              </React.Fragment>
             ))}
           </div>
         )}

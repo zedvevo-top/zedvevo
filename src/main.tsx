@@ -34,6 +34,16 @@ if (typeof window !== "undefined" && "serviceWorker" in navigator) {
 
 // Handle invalid or missing refresh token errors globally without crashing or showing error overlays
 if (typeof window !== "undefined") {
+  window.onerror = function(message, source) {
+    // If the message is "Script error." and has no source, it's a cross-origin error
+    // which provides no useful debugging information. Suppress it.
+    if (message === "Script error." && !source) {
+      console.warn("Suppressed meaningless cross-origin script error.");
+      return true;
+    }
+    return false;
+  };
+
   window.addEventListener("unhandledrejection", (event) => {
     const reason = event.reason?.message || event.reason?.error_description || (typeof event.reason === "string" ? event.reason : JSON.stringify(event.reason || {}));
     if (

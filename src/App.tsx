@@ -55,38 +55,14 @@ function SuperAdminGuard({ children }: { children: React.ReactNode }) {
   return <AdminLayout>{children}</AdminLayout>;
 }
 
-// Dynamic head script injection & dynamic platform theme loader from Supabase & Settings
+// Dynamic platform theme loader from Supabase & Settings
 const GlobalScriptsAndTheme: React.FC = () => {
-  const location = useLocation();
-  const [adHeaderCode, setAdHeaderCode] = React.useState<string | null>(null);
-
   // 1. Fetch config and apply theme/branding settings ONCE on mount
   React.useEffect(() => {
     async function loadConfigAndTheme() {
       try {
         const { getSettings } = await import('@/lib/api');
-        const { getRealAds } = await import('@/services/adsService');
         const settings = await getSettings();
-
-        let adHeader = settings['ad_code_header'] || '';
-
-        // ALSO gather any active global popunder or script codes configured in Admin Ads
-        try {
-          const realAds = await getRealAds();
-          const globalScriptAds = realAds.filter(
-            a => a.is_active !== false && a.script_code && (a.placement === 'all' || a.placement === 'popup' || a.type === 'script' || a.type === 'popup')
-          );
-          if (globalScriptAds.length > 0) {
-            const combinedCodes = globalScriptAds.map(a => a.script_code).join('\n');
-            adHeader = adHeader ? `${adHeader}\n${combinedCodes}` : combinedCodes;
-          }
-        } catch {
-          // ignore
-        }
-
-        if (adHeader) {
-          setAdHeaderCode(adHeader);
-        }
 
         // 2. Set dynamic branding & favicon
         const siteName = settings['site_name'];
@@ -166,51 +142,11 @@ const GlobalScriptsAndTheme: React.FC = () => {
         }
 
       } catch (err) {
-        console.warn('Failed to load global ads header or theme scripts:', err);
+        console.warn('Failed to load theme scripts:', err);
       }
     }
     loadConfigAndTheme();
   }, []);
-
-  // 2. Immediate Ad Loading mechanism: inject ad scripts as soon as the app opens
-  React.useEffect(() => {
-    if (!adHeaderCode) return; // Only inject if dynamic ad code is provided, don't re-inject the main script
-
-    const codeToInject = adHeaderCode;
-    
-    const injectImmediately = () => {
-      let container = document.getElementById('dynamic-header-scripts');
-      if (!container) {
-        container = document.createElement('div');
-        container.id = 'dynamic-header-scripts';
-        document.head.appendChild(container);
-      }
-
-      try {
-        container.innerHTML = '';
-        const temp = document.createElement('div');
-        temp.innerHTML = codeToInject;
-
-        // Re-create scripts as real DOM nodes to force immediate browser execution
-        Array.from(temp.childNodes).forEach((node) => {
-          if (node.nodeName.toLowerCase() === 'script') {
-            const oldScript = node as HTMLScriptElement;
-            const newScript = document.createElement('script');
-            Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-            if (oldScript.innerHTML) newScript.innerHTML = oldScript.innerHTML;
-            container.appendChild(newScript);
-          } else {
-            container.appendChild(node.cloneNode(true));
-          }
-        });
-      } catch (err) {
-        console.warn('Immediate ad script injection failed:', err);
-      }
-    };
-
-    // Run synchronously on mount
-    injectImmediately();
-  }, [adHeaderCode]); // Removed location.pathname to avoid re-injecting on every route change
 
   return null;
 };

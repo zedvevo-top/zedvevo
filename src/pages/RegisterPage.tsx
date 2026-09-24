@@ -14,6 +14,7 @@ import { useToast } from '@/components/ui/use-toast'
 const registerSchema = z.object({
   fullName: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Invalid email address'),
+  phone: z.string().min(7, 'Phone number must be at least 7 digits'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   confirmPassword: z.string(),
 }).refine((data) => data.password === data.confirmPassword, {
@@ -134,7 +135,8 @@ export default function RegisterPage() {
           id: signUpData.user.id,
           email: data.email,
           full_name: data.fullName,
-          username: data.fullName.toLowerCase().trim(),
+          phone_number: data.phone,
+          username: data.fullName.trim(), // Spaces allowed, trimmed
           avatar_url: avatarUrl,
         })
 
@@ -190,6 +192,14 @@ export default function RegisterPage() {
               leftIcon={<Mail className="h-4 w-4" />}
               error={errors.email?.message}
               {...register('email')}
+            />
+
+            <Input
+              label="Phone Number"
+              type="tel"
+              placeholder="+260 9xx xxx xxx"
+              error={errors.phone?.message}
+              {...register('phone')}
             />
 
             <div className="relative">
