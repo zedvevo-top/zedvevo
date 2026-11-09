@@ -9,6 +9,7 @@ import { recordDownload, incrementSongDownloadCount } from '@/lib/api';
 import { formatDuration } from '@/lib/utils';
 import ShareSheet from '@/components/common/ShareSheet';
 import ZedVevoWatermark from '@/components/common/ZedVevoWatermark';
+import AdContainer from '@/components/ads/AdContainer';
 
 export default function MusicPlayer() {
   const { user } = useAuth();
@@ -78,7 +79,8 @@ export default function MusicPlayer() {
 
   return (
     /* sits above MobileNav (z-40) and below Header (z-50) */
-    <div className="fixed bottom-[56px] md:bottom-0 left-0 right-0 z-[45] glass border-t border-border">
+    <div className="fixed bottom-[56px] md:bottom-0 left-0 right-0 z-[45] glass border-t border-border flex flex-col">
+      <AdContainer containerName="above-player" className="px-3 py-1 max-w-7xl mx-auto w-full" />
       <div className="pb-[env(safe-area-inset-bottom,0px)]">
         <div className="max-w-7xl mx-auto px-3 py-2.5 flex items-center gap-2 md:gap-4">
 

@@ -17,20 +17,76 @@ import { getActivePlans, getUserActiveSubscription, uploadFile, applyPaymentBene
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/db/supabase';
 import { generateIdempotencyKey, formatCurrency, formatDate, snakeCaseFileName } from '@/lib/utils';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate, Link } from 'react-router-dom';
 import CardPaymentForm from '@/components/payment/CardPaymentForm';
 import FreshTunesPortalModal from '@/components/distribution/FreshTunesPortalModal';
 import { processUnifiedPayment, listenForPaymentStatus } from '@/lib/paymentProcessor';
 import PaymentStatusOverlay from '@/components/payment/PaymentStatusOverlay';
+import { useSubscriptionGuard } from '@/hooks';
 
 type PayMethod = 'mobile_money' | 'card';
 
+const DEFAULT_FALLBACK_PLANS: UploadPlan[] = [
+  {
+    id: 'k10_single',
+    name: 'Single Release Pass',
+    plan_type: 'k10_single',
+    price: 10,
+    description: 'Upload 1 song or 1 video with instant publishing on ZedVevo.',
+    uploads_allowed: 1,
+    validity_days: 30,
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'k100_weekly',
+    name: 'Weekly Creator Pass',
+    plan_type: 'k100_weekly',
+    price: 100,
+    description: 'Unlimited songs and videos for 7 days + FreshTunes distribution.',
+    uploads_allowed: null,
+    validity_days: 7,
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'k120_freshtunes',
+    name: 'FreshTunes Distribution Access',
+    plan_type: 'k120_freshtunes',
+    price: 120,
+    description: 'Global DSP distribution access (Spotify, Apple Music, Boomplay) + 100% royalties kept.',
+    uploads_allowed: 0,
+    validity_days: 365,
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'k300_yearly',
+    name: 'Annual Pro VIP Pass',
+    plan_type: 'k300_yearly',
+    price: 300,
+    description: 'Unlimited uploads for 365 days + Verified Artist badge & spotlight.',
+    uploads_allowed: null,
+    validity_days: 365,
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+];
+
 export default function UploadPage() {
-  const { user, profile } = useAuth();
-  const navigate = useNavigate();
+  const { user, profile, loading: authLoading } = useAuth();
+  const { 
+    canUpload: guardCanUpload, 
+    subscription, 
+    checkSubscription, 
+    handleUploadAttempt,
+    showRenewalDialog,
+    setShowRenewalDialog,
+    interceptUpload
+  } = useSubscriptionGuard();
+
+  // Plan State
   const [plans, setPlans] = useState<UploadPlan[]>([]);
-  const [subscription, setSubscription] = useState<UserSubscription | null>(null);
-  const [loading, setLoading] = useState(true);
 
   // Payment dialog state
   const [payDialog, setPayDialog] = useState(false);
@@ -63,42 +119,20 @@ export default function UploadPage() {
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [autoThumb, setAutoThumb] = useState<string | null>(null); // base64 data URL
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [currentProfile, setCurrentProfile] = useState<Profile | null>(profile);
-
-  const fetchSubscription = useCallback(async () => {
-    if (!user) return null;
-    try {
-      // 1. Fetch fresh profile directly from database
-      const { data: freshProf } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
-      if (freshProf) {
-        setCurrentProfile(freshProf);
-      }
-      // 2. Evaluate entitlement with payment check
-      const sub = await getUserActiveSubscription(user.id);
-      setSubscription(sub);
-      return sub;
-    } catch (err) {
-      console.error('Error fetching subscription:', err);
-      return null;
-    }
-  }, [user]);
 
   useEffect(() => {
     if (!user) return;
 
-    // 1. Gather all registered details from profile and auth
-    const effectiveProf = currentProfile || profile;
-    const regDisplayName = effectiveProf?.display_name || '';
-    const regFullName = (effectiveProf as any)?.full_name || user.user_metadata?.full_name || '';
-    const regUsername = effectiveProf?.username || user.user_metadata?.username || '';
+    const regDisplayName = profile?.display_name || '';
+    const regFullName = (profile as any)?.full_name || user.user_metadata?.full_name || '';
+    const regUsername = profile?.username || user.user_metadata?.username || '';
     const regEmail = user.email || '';
-    const regPhone = effectiveProf?.phone || (user as any)?.phone || '';
+    const regPhone = profile?.phone || (user as any)?.phone || '';
 
-    // Primary artist name from registration details
     const primaryRegisteredName = regDisplayName || regFullName || regUsername || (regEmail ? regEmail.split('@')[0] : '') || 'Artist';
 
-    // Query artists table for stage_name
     supabase.from('artists').select('stage_name, name').eq('user_id', user.id).maybeSingle()
       .then(({ data: artistRecord }) => {
         const bestStageName = artistRecord?.stage_name || artistRecord?.name || primaryRegisteredName;
@@ -124,55 +158,21 @@ export default function UploadPage() {
         });
       });
 
-    // Admins skip plan check entirely
-    if ((effectiveProf?.role === 'admin' || effectiveProf?.role === 'super_admin')) { setLoading(false); return; }
-    Promise.all([getActivePlans(), fetchSubscription()])
-      .then(([p]) => { setPlans(p); })
-      .catch(console.error)
+    getActivePlans()
+      .then((p) => { setPlans(p); })
+      .catch(console.warn)
       .finally(() => setLoading(false));
+  }, [user?.id, profile?.display_name, profile?.username]);
 
-    // Realtime: re-fetch subscription whenever a user_subscriptions row changes for this user
-    const channelSub = supabase
-      .channel(`user_sub_${user.id}_${Math.random().toString(36).slice(2, 9)}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'user_subscriptions', filter: `user_id=eq.${user.id}` },
-        () => {
-          fetchSubscription();
-        }
-      )
-      .subscribe();
-
-    // Realtime: re-fetch subscription whenever profiles row changes (e.g., admin approvals / trigger)
-    const channelProfile = supabase
-      .channel(`user_profile_${user.id}_${Math.random().toString(36).slice(2, 9)}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
-        () => {
-          fetchSubscription();
-        }
-      )
-      .subscribe();
-
-    // Realtime: re-fetch subscription whenever payments row changes for this user (e.g., admin approves payment)
-    const channelPayments = supabase
-      .channel(`user_payments_sub_${user.id}_${Math.random().toString(36).slice(2, 9)}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'payments', filter: `user_id=eq.${user.id}` },
-        () => {
-          fetchSubscription();
-        }
-      )
-      .subscribe();
-
-    return () => { 
-      supabase.removeChannel(channelSub); 
-      supabase.removeChannel(channelProfile);
-      supabase.removeChannel(channelPayments);
-    };
-  }, [user, profile, fetchSubscription]);
+  useEffect(() => {
+    if (showRenewalDialog) {
+      const defaultPlan = plans.find(p => p.plan_type === 'k10_single') || plans[0] || DEFAULT_FALLBACK_PLANS[0];
+      if (defaultPlan) {
+        openPayDialog(defaultPlan);
+      }
+      setShowRenewalDialog(false);
+    }
+  }, [showRenewalDialog, plans]);
 
   // Create a stylized graphic cover if thumbnail extraction fails or user has no cover image
   const generateDefaultCover = useCallback((itemTitle: string, itemArtist: string, type: 'song' | 'video'): string => {
@@ -330,7 +330,7 @@ export default function UploadPage() {
           setPaymentStatus(data.status as PaymentStatus);
           if (data.status === 'completed' || data.status === 'successful') {
             await applyPaymentBenefits(paymentId).catch(() => {});
-            await fetchSubscription();
+            await checkSubscription();
             setPayDialog(false);
             
             const isAllPlatforms = (selectedPlan?.plan_type === 'k100_weekly' ||
@@ -360,7 +360,9 @@ export default function UploadPage() {
   const openPayDialog = (plan: UploadPlan) => {
     setSelectedPlan(plan);
     setPayMethod('mobile_money');
-    setPhone('');
+    const rawPhone = profile?.phone || (user as any)?.phone || '';
+    const cleanPhone = rawPhone.replace(/\D/g, '');
+    setPhone(cleanPhone.startsWith('0') ? '260' + cleanPhone.slice(1) : cleanPhone);
     setPaymentStatus(null);
     setActivePaymentId(null);
     setPaymentUrl(null);
@@ -379,8 +381,8 @@ export default function UploadPage() {
         description: `ZedVevo ${selectedPlan.name} Upload Plan`,
         payment_type: 'plan',
         plan_id: selectedPlan.id,
-        user_id: user!.id,
-        metadata: { user_id: user!.id, plan_type: selectedPlan.plan_type, plan_id: selectedPlan.id }
+        user_id: user?.id || '',
+        metadata: { user_id: user?.id || '', plan_type: selectedPlan.plan_type, plan_id: selectedPlan.id }
       });
 
       if (!result.success) {
@@ -395,7 +397,7 @@ export default function UploadPage() {
         if (result.payment_id) {
           await applyPaymentBenefits(result.payment_id).catch(() => {});
         }
-        await fetchSubscription();
+        await checkSubscription();
         setPayDialog(false);
         setPayLoading(false);
         toast.success('Payment approved! Your upload plan is now active.');
@@ -414,7 +416,7 @@ export default function UploadPage() {
           if (result.payment_id) {
             await applyPaymentBenefits(result.payment_id).catch(() => {});
           }
-          await fetchSubscription();
+          await checkSubscription();
           setPayDialog(false);
           toast.success('Lipila confirmed payment! Your upload plan is now active.');
         } else if (statusRes.status === 'failed') {
@@ -424,7 +426,7 @@ export default function UploadPage() {
         setPayLoading(false);
       });
     } catch (e: unknown) {
-      console.error('[payment] unexpected error:', e);
+      console.warn('[payment] unexpected error:', e);
       toast.error((e as Error).message || 'Payment failed. Please try again.');
       setPaymentStatus('failed');
       setPayLoading(false);
@@ -433,13 +435,19 @@ export default function UploadPage() {
 
   const handleUpload = async () => {
     if (!title || !artistName || !file) { toast.error('Fill in all required fields'); return; }
-    const isAdmin = (profile?.role === 'admin' || profile?.role === 'super_admin');
-    const hasUploadAccess = profile?.upload_access === 'active' || (profile?.is_artist && profile?.upload_access !== 'inactive');
-    const hasValidSub = !!subscription && subscription.is_active && !subscription.consumed;
-    if (!isAdmin && !hasUploadAccess && !hasValidSub) { 
-      toast.error('No active upload plan or your previous upload token has expired.'); 
-      return; 
+    
+    const allowed = await interceptUpload(
+      () => {},
+      () => {
+        const singlePlan = plans.find(p => p.plan_type === 'k10_single') || plans[0] || DEFAULT_FALLBACK_PLANS[0];
+        openPayDialog(singlePlan);
+      }
+    );
+
+    if (!allowed) {
+      return;
     }
+
     setUploading(true);
     setUploadProgress(0);
     try {
@@ -533,16 +541,14 @@ export default function UploadPage() {
 
         if (isOneTime) {
           // Token consumed: set consumed = true, is_active = false, status = 'inactive'
-          if (!subscription.id.startsWith('pay-') && !subscription.id.startsWith('profile-')) {
-            await supabase.from('user_subscriptions')
-              .update({ 
-                uploads_used: newUsed, 
-                consumed: true, 
-                is_active: false, 
-                status: 'inactive' 
-              })
-              .eq('id', subscription.id);
-          }
+          await supabase.from('user_subscriptions')
+            .update({ 
+              uploads_used: newUsed, 
+              consumed: true, 
+              is_active: false, 
+              status: 'inactive' 
+            })
+            .eq('user_id', user.id);
 
           await supabase.from('artist_subscriptions')
             .update({ 
@@ -556,8 +562,7 @@ export default function UploadPage() {
             .update({ upload_access: 'inactive' })
             .eq('id', user.id);
 
-          setSubscription(null);
-          setCurrentProfile(prev => prev ? { ...prev, upload_access: 'inactive' } : null);
+          await checkSubscription();
 
           // Notify user their single upload token has been consumed and expired
           await supabase.from('notifications').insert({
@@ -584,21 +589,14 @@ export default function UploadPage() {
           await supabase.from('artist_subscriptions')
             .update({ upload_count: newUsed })
             .eq('user_id', user.id);
-
-          if (hasReachedLimit) {
-            setSubscription(null);
-            setCurrentProfile(prev => prev ? { ...prev, upload_access: 'inactive' } : null);
-          } else {
-            setSubscription(prev => prev ? { ...prev, uploads_used: newUsed } : null);
-          }
         }
-      } else if (!isAdmin && hasUploadAccess) {
+        await checkSubscription();
+      } else if (!isAdmin) {
         // Expire direct upload access after single upload confirmation
         await supabase.from('profiles')
           .update({ upload_access: 'inactive' })
           .eq('id', user.id);
-        setCurrentProfile(prev => prev ? { ...prev, upload_access: 'inactive' } : null);
-        setSubscription(null);
+        await checkSubscription();
       }
 
       setUploadProgress(100);
@@ -614,11 +612,17 @@ export default function UploadPage() {
     } finally { setUploading(false); }
   };
 
-  const effectiveProf = currentProfile || profile;
-  const isAdmin = (effectiveProf?.role === 'admin' || effectiveProf?.role === 'super_admin');
-  const hasUploadAccess = effectiveProf?.upload_access === 'active' || (effectiveProf?.is_artist && effectiveProf?.upload_access !== 'inactive');
-  const hasValidSub = !!subscription && subscription.is_active && !subscription.consumed && (subscription.uploads_allowed === null || (subscription.uploads_used || 0) < subscription.uploads_allowed);
-  const canUpload = isAdmin || hasUploadAccess || hasValidSub;
+  const isAdmin = (profile?.role === 'admin' || profile?.role === 'super_admin');
+  const hasValidSub = !!subscription && 
+                      subscription.is_active && 
+                      !subscription.consumed && 
+                      subscription.status !== 'expired' && 
+                      subscription.status !== 'inactive' && 
+                      (subscription.expires_at == null || new Date(subscription.expires_at) > new Date()) && 
+                      (subscription.uploads_allowed === null || (subscription.uploads_used || 0) < subscription.uploads_allowed);
+
+  // Free upload access ONLY for Admin and Super Admin accounts. Non-admin artists strictly require an active, non-expired subscription.
+  const canUpload = isAdmin || Boolean(guardCanUpload && hasValidSub);
 
   // 1. Strict check: is this a 1 song / single upload plan?
   const isOneSongUploadPlan = Boolean(
@@ -638,7 +642,7 @@ export default function UploadPage() {
     subscription?.upload_plans?.name?.toLowerCase().includes('1 song') ||
     subscription?.upload_plans?.name?.toLowerCase().includes('daily') ||
     subscription?.upload_plans?.name?.toLowerCase().includes('basic') ||
-    (!subscription && (hasUploadAccess || !isAdmin))
+    (!subscription && !isAdmin)
   );
 
   // 2. Multi-platform distribution (FreshTunes) is ONLY unlocked when user explicitly holds an active K100/K300 plan.
@@ -665,132 +669,223 @@ export default function UploadPage() {
     setShowFreshTunesModal(true);
   }, [isMultiPlatformPlanOrAdmin]);
 
-  if (!user) return <Navigate to="/login" replace />;
-
-  if (loading) return (
+  if (authLoading || loading) return (
     <div className="min-h-screen pt-20 flex items-center justify-center">
       <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
     </div>
   );
 
+  if (!user) return <Navigate to="/login" replace />;
+
   return (
     <div className="min-h-screen pt-20 pb-24 lg:pb-6">
-      <div className="max-w-2xl mx-auto px-4 py-6">
+      <div className={`mx-auto px-4 py-6 transition-all duration-300 ${canUpload ? 'max-w-2xl' : 'max-w-5xl'}`}>
         <BackToHome />
         <div className="mb-6">
-          <h1 className="text-2xl font-bold mb-1">Upload Content</h1>
-          <p className="text-sm text-muted-foreground">Share your music and videos with Zambia</p>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight mb-1 text-foreground">
+            {canUpload ? 'Upload Content' : 'Choose an Artist Upload Plan'}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {canUpload 
+              ? 'Share your music and videos with Zambia and worldwide streaming platforms' 
+              : 'Select your upload plan below to unlock uploading immediately. Pay securely via Lipila Mobile Money or Card.'}
+          </p>
         </div>
 
-        {/* Active plan banner — displays all registered artist details */}
-        {canUpload && (
-          <Card className="mb-6 border-accent/30 bg-accent/5">
-            <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3 px-4">
-              <div className="flex items-start gap-3">
-                <UserAvatar 
-                  src={profile?.avatar_url} 
-                  name={artistName || registeredInfo?.stageName || registeredInfo?.displayName || registeredInfo?.fullName || registeredInfo?.username || 'Artist'} 
-                  size="md"
-                  className="mt-0.5"
-                />
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-semibold text-foreground">
-                      {subscription?.upload_plans?.name || (profile?.role === 'artist' ? 'Artist Plan Active' : 'Upload Access Active')}
-                    </p>
-                    <Badge variant="outline" className="text-[10px] bg-accent/15 text-accent border-accent/40 font-semibold uppercase tracking-wider">
-                      Artist Active
-                    </Badge>
-                    {isMultiPlatformPlanOrAdmin && (
-                      <Badge className="text-[10px] bg-emerald-500/15 text-emerald-500 border border-emerald-500/40 font-semibold uppercase tracking-wider flex items-center gap-1">
-                        <Sparkles className="h-2.5 w-2.5" /> All Streaming Unlocked
-                      </Badge>
-                    )}
-                  </div>
-                  
-                  {/* Show registered details clearly */}
-                  <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span>
-                      Artist Name:{' '}
-                      <strong className="text-foreground font-semibold">
-                        {artistName || registeredInfo?.stageName || registeredInfo?.displayName || registeredInfo?.fullName || registeredInfo?.username || 'Registered Artist'}
-                      </strong>
-                    </span>
-                    {registeredInfo?.username && (
-                      <span>Username: <strong className="text-foreground">@{registeredInfo.username}</strong></span>
-                    )}
-                    {registeredInfo?.email && (
-                      <span>Email: <strong className="text-foreground">{registeredInfo.email}</strong></span>
-                    )}
-                    {registeredInfo?.phone && (
-                      <span>Phone: <strong className="text-foreground">{registeredInfo.phone}</strong></span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-accent font-medium">
-                    ✓ Your artist account and upload plan are active. You can upload content now!
+        {/* Artist Status Header Banner */}
+        <Card className={`mb-6 border ${canUpload ? 'border-accent/30 bg-accent/5' : 'border-amber-500/30 bg-amber-500/5'}`}>
+          <CardContent className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3 px-4">
+            <div className="flex items-start gap-3">
+              <UserAvatar 
+                src={profile?.avatar_url} 
+                name={artistName || registeredInfo?.stageName || registeredInfo?.displayName || registeredInfo?.fullName || registeredInfo?.username || 'Artist'} 
+                size="md"
+                className="mt-0.5"
+              />
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm font-semibold text-foreground">
+                    {isAdmin ? 'Admin Upload Privilege Active' : (subscription?.upload_plans?.name || (canUpload ? 'Artist Plan Active' : 'Payment Required to Publish'))}
                   </p>
+                  <Badge variant="outline" className={`text-[10px] font-semibold uppercase tracking-wider ${canUpload ? 'bg-accent/15 text-accent border-accent/40' : 'bg-amber-500/15 text-amber-500 border-amber-500/40'}`}>
+                    {isAdmin ? 'Admin' : canUpload ? 'Active Plan' : 'Plan Required'}
+                  </Badge>
+                  {isMultiPlatformPlanOrAdmin && (
+                    <Badge className="text-[10px] bg-emerald-500/15 text-emerald-500 border border-emerald-500/40 font-semibold uppercase tracking-wider flex items-center gap-1">
+                      <Sparkles className="h-2.5 w-2.5" /> All Streaming Unlocked
+                    </Badge>
+                  )}
                 </div>
+                
+                {/* Registered details */}
+                <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span>
+                    Artist Name:{' '}
+                    <strong className="text-foreground font-semibold">
+                      {artistName || registeredInfo?.stageName || registeredInfo?.displayName || registeredInfo?.fullName || registeredInfo?.username || 'Registered Artist'}
+                    </strong>
+                  </span>
+                  {registeredInfo?.username && (
+                    <span>Username: <strong className="text-foreground">@{registeredInfo.username}</strong></span>
+                  )}
+                  {registeredInfo?.email && (
+                    <span>Email: <strong className="text-foreground">{registeredInfo.email}</strong></span>
+                  )}
+                </div>
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  {canUpload
+                    ? '✓ Your upload plan is active. You can publish content immediately!'
+                    : 'ℹ Your artist upload plan has expired or no active subscription was found. Select any plan below to unlock uploading.'}
+                </p>
               </div>
+            </div>
 
-              <div className="flex flex-col sm:items-end gap-2 shrink-0">
-                {subscription && (
-                  <div className="text-left sm:text-right">
-                    <span className="text-xs font-semibold text-foreground block">
-                      {subscription.plan_type === 'k10_single' || subscription.uploads_allowed === 1
-                        ? '1 of 1 Upload Active'
-                        : 'Unlimited Uploads'}
+            <div className="flex flex-col sm:items-end gap-2 shrink-0">
+              {canUpload && subscription && (
+                <div className="text-left sm:text-right">
+                  <span className="text-xs font-semibold text-foreground block">
+                    {subscription.plan_type === 'k10_single' || subscription.uploads_allowed === 1
+                      ? '1 of 1 Upload Active'
+                      : 'Unlimited Uploads'}
+                  </span>
+                  {subscription.expires_at && (
+                    <span className="text-[10px] text-muted-foreground block">
+                      Expires {formatDate(subscription.expires_at)}
                     </span>
-                    {subscription.expires_at && (
-                      <span className="text-[10px] text-muted-foreground block">
-                        Expires {formatDate(subscription.expires_at)}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {isMultiPlatformPlanOrAdmin && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={handleOpenFreshTunes}
-                    className="h-7 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1.5 shadow-xs"
-                  >
-                    <Globe className="h-3.5 w-3.5" />
-                    <span>All Streaming Upload</span>
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Plans grid — ONLY shown when no active plan or after plan expires */}
-        {!canUpload && !isAdmin && (
-          <div className="space-y-4 mb-6">
-            <h2 className="text-base font-semibold">Choose an Upload Plan</h2>
-            <p className="text-xs text-muted-foreground -mt-2 mb-3">
-              Your previous upload token has expired or you do not have an active upload plan. Choose a plan to unlock uploads.
-            </p>
-            <div className="grid gap-3">
-              {plans.map(plan => (
-                <button
-                  key={plan.id}
-                  onClick={() => openPayDialog(plan)}
-                  className="text-left w-full border border-border rounded-lg p-4 transition-colors hover:border-accent focus:outline-none focus:border-accent"
+                  )}
+                </div>
+              )}
+              {isMultiPlatformPlanOrAdmin && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleOpenFreshTunes}
+                  className="h-7 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1.5 shadow-xs"
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold">{plan.name}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{plan.description}</p>
-                    </div>
-                    <p className="text-xl font-bold text-accent shrink-0 ml-4">{formatCurrency(plan.price)}</p>
-                  </div>
-                </button>
-              ))}
+                  <Globe className="h-3.5 w-3.5" />
+                  <span>All Streaming Upload</span>
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Real Renew / Select Plan Section — Shown when plan is expired or inactive */}
+        {!canUpload && !isAdmin && (
+          <div className="space-y-6 mb-8">
+            <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-foreground space-y-1.5">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-amber-500 shrink-0" />
+                <h2 className="text-base font-bold text-foreground">
+                  Plan Expired or Required — Select Plan to Unlock Immediate Uploads
+                </h2>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed pl-7">
+                Your artist upload plan has expired or has been consumed. Choose from the available plans below and pay via Lipila Mobile Money (MTN, Airtel, Zamtel) or Card. Once payment is confirmed, the upload form unlocks instantly right here.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-foreground">Available Artist Plans</h3>
+                <p className="text-xs text-muted-foreground">Select a plan card to pay via Lipila Mobile Money or Card</p>
+              </div>
+              <Button asChild variant="outline" size="sm" className="text-xs gap-1">
+                <Link to="/renew-plan">
+                  <span>Open Full Renew Page</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </Link>
+              </Button>
+            </div>
+
+            {/* Plans Grid Cards (4 columns on lg) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {(plans.length > 0 ? plans : DEFAULT_FALLBACK_PLANS).map((plan) => {
+                const isSingle = plan.plan_type === 'k10_single' || plan.price <= 15;
+                const isWeekly = plan.plan_type === 'k100_weekly' || (plan.price >= 80 && plan.price <= 110 && !plan.name?.toLowerCase().includes('fresh'));
+                const isFreshTunes = plan.plan_type === 'k120_freshtunes' || plan.price === 120 || plan.name?.toLowerCase().includes('fresh');
+                const isAnnual = plan.plan_type === 'k300_yearly' || plan.price >= 250;
+
+                return (
+                  <Card
+                    key={plan.id}
+                    className={`relative flex flex-col justify-between transition-all duration-200 border-border/80 hover:border-primary/60 bg-card/80 hover:bg-card shadow-sm hover:shadow-md ${
+                      isWeekly ? 'border-primary/50 ring-2 ring-primary/20 bg-primary/5' : ''
+                    }`}
+                  >
+                    {isWeekly && (
+                      <div className="absolute -top-2.5 left-1/2 -translate-x-1/2">
+                        <Badge className="bg-primary text-primary-foreground text-[10px] font-bold uppercase py-0 px-2 shadow-xs">
+                          Most Popular 🔥
+                        </Badge>
+                      </div>
+                    )}
+                    {isFreshTunes && (
+                      <div className="absolute -top-2.5 left-1/2 -translate-x-1/2">
+                        <Badge className="bg-emerald-600 text-white text-[10px] font-bold uppercase py-0 px-2 shadow-xs">
+                          Global DSPs 🌍
+                        </Badge>
+                      </div>
+                    )}
+                    {isAnnual && (
+                      <div className="absolute -top-2.5 left-1/2 -translate-x-1/2">
+                        <Badge className="bg-amber-500 text-black text-[10px] font-bold uppercase py-0 px-2 shadow-xs">
+                          Best Value 👑
+                        </Badge>
+                      </div>
+                    )}
+
+                    <CardHeader className="p-4 pb-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                          {isSingle ? 'Single Release' : isWeekly ? 'Creator Pass' : isFreshTunes ? 'DSP Portal' : 'Pro VIP'}
+                        </span>
+                        <span className="text-xs font-mono font-semibold text-muted-foreground">
+                          {isSingle ? '1 Upload' : isWeekly ? '7 Days' : isFreshTunes ? '1 Year' : '365 Days'}
+                        </span>
+                      </div>
+                      <CardTitle className="text-base font-bold text-foreground line-clamp-1">{plan.name}</CardTitle>
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{plan.description}</p>
+                      <div className="pt-2">
+                        <span className="text-2xl font-black text-foreground">{formatCurrency(plan.price)}</span>
+                        <span className="text-[11px] text-muted-foreground ml-1">
+                          /{isSingle ? '1 release' : isWeekly ? '7 days' : '1 year'}
+                        </span>
+                      </div>
+                    </CardHeader>
+
+                    <CardContent className="p-4 pt-2 space-y-3">
+                      <ul className="space-y-1.5 text-xs text-muted-foreground border-t border-border/40 pt-2.5">
+                        <li className="flex items-center gap-1.5 text-foreground/90">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          <span>{isSingle ? '1 Song or Video upload' : isFreshTunes ? 'Spotify & Apple Music' : 'Unlimited uploads'}</span>
+                        </li>
+                        <li className="flex items-center gap-1.5 text-foreground/90">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          <span>{isFreshTunes ? '100% Royalties Kept' : 'Instant Live Publishing'}</span>
+                        </li>
+                        <li className="flex items-center gap-1.5 text-foreground/90">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          <span>{isAnnual ? 'Verified Blue Badge' : isWeekly ? 'FreshTunes Distribution' : 'Play & Download Analytics'}</span>
+                        </li>
+                      </ul>
+
+                      <Button
+                        type="button"
+                        onClick={() => openPayDialog(plan)}
+                        className="w-full font-bold text-xs h-9 bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs"
+                      >
+                        Select Plan • {formatCurrency(plan.price)}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* Upload form — shown when admin or has active sub */}
+        {/* Upload form — shown ONLY when admin or has active paid plan */}
         {canUpload && (
           <Card>
             <CardHeader>
@@ -1075,7 +1170,7 @@ export default function UploadPage() {
                     amount={selectedPlan?.price || 0}
                     paymentType="plan"
                     metadata={{
-                      user_id: user!.id,
+                      user_id: user?.id || '',
                       plan_id: selectedPlan?.id,
                       plan_type: selectedPlan?.plan_type,
                     }}
@@ -1090,14 +1185,10 @@ export default function UploadPage() {
                         selectedPlan?.plan_type !== 'k10_single' &&
                         (selectedPlan?.price || 0) >= 100;
 
-                      if (user?.id) {
-                        try {
-                          const sub = await getUserActiveSubscription(user.id);
-                          setSubscription(sub);
-                        } catch {
-                          // Ignore fetch error
-                        }
+                      if (paymentId) {
+                        await applyPaymentBenefits(paymentId).catch(() => {});
                       }
+                      await checkSubscription();
 
                       if (isAllPlatforms) {
                         setShowFreshTunesModal(true);

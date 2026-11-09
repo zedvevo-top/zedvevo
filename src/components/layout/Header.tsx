@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, Music2, Video, Trophy, Upload, Library, User, LayoutDashboard, LogOut, LogIn, TrendingUp, Download, Heart, Settings } from 'lucide-react';
+import { Menu, X, Music2, Video, Trophy, Upload, Library, User, LayoutDashboard, LogOut, LogIn, TrendingUp, Download, Heart, Settings, Users } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { UserAvatar } from '@/components/ui/avatar';
@@ -12,7 +12,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useUserProfile } from '@/hooks/useUserProfile';
 import CDLogo from '@/components/ui/CDLogo';
 import SearchBar from '@/components/search/SearchBar';
-import NotificationBell from '@/components/notifications/NotificationBell';
 import DonationDialog from '@/components/donation/DonationDialog';
 import InstallAppButton from '@/components/layout/InstallAppButton';
 import ThemeSelector from '@/components/common/ThemeSelector';
@@ -22,6 +21,7 @@ const navLinks = [
   { to: '/', label: 'Home' },
   { to: '/music', label: 'Music', icon: Music2 },
   { to: '/videos', label: 'Videos', icon: Video },
+  { to: '/artists', label: 'Artists', icon: Users },
   { to: '/awards', label: 'Awards', icon: Trophy },
   { to: '/trending', label: 'Trending', icon: TrendingUp },
   { to: '/upload', label: 'Upload', icon: Upload },
@@ -144,9 +144,6 @@ export default function Header() {
             {/* Theme switcher */}
             <ThemeSelector />
 
-            {/* Notification bell */}
-            <NotificationBell />
-
             {user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -260,6 +257,15 @@ export default function Header() {
                       className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium bg-accent text-accent-foreground mt-2"
                     >
                       <LogIn className="h-4 w-4 shrink-0" />Sign In
+                    </Link>
+                  )}
+                  {user && (
+                    <Link
+                      to="/profile"
+                      onClick={() => setMobileOpen(false)}
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted"
+                    >
+                      <User className="h-4 w-4 shrink-0 text-primary" />My Profile
                     </Link>
                   )}
                   {user && (

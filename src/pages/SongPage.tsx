@@ -3,7 +3,7 @@ import { motion } from 'motion/react'
 import { Play, Pause, Heart, Share2, Download, MoreHorizontal, Clock, User } from 'lucide-react'
 import { Helmet } from 'react-helmet-async'
 import { useSong, useArtistSongs, useFavoriteSong } from '@/hooks'
-import { usePlayerStore } from '@/store'
+import { usePlayer } from '@/contexts/PlayerContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -12,18 +12,20 @@ import { UserAvatar } from '@/components/ui/avatar'
 import { formatDuration, formatNumber, formatDate } from '@/utils'
 import { useToast } from '@/components/ui/use-toast'
 import AdBanner from '@/components/ads/AdBanner'
+import ZedVevoWatermark from '@/components/common/ZedVevoWatermark'
+import { triggerInstantSongDownload } from '@/lib/downloadHelper'
 
 export default function SongPage() {
   const { slug } = useParams<{ slug: string }>()
   const { data: song, isLoading, error } = useSong(slug!)
   const { data: relatedSongs } = useArtistSongs(song?.artist_id || '')
-  const { playSong, currentSong, isPlaying, setIsPlaying } = usePlayerStore()
+  const { playSong, currentSong, playing, togglePlay } = usePlayer()
   const { toast } = useToast()
   const isFavorite = false
 
   const handlePlay = () => {
     if (currentSong?.id === song?.id) {
-      setIsPlaying(!isPlaying)
+      togglePlay()
     } else if (song) {
       playSong(song, relatedSongs || [])
     }
@@ -135,13 +137,14 @@ export default function SongPage() {
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="relative w-48 h-48 md:w-64 md:h-64 flex-shrink-0 mx-auto md:mx-0"
+              className="relative w-48 h-48 md:w-64 md:h-64 flex-shrink-0 mx-auto md:mx-0 overflow-hidden rounded-lg"
             >
               <img
-                src={song.cover_url || '/placeholder.jpg'}
+                src={song.cover_url || '/app-icon.png'}
                 alt={song.title}
                 className="w-full h-full object-cover rounded-lg shadow-2xl"
               />
+              <ZedVevoWatermark size="sm" />
               {song.access === 'premium' && (
                 <Badge variant="default" className="absolute top-4 right-4 bg-amber-500 text-black">
                   Premium
@@ -192,7 +195,7 @@ export default function SongPage() {
 
               <div className="flex items-center justify-center md:justify-start gap-3">
                 <Button onClick={handlePlay} size="lg">
-                  {currentSong?.id === song.id && isPlaying ? (
+                  {currentSong?.id === song.id && playing ? (
                     <>
                       <Pause className="mr-2 h-5 w-5" /> Pause
                     </>
@@ -210,7 +213,7 @@ export default function SongPage() {
                   <Share2 className="mr-2 h-5 w-5" />
                   Share
                 </Button>
-                <Button variant="outline">
+                <Button variant="outline" onClick={() => triggerInstantSongDownload(song, undefined, 'song_page')}>
                   <Download className="mr-2 h-5 w-5" />
                   Download
                 </Button>

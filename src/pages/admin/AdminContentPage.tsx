@@ -13,6 +13,8 @@ import { toast } from 'sonner';
 import { getSongs, getVideos, approveContent, rejectContent, setTrending, deleteSong, deleteVideo, setVideoDownloadsEnabled } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import type { Song, Video as VideoType } from '@/types/index';
+import AdminVideoTagsManager from '@/components/admin/AdminVideoTagsManager';
+import AdminVideoAdPlacements from '@/components/admin/AdminVideoAdPlacements';
 
 type Status = 'all' | 'pending' | 'approved' | 'rejected';
 
@@ -206,9 +208,13 @@ export default function AdminContentPage() {
         <TabsList className="h-8">
           <TabsTrigger value="songs" className="text-xs">Songs ({songs.length})</TabsTrigger>
           <TabsTrigger value="videos" className="text-xs">Videos ({videos.length})</TabsTrigger>
+          <TabsTrigger value="tags" className="text-xs">Video Tags & Animations</TabsTrigger>
+          <TabsTrigger value="ad-placements" className="text-xs">Video Ad Placements</TabsTrigger>
         </TabsList>
         <TabsContent value="songs" className="mt-4"><SongsTable /></TabsContent>
         <TabsContent value="videos" className="mt-4"><VideosTable /></TabsContent>
+        <TabsContent value="tags" className="mt-4"><AdminVideoTagsManager /></TabsContent>
+        <TabsContent value="ad-placements" className="mt-4"><AdminVideoAdPlacements /></TabsContent>
       </Tabs>
     </div>
   );

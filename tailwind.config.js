@@ -24,6 +24,12 @@ export default {
         },
         extend: {
             colors: {
+                electric: {
+                    DEFAULT: '#00D4FF',
+                    blue: '#00D4FF'
+                },
+                'electric-blue': '#00D4FF',
+                'dark-gray': '#18181b',
                 border: 'hsl(var(--border))',
                 borderColor: {
                     border: 'hsl(var(--border))'

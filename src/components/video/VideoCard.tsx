@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import type { Video } from '@/types/index';
 import { useAuth } from '@/contexts/AuthContext';
 import { toggleLike, toggleSave, recordDownload, incrementVideoDownloadCount, getLikedContentIds } from '@/lib/api';
+import { triggerInstantVideoDownload } from '@/lib/downloadHelper';
 import { formatDuration } from '@/lib/utils';
 import ShareSheet from '@/components/common/ShareSheet';
 import ZedVevoWatermark from '@/components/common/ZedVevoWatermark';
@@ -70,34 +71,15 @@ export default function VideoCard({ video, onPlay, active = false }: VideoCardPr
 
   const handleDownload = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!user) { toast.error('Sign in to download videos'); return; }
-    if (!video.downloads_enabled) { toast.error('Downloads are not enabled for this video'); return; }
     if (downloading) return;
     setDownloading(true);
     try {
-      const a = document.createElement('a');
-      a.href = video.file_url;
-      a.download = `${video.title} - ${video.artist_name}.mp4`;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      await Promise.all([
-        incrementVideoDownloadCount(video.id),
-        recordDownload({
-          user_id: user.id,
-          content_id: video.id,
-          content_type: 'video',
-          file_url: video.file_url,
-          title: video.title,
-          artist_name: video.artist_name,
-          cover_url: video.thumbnail_url,
-        }),
-      ]);
-      toast.success('Download started');
-    } catch { toast.error('Download failed'); }
-    finally { setDownloading(false); }
+      await triggerInstantVideoDownload(video, user?.id, 'video_card');
+    } catch {
+      toast.error('Download failed');
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
@@ -111,7 +93,14 @@ export default function VideoCard({ video, onPlay, active = false }: VideoCardPr
         <ZedVevoWatermark size="sm" />
 
         {video.thumbnail_url ? (
-          <img src={video.thumbnail_url} alt={video.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+          <img
+            src={video.thumbnail_url}
+            alt={video.title}
+            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+            onError={(e) => {
+              e.currentTarget.src = 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=800&q=80';
+            }}
+          />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-muted">
             <VideoIcon className="h-12 w-12 text-muted-foreground/40" />

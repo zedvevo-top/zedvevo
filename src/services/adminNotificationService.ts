@@ -206,46 +206,60 @@ export function startAdminNotificationMonitor(isAdmin: boolean) {
   // 1. Supabase Realtime Channels for Admin
   const channel = supabase
     .channel('admin-comprehensive-activity-popups')
-    // Song uploads
+    // Song uploads & approvals/rejections
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'songs' },
+      { event: '*', schema: 'public', table: 'songs' },
       (payload) => {
         const song = payload.new as any;
         if (!song) return;
         lastKnownSongId = song.id;
-        showAdminPopNotification('🎵 New Song Uploaded!', {
-          body: `"${song.title || 'Untitled'}" by ${song.artist_name || 'Artist'} was submitted.`,
-          tag: `song-${song.id}`,
-        });
-        toast.info(`🎵 New song uploaded: "${song.title}" by ${song.artist_name}`);
+        if (payload.eventType === 'INSERT') {
+          showAdminPopNotification('🎵 New Song Uploaded!', {
+            body: `"${song.title || 'Untitled'}" by ${song.artist_name || 'Artist'} was submitted.`,
+            tag: `song-${song.id}`,
+          });
+          toast.info(`🎵 New song uploaded: "${song.title}" by ${song.artist_name}`);
+        } else if (payload.eventType === 'UPDATE' && payload.old && (payload.old as any).status !== song.status) {
+          showAdminPopNotification(`🎵 Song ${song.status === 'approved' ? 'Approved' : 'Updated'}`, {
+            body: `"${song.title}" status changed to ${song.status}.`,
+            tag: `song-status-${song.id}`,
+          });
+        }
       }
     )
-    // Video uploads
+    // Video uploads & approvals/rejections
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'videos' },
+      { event: '*', schema: 'public', table: 'videos' },
       (payload) => {
         const video = payload.new as any;
         if (!video) return;
-        showAdminPopNotification('🎬 New Video Uploaded!', {
-          body: `"${video.title || 'Untitled'}" by ${video.artist_name || 'Artist'} was uploaded.`,
-          tag: `video-${video.id}`,
-        });
-        toast.info(`🎬 New video uploaded: "${video.title}"`);
+        if (payload.eventType === 'INSERT') {
+          showAdminPopNotification('🎬 New Video Uploaded!', {
+            body: `"${video.title || 'Untitled'}" by ${video.artist_name || 'Artist'} was uploaded.`,
+            tag: `video-${video.id}`,
+          });
+          toast.info(`🎬 New video uploaded: "${video.title}"`);
+        } else if (payload.eventType === 'UPDATE' && payload.old && (payload.old as any).status !== video.status) {
+          showAdminPopNotification(`🎬 Video ${video.status === 'approved' ? 'Approved' : 'Updated'}`, {
+            body: `"${video.title}" status changed to ${video.status}.`,
+            tag: `video-status-${video.id}`,
+          });
+        }
       }
     )
     // New Users & Artists
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'users' },
+      { event: 'INSERT', schema: 'public', table: 'profiles' },
       (payload) => {
         const u = payload.new as any;
         if (!u) return;
         lastKnownUserId = u.id;
         const isArtist = u.is_artist || u.role === 'artist';
         const title = isArtist ? '🎸 New Artist Registered!' : '👤 New User Registered!';
-        const body = `${u.full_name || u.username || u.email || 'A new user'} joined ZedVevo.`;
+        const body = `${u.display_name || u.full_name || u.username || u.email || 'A new user'} joined ZedVevo.`;
         showAdminPopNotification(title, {
           body,
           tag: `user-${u.id}`,
@@ -253,10 +267,10 @@ export function startAdminNotificationMonitor(isAdmin: boolean) {
         toast.success(body);
       }
     )
-    // Every Payment
+    // Every Payment (new payments + payment confirmations/rejections)
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'payments' },
+      { event: '*', schema: 'public', table: 'payments' },
       (payload) => {
         const p = payload.new as any;
         if (!p) return;
@@ -264,44 +278,86 @@ export function startAdminNotificationMonitor(isAdmin: boolean) {
         const amount = p.amount;
         const type = p.payment_type || 'transaction';
         const status = p.status || 'completed';
-        const title = status === 'completed' || status === 'successful' ? `💰 New Payment Received!` : `⚠️ Payment Notice`;
-        const body = `ZMW ${amount} (${type}) transaction status: ${status}.`;
-        showAdminPopNotification(title, {
-          body,
-          tag: `payment-${p.id}`,
-        });
-        toast.info(body);
+
+        if (payload.eventType === 'INSERT') {
+          const title = `💰 New Payment Initiated: ZMW ${amount}`;
+          const body = `${type} payment (${status}) from phone ${p.phone_number || 'N/A'}`;
+          showAdminPopNotification(title, {
+            body,
+            tag: `payment-${p.id}`,
+          });
+          toast.info(body);
+        } else if (payload.eventType === 'UPDATE' && payload.old && (payload.old as any).status !== status) {
+          const isSuccess = status === 'completed' || status === 'successful';
+          const title = isSuccess ? '✅ Payment Confirmed!' : `⚠️ Payment ${status.toUpperCase()}`;
+          const body = `ZMW ${amount} (${type}) payment marked as ${status}.`;
+          showAdminPopNotification(title, {
+            body,
+            tag: `payment-status-${p.id}`,
+          });
+          if (isSuccess) toast.success(body);
+          else toast.error(body);
+        }
       }
     )
-    // Award Nominees
+    // Award Nominees (submissions and approvals/rejections)
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'nominees' },
+      { event: '*', schema: 'public', table: 'nominees' },
       (payload) => {
         const nominee = payload.new as any;
         if (!nominee) return;
         lastKnownNomineeId = nominee.id;
-        showAdminPopNotification('🏆 New Award Nominee Submitted!', {
-          body: `${nominee.name || 'Nominee'} was entered for "${nominee.song_title || 'Award Entry'}"`,
-          tag: `nominee-${nominee.id}`,
-        });
-        toast.info(`🏆 New nominee submitted: ${nominee.name}`);
+        if (payload.eventType === 'INSERT') {
+          showAdminPopNotification('🏆 New Award Nominee Submitted!', {
+            body: `${nominee.name || 'Nominee'} was entered for "${nominee.song_title || 'Award Entry'}"`,
+            tag: `nominee-${nominee.id}`,
+          });
+          toast.info(`🏆 New nominee submitted: ${nominee.name}`);
+        } else if (payload.eventType === 'UPDATE' && payload.old && (payload.old as any).nomination_status !== nominee.nomination_status) {
+          showAdminPopNotification(`🏆 Nominee ${nominee.nomination_status === 'approved' ? 'Approved' : 'Status Updated'}`, {
+            body: `${nominee.name} nomination status is now ${nominee.nomination_status}.`,
+            tag: `nominee-status-${nominee.id}`,
+          });
+        }
       }
     )
     // Nominee Votes
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'votes' },
+      { event: '*', schema: 'public', table: 'votes' },
       (payload) => {
         const vote = payload.new as any;
         if (!vote) return;
         lastKnownVoteId = vote.id;
         const count = vote.vote_count || 1;
-        showAdminPopNotification('🗳️ New Nominee Vote Cast!', {
-          body: `${count} vote(s) recorded for award candidate.`,
-          tag: `vote-${vote.id}`,
-        });
-        toast.success(`🗳️ ${count} vote(s) cast for nominee!`);
+        if (payload.eventType === 'INSERT') {
+          showAdminPopNotification('🗳️ New Nominee Vote Cast!', {
+            body: `${count} vote(s) recorded for award candidate.`,
+            tag: `vote-${vote.id}`,
+          });
+          toast.success(`🗳️ ${count} vote(s) cast for nominee!`);
+        } else if (payload.eventType === 'UPDATE' && payload.old && (payload.old as any).vote_approval_status !== vote.vote_approval_status) {
+          showAdminPopNotification(`🗳️ Vote ${vote.vote_approval_status || 'Updated'}`, {
+            body: `Vote record status is now ${vote.vote_approval_status}.`,
+            tag: `vote-status-${vote.id}`,
+          });
+        }
+      }
+    )
+    // Admin Broadcast and System Notifications
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'notifications' },
+      (payload) => {
+        const notif = payload.new as any;
+        if (!notif) return;
+        if (!notif.user_id) {
+          showAdminPopNotification(notif.title || 'System Notification', {
+            body: notif.message || '',
+            tag: `broadcast-${notif.id}`,
+          });
+        }
       }
     )
     .subscribe();
@@ -320,27 +376,27 @@ export function startAdminNotificationMonitor(isAdmin: boolean) {
       if (latestPayments && latestPayments.length > 0) {
         const p = latestPayments[0];
         if (!isInitialCheck && lastKnownPaymentId && p.id !== lastKnownPaymentId) {
-          showAdminPopNotification('💰 New Payment Received!', {
-            body: `ZMW ${p.amount} (${p.payment_type || 'transaction'}) completed.`,
+          showAdminPopNotification('💰 New Payment Activity!', {
+            body: `ZMW ${p.amount} (${p.payment_type || 'transaction'}) status: ${p.status}.`,
             tag: `payment-${p.id}`,
           });
         }
         lastKnownPaymentId = p.id;
       }
 
-      // Check latest user
-      const { data: latestUsers } = await supabase
-        .from('users')
-        .select('id, full_name, username, email, is_artist, created_at')
+      // Check latest profile
+      const { data: latestProfiles } = await supabase
+        .from('profiles')
+        .select('id, display_name, username, email, is_artist, created_at')
         .order('created_at', { ascending: false })
         .limit(1);
 
-      if (latestUsers && latestUsers.length > 0) {
-        const u = latestUsers[0];
+      if (latestProfiles && latestProfiles.length > 0) {
+        const u = latestProfiles[0];
         if (!isInitialCheck && lastKnownUserId && u.id !== lastKnownUserId) {
           const isArtist = u.is_artist;
           showAdminPopNotification(isArtist ? '🎸 New Artist Registered!' : '👤 New User Registered!', {
-            body: `${u.full_name || u.username || u.email || 'A user'} joined ZedVevo.`,
+            body: `${u.display_name || u.username || u.email || 'A user'} joined ZedVevo.`,
             tag: `user-${u.id}`,
           });
         }

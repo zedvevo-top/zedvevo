@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, isConfigured, type Song, type Album, type Artist, type Playlist } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
 import { mockSongs, mockAlbums, mockArtists } from '@/lib/mockData'
-import { resolveArtistAvatar } from '@/lib/api'
+import { resolveArtistAvatar, toggleFollowArtist, checkIsFollowing, getArtistFollowerCount } from '@/lib/api'
 
 // Helper to normalize artist objects across different schema variants
 export function normalizeArtist(a: any): Artist {
@@ -248,8 +248,28 @@ export function useArtists(limit = 50) {
         .select('id, play_count, cover_url, artist_name, user_id, artist_id')
         .eq('status', 'approved')
 
+      const { data: videos } = await supabase
+        .from('videos')
+        .select('id, view_count, thumbnail_url, artist_name, user_id, artist_id')
+        .eq('status', 'approved')
+
+      const { data: followRows } = await supabase
+        .from('content_likes')
+        .select('content_id')
+        .eq('content_type', 'artist');
+
+      const followCountMap: Record<string, number> = {};
+      if (Array.isArray(followRows)) {
+        followRows.forEach((r: any) => {
+          if (r.content_id) {
+            followCountMap[r.content_id] = (followCountMap[r.content_id] || 0) + 1;
+          }
+        });
+      }
+
       const clean = (str: string) => (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
       const allSongs = Array.isArray(songs) ? songs : [];
+      const allVideos = Array.isArray(videos) ? videos : [];
       const artistList = [...artists];
       const existingNames = new Set(artistList.map((a: any) => clean(a.stage_name || a.name)));
 
@@ -290,9 +310,19 @@ export function useArtists(limit = 50) {
           return false;
         });
 
+        const matchedVideos = allVideos.filter(video => {
+          if (video.artist_id && video.artist_id === artistId) return true;
+          if (video.user_id && artistUserId && video.user_id === artistUserId) return true;
+          const vidArtistClean = clean(video.artist_name);
+          if (vidArtistClean && (vidArtistClean === artistName || vidArtistClean === artistStageName)) return true;
+          return false;
+        });
+
         const songsPlays = matchedSongs.reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
-        const totalPlays = matchedSongs.length > 0 ? songsPlays : (Number(artist.play_count) || 0);
-        return normalizeArtist({ ...artist, songs: matchedSongs, play_count: totalPlays });
+        const videoPlays = matchedVideos.reduce((sum: number, video: any) => sum + (Number(video.view_count) || 0), 0);
+        const totalPlays = (songsPlays + videoPlays) || (Number(artist.play_count) || 0);
+        const totalFollowers = (followCountMap[artistId] || 0) + (artistUserId && artistUserId !== artistId ? (followCountMap[artistUserId] || 0) : 0);
+        return normalizeArtist({ ...artist, songs: matchedSongs, play_count: totalPlays, total_followers: totalFollowers });
       });
 
       // Prioritize real active artists
@@ -313,7 +343,14 @@ export function useArtists(limit = 50) {
         return (b.play_count || 0) - (a.play_count || 0);
       });
 
-      return mapped.slice(0, limit);
+      const seenIds = new Set<string>();
+      const deduplicated = mapped.filter((a: any) => {
+        if (!a.id || seenIds.has(a.id)) return false;
+        seenIds.add(a.id);
+        return true;
+      });
+
+      return deduplicated.slice(0, limit);
     },
   })
 }
@@ -336,6 +373,20 @@ export function useFeaturedArtists(limit = 10) {
         .select('id, play_count, cover_url, artist_name, user_id, artist_id')
         .eq('status', 'approved')
 
+      const { data: followRows } = await supabase
+        .from('content_likes')
+        .select('content_id')
+        .eq('content_type', 'artist');
+
+      const followCountMap: Record<string, number> = {};
+      if (Array.isArray(followRows)) {
+        followRows.forEach((r: any) => {
+          if (r.content_id) {
+            followCountMap[r.content_id] = (followCountMap[r.content_id] || 0) + 1;
+          }
+        });
+      }
+
       const clean = (str: string) => (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
       const allSongs = Array.isArray(songs) ? songs : [];
       const artistList = [...artists];
@@ -380,7 +431,8 @@ export function useFeaturedArtists(limit = 10) {
 
         const songsPlays = matchedSongs.reduce((sum: number, song: any) => sum + (Number(song.play_count) || 0), 0);
         const totalPlays = matchedSongs.length > 0 ? songsPlays : (Number(artist.play_count) || 0);
-        return normalizeArtist({ ...artist, songs: matchedSongs, play_count: totalPlays });
+        const totalFollowers = (followCountMap[artistId] || 0) + (artistUserId && artistUserId !== artistId ? (followCountMap[artistUserId] || 0) : 0);
+        return normalizeArtist({ ...artist, songs: matchedSongs, play_count: totalPlays, total_followers: totalFollowers });
       });
 
       // Prioritize real active artists
@@ -401,7 +453,14 @@ export function useFeaturedArtists(limit = 10) {
         return (b.play_count || 0) - (a.play_count || 0);
       });
 
-      return mapped.slice(0, limit);
+      const seenIdsFeatured = new Set<string>();
+      const deduplicatedFeatured = mapped.filter((a: any) => {
+        if (!a.id || seenIdsFeatured.has(a.id)) return false;
+        seenIdsFeatured.add(a.id);
+        return true;
+      });
+
+      return deduplicatedFeatured.slice(0, limit);
     },
   })
 }
@@ -410,35 +469,40 @@ export function useArtist(id: string) {
   return useQuery({
     queryKey: ['artist', id],
     queryFn: async () => {
+      if (!id || typeof id !== 'string') return null;
       if (!isConfigured) {
         const found = mockArtists.find(a => a.id === id) || mockArtists[0]
         return normalizeArtist(found)
       }
 
       const clean = (str: string) => (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-      const rawIdClean = clean(id.replace(/^artist-/, ''));
+      const rawIdClean = clean((id || '').replace(/^artist-/, ''));
 
       // 1. Try finding artist in artists table
       let artist: any = null;
       try {
-        const { data } = await supabase
-          .from('artists')
-          .select('*')
-          .or(`id.eq.${id},user_id.eq.${id},name.ilike.%${rawIdClean}%`)
-          .limit(1)
-          .maybeSingle();
+        let query = supabase.from('artists').select('*');
+        if (rawIdClean && rawIdClean.length >= 2) {
+          query = query.or(`id.eq.${id},user_id.eq.${id},name.ilike.%${rawIdClean}%`);
+        } else {
+          query = query.or(`id.eq.${id},user_id.eq.${id}`);
+        }
+        const { data } = await query.limit(1).maybeSingle();
         artist = data;
-      } catch {}
+      } catch (err) {
+        console.warn('Artist fetch error:', err);
+      }
 
       // 2. Try finding user profile if artist row not found
       if (!artist) {
         try {
-          const { data: prof } = await supabase
-            .from('profiles')
-            .select('*')
-            .or(`id.eq.${id},username.eq.${rawIdClean},display_name.ilike.%${rawIdClean}%`)
-            .limit(1)
-            .maybeSingle();
+          let profQuery = supabase.from('profiles').select('*');
+          if (rawIdClean && rawIdClean.length >= 2) {
+            profQuery = profQuery.or(`id.eq.${id},username.eq.${rawIdClean},display_name.ilike.%${rawIdClean}%`);
+          } else {
+            profQuery = profQuery.eq('id', id);
+          }
+          const { data: prof } = await profQuery.limit(1).maybeSingle();
           if (prof) {
             artist = {
               id: prof.id,
@@ -452,7 +516,9 @@ export function useArtist(id: string) {
               play_count: 0,
             };
           }
-        } catch {}
+        } catch (err) {
+          console.warn('Profile fetch for artist error:', err);
+        }
       }
 
       // 3. Fetch all approved songs from Supabase to match this artist and sum exact real plays
@@ -496,7 +562,7 @@ export function useArtist(id: string) {
 
       if (!artist) {
         // Construct artist from matched songs or ID
-        const displayName = matchedSongs[0]?.artist_name || id.replace(/^artist-/, '').replace(/-/g, ' ');
+        const displayName = matchedSongs[0]?.artist_name || (id || '').replace(/^artist-/, '').replace(/-/g, ' ') || 'Artist';
         const firstCover = matchedSongs.find(s => s.cover_url)?.cover_url;
         artist = {
           id: id,
@@ -512,12 +578,15 @@ export function useArtist(id: string) {
         };
       }
 
+      const followerCount = await getArtistFollowerCount(artist?.id || id, artist?.user_id);
+
       return normalizeArtist({
         ...artist,
         songs: matchedSongs,
         play_count: totalPlays,
         monthly_listeners: totalPlays,
         total_streams: totalPlays,
+        total_followers: followerCount,
       });
     },
     enabled: !!id,
@@ -622,30 +691,83 @@ export function useLikedSongs() {
   })
 }
 
+export function useFollowingFeedSongs() {
+  const user = useAuthStore((state) => state.user)
+  return useQuery({
+    queryKey: ['following_feed_songs', user?.id],
+    queryFn: async () => {
+      if (!user || !supabase) return []
+      const { data: followRows } = await supabase
+        .from('content_likes')
+        .select('content_id')
+        .eq('user_id', user.id)
+        .eq('content_type', 'artist');
+
+      const followedIds = (followRows || []).map((r: any) => r.content_id);
+      if (followedIds.length === 0) return [];
+
+      const { data: songs } = await supabase
+        .from('songs')
+        .select('*, artist:artists(*)')
+        .eq('status', 'approved')
+        .or(`artist_id.in.(${followedIds.join(',')}),user_id.in.(${followedIds.join(',')})`)
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      return songs || [];
+    },
+    enabled: !!user,
+  })
+}
+
 // Follow Artist Hooks
-export function useFollowArtist() {
+export function useIsFollowing(artistId: string, artistUserId?: string) {
+  const user = useAuthStore((state) => state.user)
+  return useQuery({
+    queryKey: ['is_following', artistId, artistUserId, user?.id],
+    queryFn: async () => {
+      if (!user?.id) return false
+      return await checkIsFollowing(user.id, artistId, artistUserId)
+    },
+    enabled: !!artistId && !!user?.id,
+  })
+}
+
+export function useToggleFollowArtist() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (artistId: string) => {
+    mutationFn: async ({ artistId, artistUserId }: { artistId: string; artistUserId?: string }) => {
       const user = useAuthStore.getState().user
-      if (!user || !supabase) throw new Error('Not authenticated')
-      const { error } = await supabase.from('artist_followers').insert({ user_id: user.id, artist_id: artistId })
-      if (error && error.code !== '23505') throw error
+      if (!user?.id) throw new Error('Authentication required to follow artists');
+      return await toggleFollowArtist(user.id, artistId, artistUserId)
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['artist_followers'] }) },
+    onSuccess: (_, { artistId, artistUserId }) => {
+      queryClient.invalidateQueries({ queryKey: ['artist', artistId] })
+      if (artistUserId) queryClient.invalidateQueries({ queryKey: ['artist', artistUserId] })
+      queryClient.invalidateQueries({ queryKey: ['artists'] })
+      queryClient.invalidateQueries({ queryKey: ['is_following'] })
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('zedvevo:artist-follow-changed', { detail: { artistId, artistUserId } }))
+      }
+    },
+  })
+}
+
+export function useFollowArtist() {
+  const toggle = useToggleFollowArtist()
+  return useMutation({
+    mutationFn: async (artistId: string) => {
+      return await toggle.mutateAsync({ artistId })
+    },
   })
 }
 
 export function useUnfollowArtist() {
-  const queryClient = useQueryClient()
+  const toggle = useToggleFollowArtist()
   return useMutation({
     mutationFn: async (artistId: string) => {
-      const user = useAuthStore.getState().user
-      if (!user || !supabase) throw new Error('Not authenticated')
-      const { error } = await supabase.from('artist_followers').delete().eq('user_id', user.id).eq('artist_id', artistId)
-      if (error) throw error
+      return await toggle.mutateAsync({ artistId })
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['artist_followers'] }) },
   })
 }
 

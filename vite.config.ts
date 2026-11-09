@@ -54,6 +54,7 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 3000,
     allowedHosts: true,
+    hmr: false,
   },
   plugins: [
     react(),
@@ -316,5 +317,10 @@ export default defineConfig({
     },
     // Ensure only a single copy of React is ever bundled (prevents HMR useState=null)
     dedupe: ["react", "react-dom"],
+  },
+  build: {
+    target: "es2020",
+    cssCodeSplit: true,
+    chunkSizeWarningLimit: 1200,
   },
 });

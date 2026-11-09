@@ -96,9 +96,10 @@ export default function RegisterPage() {
       })
 
       if (signUpError) {
+        const isRate = signUpError.message?.toLowerCase().includes('rate');
         toast({
-          title: 'Registration failed',
-          description: signUpError.message,
+          title: isRate ? 'Please wait a moment' : 'Registration failed',
+          description: isRate ? 'Too many registration requests. Please wait 60 seconds and try again.' : signUpError.message,
           variant: 'destructive',
         })
         return

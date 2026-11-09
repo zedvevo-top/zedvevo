@@ -346,6 +346,8 @@ export default function AdminAdsPage() {
                     <SelectItem value="videos">Videos Section</SelectItem>
                     <SelectItem value="awards">Awards Section</SelectItem>
                     <SelectItem value="popup">Pop-up Overlay</SelectItem>
+                    <SelectItem value="download">Download Button Popunder</SelectItem>
+                    <SelectItem value="like">Like Button Popunder</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

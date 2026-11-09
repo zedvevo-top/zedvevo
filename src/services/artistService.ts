@@ -165,7 +165,7 @@ class ArtistService {
 
       return result
     } catch (error: any) {
-      console.error('Subscription error:', error)
+      console.warn('Subscription error:', error)
       return { success: false, error: error.message || 'Failed to create subscription' }
     }
   }
@@ -263,7 +263,7 @@ class ArtistService {
 
       return { success: true }
     } catch (error: any) {
-      console.error('Subscription activation error:', error)
+      console.warn('Subscription activation error:', error)
       return { success: false, error: error.message }
     }
   }
@@ -380,10 +380,10 @@ class ArtistService {
         endDate.setFullYear(endDate.getFullYear() + 1)
       }
 
-      // Create subscription
-      const { error: subError } = await supabase
+      // Create/upsert artist subscription
+      await supabase
         .from('artist_subscriptions')
-        .insert({
+        .upsert({
           user_id: userId,
           plan: planType,
           status: 'active',
@@ -393,24 +393,48 @@ class ArtistService {
           upload_count: 0,
           price: 0, // Admin grant = free
           currency: 'ZMW',
+        }, { onConflict: 'user_id,plan' })
+
+      // Create active user_subscriptions record
+      const mappedPlanType = planType === 'weekly' ? 'k100_weekly' : planType === 'annual' ? 'k300_yearly' : 'k10_single'
+      await supabase
+        .from('user_subscriptions')
+        .update({ is_active: false, status: 'inactive' })
+        .eq('user_id', userId)
+
+      await supabase
+        .from('user_subscriptions')
+        .insert({
+          user_id: userId,
+          plan_id: `admin-grant-${Date.now()}`,
+          plan_type: mappedPlanType,
+          uploads_used: 0,
+          uploads_allowed: plan.songLimit === 1 ? 1 : null,
+          activated_at: now.toISOString(),
+          expires_at: endDate.toISOString(),
+          is_active: true,
+          status: 'active',
+          consumed: false,
         })
 
-      if (subError) {
-        return { success: false, error: subError.message }
-      }
+      // Also ensure profile upload_access is active
+      await supabase
+        .from('profiles')
+        .update({ upload_access: 'active', is_artist: true })
+        .eq('id', userId)
 
       // Create notification for user
       await supabase.from('notifications').insert({
         user_id: userId,
         type: 'success',
         title: 'Upload Access Granted by Admin',
-        message: `Admin has granted you ${plan.name} plan access. You can now upload.`,
+        message: `Admin has granted you ${plan.name} plan access. You can now upload songs and videos.`,
         data: { plan: planType }
       })
 
       return { success: true }
     } catch (error: any) {
-      console.error('Grant access error:', error)
+      console.warn('Grant access error:', error)
       return { success: false, error: error.message }
     }
   }
@@ -526,7 +550,7 @@ class ArtistService {
 
       return { success: true, songId }
     } catch (error: any) {
-      console.error('Upload error:', error)
+      console.warn('Upload error:', error)
       return { success: false, error: error.message }
     }
   }
@@ -627,7 +651,7 @@ class ArtistService {
 
       return { success: true, videoId }
     } catch (error: any) {
-      console.error('Video upload error:', error)
+      console.warn('Video upload error:', error)
       return { success: false, error: error.message }
     }
   }
@@ -691,7 +715,7 @@ class ArtistService {
 
       return { success: true, albumId }
     } catch (error: any) {
-      console.error('Album creation error:', error)
+      console.warn('Album creation error:', error)
       return { success: false, error: error.message }
     }
   }

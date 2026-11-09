@@ -154,7 +154,7 @@ export const lipilaService = {
         .single()
 
       if (paymentError) {
-        console.error('Error creating payment record:', paymentError)
+        console.warn('Error creating payment record:', paymentError)
         return { success: false, error: paymentError.message }
       }
 
@@ -208,7 +208,7 @@ export const lipilaService = {
         message: 'Payment initiated successfully! Please check your mobile phone for a PIN prompt to authorize the transaction.',
       }
     } catch (error) {
-      console.error('Error creating mobile money payment:', error)
+      console.warn('Error creating mobile money payment:', error)
       return { success: false, error: 'Payment failed. Please try again.' }
     }
   },
@@ -317,7 +317,7 @@ export const lipilaService = {
         .single()
 
       if (error || !payment) {
-        console.error('Payment not found for webhook:', reference)
+        console.warn('Payment not found for webhook:', reference)
         return
       }
 
@@ -335,7 +335,7 @@ export const lipilaService = {
         await handleSuccessfulPayment(payment.id, payment)
       }
     } catch (error) {
-      console.error('Error handling webhook:', error)
+      console.warn('Error handling webhook:', error)
     }
   },
 
@@ -350,27 +350,60 @@ export const lipilaService = {
       .order('created_at', { ascending: false })
 
     if (error) {
-      console.error('Error fetching payment history:', error)
+      console.warn('Error fetching payment history:', error)
       return []
     }
 
     return data || []
   },
 
-  async autoActivateAllSuccessfulArtistPlans() {
-    return autoActivateAllSuccessfulArtistPlans();
+  async autoActivateAllSuccessfulArtistPlans(forUserId?: string) {
+    return autoActivateAllSuccessfulArtistPlans(forUserId);
+  },
+
+  async adminApprovePayment(paymentId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { data: payment, error } = await supabase
+        .from('payments')
+        .select('*')
+        .eq('id', paymentId)
+        .single();
+      if (error || !payment) return { success: false, error: 'Payment not found' };
+
+      await supabase
+        .from('payments')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', paymentId);
+
+      await handleSuccessfulPayment(payment.id, payment);
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   },
 }
 
-export async function autoActivateAllSuccessfulArtistPlans() {
+export async function autoActivateAllSuccessfulArtistPlans(forUserId?: string) {
   try {
-    const { data: successfulPayments } = await supabase
+    let q = supabase
       .from('payments')
       .select('*')
       .in('payment_type', ['artist_subscription', 'upload', 'upload_plan', 'plan', 'subscription'])
-      .in('status', ['completed', 'successful', 'SUCCESSFUL', 'COMPLETED']);
+      .in('status', ['completed', 'successful', 'SUCCESSFUL', 'COMPLETED'])
+      .order('created_at', { ascending: false })
+      .limit(forUserId ? 5 : 20);
 
-    if (!successfulPayments) return;
+    if (forUserId) {
+      q = q.eq('user_id', forUserId);
+    }
+
+    const { data: successfulPayments } = await q;
+
+    if (!successfulPayments || successfulPayments.length === 0) return;
 
     for (const payment of successfulPayments) {
       if (payment.user_id) {
@@ -393,7 +426,7 @@ async function handleSuccessfulPayment(paymentId: string, payment: Payment): Pro
   try {
     await applyPaymentBenefits(paymentId);
   } catch (err) {
-    console.error('Error applying payment benefits:', err);
+    console.warn('Error applying payment benefits:', err);
   }
 
   if (!userId) return

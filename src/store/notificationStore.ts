@@ -38,13 +38,16 @@ export const useNotificationStore = create<NotificationState>()((set, get) => ({
         .order('created_at', { ascending: false })
         .limit(50)
 
-      if (error) throw error
+      if (error) {
+        console.warn('Warning fetching notifications from Supabase:', error.message || error)
+        return
+      }
 
       const unreadCount = data?.filter((n) => !n.is_read).length || 0
 
       set({ notifications: data || [], unreadCount })
-    } catch (error) {
-      console.error('Error fetching notifications:', error)
+    } catch (error: any) {
+      console.warn('Transient network issue fetching notifications:', error?.message || error)
     } finally {
       set({ isLoading: false })
     }

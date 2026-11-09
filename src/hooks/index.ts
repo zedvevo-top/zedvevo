@@ -6,6 +6,7 @@ export * from './useSearch'
 export * from './useCategories'
 export * from './usePurchases'
 export * from './useUserProfile'
+export * from './useSubscriptionGuard'
 
 import { useQuery } from '@tanstack/react-query'
 import { supabase, isConfigured } from '@/lib/supabase'

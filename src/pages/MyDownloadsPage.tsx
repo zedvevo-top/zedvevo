@@ -9,6 +9,8 @@ import { getUserDownloads } from '@/lib/api';
 import type { Download as DownloadType } from '@/types/index';
 import { formatDate } from '@/lib/utils';
 import { toast } from 'sonner';
+import { triggerPopunder } from '@/services/adsService';
+import { triggerInstantSongDownload, triggerInstantVideoDownload } from '@/lib/downloadHelper';
 
 function DownloadRow({ item, onRedownload }: { item: DownloadType; onRedownload: (item: DownloadType) => void }) {
   const Icon = item.content_type === 'song' ? Music2 : VideoIcon;
@@ -56,15 +58,23 @@ export default function MyDownloadsPage() {
 
   const handleRedownload = async (item: DownloadType) => {
     try {
-      const a = document.createElement('a');
-      a.href = item.file_url;
-      a.download = `${item.title} - ${item.artist_name}.${item.content_type === 'song' ? 'mp3' : 'mp4'}`;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      toast.success('Download started');
+      if (item.content_type === 'song') {
+        await triggerInstantSongDownload({
+          id: item.content_id,
+          title: item.title,
+          artist_name: item.artist_name,
+          file_url: item.file_url,
+          cover_url: item.cover_url,
+        }, user?.id);
+      } else {
+        await triggerInstantVideoDownload({
+          id: item.content_id,
+          title: item.title,
+          artist_name: item.artist_name,
+          file_url: item.file_url,
+          thumbnail_url: item.cover_url,
+        }, user?.id);
+      }
     } catch {
       toast.error('Download failed');
     }

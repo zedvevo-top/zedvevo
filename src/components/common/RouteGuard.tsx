@@ -30,15 +30,15 @@ export function RouteGuard({ children }: RouteGuardProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
+
   useEffect(() => {
     if (loading) return;
-
-    const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
 
     if (!user && !isPublic) {
       navigate('/login', { state: { from: location.pathname }, replace: true });
     }
-  }, [user, loading, location.pathname, navigate]);
+  }, [user, loading, isPublic, location.pathname, navigate]);
 
   if (loading) {
     return (
@@ -46,6 +46,10 @@ export function RouteGuard({ children }: RouteGuardProps) {
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
       </div>
     );
+  }
+
+  if (!user && !isPublic) {
+    return null;
   }
 
   return <>{children}</>;

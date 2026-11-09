@@ -1,29 +1,29 @@
-import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import {
-  Play,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Heart,
+  ListMusic,
   Pause,
+  Play,
+  Repeat,
+  Repeat1,
+  Share2,
+  Shuffle,
   SkipBack,
   SkipForward,
   Volume2,
   VolumeX,
-  Repeat,
-  Repeat1,
-  Shuffle,
-  ListMusic,
   X,
-  ChevronUp,
-  ChevronDown,
-  Download,
-  Heart,
-  Share2,
 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { UserAvatar } from '@/components/ui/avatar'
+import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
+import { Slider } from '@/components/ui/slider'
 import { usePlayerStore } from '@/store'
 import { cn, formatDuration } from '@/utils'
-import { Button } from '@/components/ui/button'
-import { Slider } from '@/components/ui/slider'
-import { UserAvatar } from '@/components/ui/avatar'
-import { Progress } from '@/components/ui/progress'
 
 export function MusicPlayer() {
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -53,25 +53,61 @@ export function MusicPlayer() {
     playPrevious,
     setMiniPlayer,
   } = usePlayerStore()
+  const playPromiseRef = useRef<Promise<void> | null>(null)
+
+  const safePause = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (playPromiseRef.current) {
+      playPromiseRef.current
+        .catch(() => {})
+        .finally(() => {
+          try { audio.pause() } catch {}
+        })
+    } else {
+      try { audio.pause() } catch {}
+    }
+  }, [])
 
   useEffect(() => {
     if (audioRef.current && currentSong) {
+      safePause()
       audioRef.current.src = currentSong.audio_url
       if (isPlaying) {
-        audioRef.current.play().catch((err) => console.warn('Audio play prevented:', err));
+        const p = audioRef.current.play()
+        playPromiseRef.current = p
+        if (p !== undefined) {
+          p.then(() => {
+            playPromiseRef.current = null
+          }).catch((err) => {
+            playPromiseRef.current = null
+            if (err?.name === 'AbortError' || err?.message?.includes('interrupted') || err?.message?.includes('pause')) return
+            console.warn('Audio play prevented:', err)
+          })
+        }
       }
     }
-  }, [currentSong])
+  }, [currentSong, isPlaying, safePause])
 
   useEffect(() => {
     if (audioRef.current) {
       if (isPlaying) {
-        audioRef.current.play().catch((err) => console.warn('Audio play prevented:', err));
+        const p = audioRef.current.play()
+        playPromiseRef.current = p
+        if (p !== undefined) {
+          p.then(() => {
+            playPromiseRef.current = null
+          }).catch((err) => {
+            playPromiseRef.current = null
+            if (err?.name === 'AbortError' || err?.message?.includes('interrupted') || err?.message?.includes('pause')) return
+            console.warn('Audio play prevented:', err)
+          })
+        }
       } else {
-        audioRef.current.pause()
+        safePause()
       }
     }
-  }, [isPlaying])
+  }, [isPlaying, safePause])
 
   useEffect(() => {
     if (audioRef.current) {
@@ -96,7 +132,16 @@ export function MusicPlayer() {
     if (repeatMode === 'one') {
       if (audioRef.current) {
         audioRef.current.currentTime = 0
-        audioRef.current.play()
+        const p = audioRef.current.play()
+        playPromiseRef.current = p
+        if (p !== undefined) {
+          p.then(() => {
+            playPromiseRef.current = null
+          }).catch((err) => {
+            playPromiseRef.current = null
+            if (err?.name === 'AbortError' || err?.message?.includes('interrupted') || err?.message?.includes('pause')) return
+          })
+        }
       }
     } else {
       playNext()

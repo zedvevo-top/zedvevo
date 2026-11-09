@@ -5,6 +5,9 @@ import ScrollToTop from '@/components/common/ScrollToTop';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { PlayerProvider } from '@/contexts/PlayerContext';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+const queryClient = new QueryClient();
 import { RouteGuard } from '@/components/common/RouteGuard';
 import Header from '@/components/layout/Header';
 import MobileNav from '@/components/layout/MobileNav';
@@ -28,10 +31,9 @@ import { analytics } from '@/lib/analytics';
 
 // Guard for admin routes — only admin/super_admin can access
 function AdminGuard({ children }: { children: React.ReactNode }) {
-  const { profile, user, loading } = useAuth();
+  const { profile, loading } = useAuth();
   if (loading) return null;
-  const isSuperAdminEmail = user?.email?.toLowerCase() === 'topkuchalo@gmail.com' || profile?.email?.toLowerCase() === 'topkuchalo@gmail.com';
-  if (!isSuperAdminEmail && (!profile || (profile.role !== 'admin' && profile.role !== 'super_admin'))) {
+  if (!profile || (profile.role !== 'admin' && profile.role !== 'super_admin')) {
     return <NavRedirect to="/" replace />;
   }
   return <AdminLayout>{children}</AdminLayout>;
@@ -39,12 +41,8 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 
 // Guard for super_admin-only routes — redirects admin to /admin overview
 function SuperAdminGuard({ children }: { children: React.ReactNode }) {
-  const { profile, user, loading } = useAuth();
+  const { profile, loading } = useAuth();
   if (loading) return null;
-  const isSuperAdminEmail = user?.email?.toLowerCase() === 'topkuchalo@gmail.com' || profile?.email?.toLowerCase() === 'topkuchalo@gmail.com';
-  if (isSuperAdminEmail) {
-    return <AdminLayout>{children}</AdminLayout>;
-  }
   if (!profile) return <NavRedirect to="/" replace />;
   if (profile.role === 'admin') {
     return <NavRedirect to="/admin" replace />;
@@ -55,16 +53,15 @@ function SuperAdminGuard({ children }: { children: React.ReactNode }) {
   return <AdminLayout>{children}</AdminLayout>;
 }
 
-// Dynamic platform theme loader from Supabase & Settings
+// Dynamic platform theme and site branding loader
 const GlobalScriptsAndTheme: React.FC = () => {
-  // 1. Fetch config and apply theme/branding settings ONCE on mount
   React.useEffect(() => {
     async function loadConfigAndTheme() {
       try {
         const { getSettings } = await import('@/lib/api');
         const settings = await getSettings();
 
-        // 2. Set dynamic branding & favicon
+        // 1. Set dynamic branding & favicon
         const siteName = settings['site_name'];
         if (siteName) {
           (window as any).ZED_SITE_NAME = siteName;
@@ -107,7 +104,7 @@ const GlobalScriptsAndTheme: React.FC = () => {
         };
         window.addEventListener('favicon_changed', onFaviconChanged);
 
-        // 3. Set dynamic theme attributes (primary color, accent highlight, and radius)
+        // 2. Set dynamic theme attributes (primary color, accent highlight, and radius)
         const primaryColor = settings['theme_primary_color'];
         const accentColor = settings['theme_accent_color'];
         const borderRadius = settings['theme_border_radius'];
@@ -134,7 +131,7 @@ const GlobalScriptsAndTheme: React.FC = () => {
           styleEl.textContent = styleRules;
         }
 
-        // 4. Force default theme mode if configured
+        // 3. Force default theme mode if configured
         if (themeMode === 'dark') {
           document.documentElement.classList.add('dark');
         } else if (themeMode === 'light') {
@@ -142,7 +139,7 @@ const GlobalScriptsAndTheme: React.FC = () => {
         }
 
       } catch (err) {
-        console.warn('Failed to load theme scripts:', err);
+        console.warn('Failed to load global theme settings:', err);
       }
     }
     loadConfigAndTheme();
@@ -162,56 +159,58 @@ const NavigationAnalytics: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <Router>
-      <AuthProvider>
-        <PlayerProvider>
-        <RouteGuard>
-          <ScrollToTop />
-          <GlobalScriptsAndTheme />
-          <NavigationAnalytics />
-          <IntersectObserver />
-          <AdminNotificationListener />
-          <UniversalNotificationListener />
-          <Routes>
-            {/* Admin sub-routes — full-screen layout, no Header/MobileNav */}
-            <Route path="/admin" element={<AdminGuard><AdminOverviewPage /></AdminGuard>} />
-            <Route path="/admin/content"       element={<AdminGuard><AdminContentPage /></AdminGuard>} />
-            <Route path="/admin/videos"        element={<AdminGuard><AdminContentPage /></AdminGuard>} />
-            <Route path="/admin/users"         element={<SuperAdminGuard><AdminUsersPage /></SuperAdminGuard>} />
-            <Route path="/admin/payments"      element={<SuperAdminGuard><AdminPaymentsPage /></SuperAdminGuard>} />
-            <Route path="/admin/awards"        element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
-            <Route path="/admin/nominees"      element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
-            <Route path="/admin/trending"      element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
-            <Route path="/admin/downloads"     element={<SuperAdminGuard><AdminDownloadsPage /></SuperAdminGuard>} />
-            <Route path="/admin/notifications" element={<SuperAdminGuard><AdminNotificationsPage /></SuperAdminGuard>} />
-            <Route path="/admin/banners"       element={<SuperAdminGuard><AdminSettingsPage /></SuperAdminGuard>} />
-            <Route path="/admin/settings"      element={<SuperAdminGuard><AdminSettingsPage /></SuperAdminGuard>} />
-            <Route path="/admin/sponsors"      element={<SuperAdminGuard><AdminSponsorsPage /></SuperAdminGuard>} />
-            <Route path="/admin/payment-gateway" element={<SuperAdminGuard><AdminPaymentGatewayPage /></SuperAdminGuard>} />
+    <QueryClientProvider client={queryClient}>
+      <Router>
+        <AuthProvider>
+          <PlayerProvider>
+          <RouteGuard>
+            <ScrollToTop />
+            <GlobalScriptsAndTheme />
+            <NavigationAnalytics />
+            <IntersectObserver />
+            <AdminNotificationListener />
+            <UniversalNotificationListener />
+            <Routes>
+              {/* Admin sub-routes — full-screen layout, no Header/MobileNav */}
+              <Route path="/admin" element={<AdminGuard><AdminOverviewPage /></AdminGuard>} />
+              <Route path="/admin/content"       element={<AdminGuard><AdminContentPage /></AdminGuard>} />
+              <Route path="/admin/videos"        element={<AdminGuard><AdminContentPage /></AdminGuard>} />
+              <Route path="/admin/users"         element={<SuperAdminGuard><AdminUsersPage /></SuperAdminGuard>} />
+              <Route path="/admin/payments"      element={<SuperAdminGuard><AdminPaymentsPage /></SuperAdminGuard>} />
+              <Route path="/admin/awards"        element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
+              <Route path="/admin/nominees"      element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
+              <Route path="/admin/trending"      element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
+              <Route path="/admin/downloads"     element={<SuperAdminGuard><AdminDownloadsPage /></SuperAdminGuard>} />
+              <Route path="/admin/notifications" element={<SuperAdminGuard><AdminNotificationsPage /></SuperAdminGuard>} />
+              <Route path="/admin/banners"       element={<SuperAdminGuard><AdminSettingsPage /></SuperAdminGuard>} />
+              <Route path="/admin/settings"      element={<SuperAdminGuard><AdminSettingsPage /></SuperAdminGuard>} />
+              <Route path="/admin/sponsors"      element={<SuperAdminGuard><AdminSponsorsPage /></SuperAdminGuard>} />
+              <Route path="/admin/payment-gateway" element={<SuperAdminGuard><AdminPaymentGatewayPage /></SuperAdminGuard>} />
 
-            {/* All other routes wrapped in the public layout */}
-            <Route path="/*" element={
-              <div className="flex flex-col min-h-screen">
-                <Header />
-                <main className="flex-grow">
-                  <Routes>
-                    {routes.filter(r => !r.path.startsWith('/admin')).map((route) => (
-                      <Route key={route.path} path={route.path} element={<route.component />} />
-                    ))}
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
-                </main>
-                {/* Player sits above mobile nav */}
-                <MusicPlayer />
-                <MobileNav />
-              </div>
-            } />
-          </Routes>
-          <Toaster richColors />
-        </RouteGuard>
-        </PlayerProvider>
-      </AuthProvider>
-    </Router>
+              {/* All other routes wrapped in the public layout */}
+              <Route path="/*" element={
+                <div className="flex flex-col min-h-screen">
+                  <Header />
+                  <main className="flex-grow">
+                    <Routes>
+                      {routes.filter(r => !r.path.startsWith('/admin')).map((route) => (
+                        <Route key={route.path} path={route.path} element={<route.component />} />
+                      ))}
+                      <Route path="*" element={<Navigate to="/" replace />} />
+                    </Routes>
+                  </main>
+                  {/* Player sits above mobile nav */}
+                  <MusicPlayer />
+                  <MobileNav />
+                </div>
+              } />
+            </Routes>
+            <Toaster richColors />
+          </RouteGuard>
+          </PlayerProvider>
+        </AuthProvider>
+      </Router>
+    </QueryClientProvider>
   );
 };
 

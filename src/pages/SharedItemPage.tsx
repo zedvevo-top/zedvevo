@@ -52,7 +52,7 @@ export default function SharedItemPage() {
         if (type === 'video') table = 'videos';
         if (type === 'nominee') table = 'nominees';
 
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        const isUuid = Boolean(id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
         let query = supabase.from(table).select('*');
         if (isUuid) {
           query = query.eq('id', id);
@@ -85,7 +85,7 @@ export default function SharedItemPage() {
           if (cat) setCategoryName(cat.name);
         }
       } catch (err: any) {
-        console.error(err);
+        console.warn(err);
         setError(err.message || 'Failed to load item');
       } finally {
         setLoading(false);

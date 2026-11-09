@@ -1,14 +1,14 @@
-import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
-import { supabase, clearStaleAuthStorage } from '@/lib/supabase';
 import type { User } from '@supabase/supabase-js';
-import type { Profile } from '@/types/index';
+import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { clearStaleAuthStorage, supabase } from '@/lib/supabase';
 import { autoActivateAllSuccessfulArtistPlans } from '@/services/lipila';
 import { useAuthStore } from '@/store/authStore';
+import type { Profile } from '@/types/index';
 
 function isRefreshTokenErr(err: any): boolean {
   if (!err) return false;
-  const msg = typeof err === 'string' ? err : `${err.message || ''} ${err.error_description || ''} ${err.name || ''}`;
+  const msg = typeof err === 'string' ? err : `${err.message || ''} ${err.error_description || ''} ${err.name || ''} ${err.code || ''} ${JSON.stringify(err)}`;
   const lower = msg.toLowerCase();
   return lower.includes('refresh token') || lower.includes('not found') || lower.includes('invalid_grant');
 }
@@ -77,6 +77,10 @@ export async function getProfile(userId: string): Promise<Profile | null> {
       // Admins and super_admins always have artist upload privileges
       data.is_artist = true;
     }
+    // Persist to quick cache for instant initial paints
+    try {
+      localStorage.setItem('zed_current_profile', JSON.stringify(data));
+    } catch { /* ignore */ }
     // Synchronize to useAuthStore
     useAuthStore.getState().setUser(data as any);
   }
@@ -111,18 +115,42 @@ const AuthContext = createContext<AuthContextType>({
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(() => {
+    try {
+      const raw = localStorage.getItem('zed_current_profile');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(true);
 
+  const updateProfileState = (prof: Profile | null) => {
+    setProfile(prof);
+    try {
+      if (prof) {
+        localStorage.setItem('zed_current_profile', JSON.stringify(prof));
+      } else {
+        localStorage.removeItem('zed_current_profile');
+      }
+    } catch { /* ignore */ }
+  };
+
   const refreshProfile = async () => {
-    if (!user) { setProfile(null); return; }
+    if (!user) { updateProfileState(null); return; }
     const profileData = await getProfile(user.id);
-    setProfile(profileData);
+    updateProfileState(profileData);
   };
 
   const initialLoadRef = useRef(true);
 
   useEffect(() => {
+    // Safety guard: Ensure loading state is NEVER stuck indefinitely under any network condition
+    const safetyTimeout = setTimeout(() => {
+      setLoading(false);
+      initialLoadRef.current = false;
+    }, 1200);
+
     supabase.auth.getSession()
       .then(({ data: { session }, error }) => {
         if (error) {
@@ -131,46 +159,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             supabase.auth.signOut().catch(() => {});
           }
           setUser(null);
-          setProfile(null);
+          updateProfileState(null);
           return;
         }
         setUser(session?.user ?? null);
         if (session?.user) {
-          autoActivateAllSuccessfulArtistPlans().then(() => {
-            getProfile(session.user.id).then(setProfile);
-          });
+          getProfile(session.user.id).then(updateProfileState);
+          autoActivateAllSuccessfulArtistPlans(session.user.id).catch(() => {});
+        } else {
+          updateProfileState(null);
         }
       })
       .catch(error => {
         if (isRefreshTokenErr(error)) {
           clearStaleAuthStorage();
           supabase.auth.signOut().catch(() => {});
-        } else if (error?.message) {
+        } else if (error?.message && !error.message.includes('Failed to fetch') && !error.message.includes('NetworkError') && !error.message.includes('network')) {
           toast.error(`Session notice: ${error.message}`);
         }
       })
       .finally(() => {
+        clearTimeout(safetyTimeout);
         setLoading(false);
         // Turn off initial load flag after session resolution is done
         setTimeout(() => {
           initialLoadRef.current = false;
-        }, 1000);
+        }, 800);
       });
 
     // Do NOT use await inside onAuthStateChange – use .then() to avoid deadlocks.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        autoActivateAllSuccessfulArtistPlans().then(() => {
-          getProfile(session.user.id).then((prof) => {
-            setProfile(prof);
-            if (event === 'SIGNED_IN' && !initialLoadRef.current) {
-              toast.success(`Welcome back, ${prof?.display_name || session.user.email}!`);
-            }
-          });
+        getProfile(session.user.id).then((prof) => {
+          updateProfileState(prof);
+          if (event === 'SIGNED_IN' && !initialLoadRef.current) {
+            toast.success(`Welcome back, ${prof?.display_name || session.user.email}!`);
+          }
         });
+        autoActivateAllSuccessfulArtistPlans(session.user.id).catch(() => {});
       } else {
-        setProfile(null);
+        updateProfileState(null);
         useAuthStore.getState().setUser(null);
         if (event === 'SIGNED_OUT' && !initialLoadRef.current) {
           toast.info('You have logged out successfully.');
@@ -205,11 +234,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Sign in directly with real email
   const signInWithEmail = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim().toLowerCase(),
-      password,
-    });
-    if (error) throw error;
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
+      if (error) {
+        if (error.message?.toLowerCase().includes('rate') || (error as any).status === 429) {
+          throw new Error('Too many login attempts. Please wait 60 seconds and try again.');
+        }
+        throw error;
+      }
+    } catch (err: any) {
+      if (err.message?.toLowerCase().includes('rate') || err.status === 429) {
+        throw new Error('Too many login attempts. Please wait 60 seconds and try again.');
+      }
+      throw err;
+    }
   };
 
   // Register with real Gmail / any email
@@ -220,16 +261,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     displayName?: string,
   ) => {
     const authEmail = email.trim().toLowerCase();
-    const { data, error } = await supabase.auth.signUp({ email: authEmail, password });
-    if (error) throw error;
-    if (data.user) {
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        username: username.toLowerCase(),
-        display_name: displayName || username,
-        email: authEmail,
-        role: 'user',
-      }, { onConflict: 'id' });
+    try {
+      const { data, error } = await supabase.auth.signUp({ email: authEmail, password });
+      if (error) {
+        if (error.message?.toLowerCase().includes('rate') || (error as any).status === 429) {
+          throw new Error('Too many requests. Please wait 60 seconds and try again.');
+        }
+        throw error;
+      }
+      if (data.user) {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          username: username.toLowerCase(),
+          display_name: displayName || username,
+          email: authEmail,
+          role: 'user',
+        }, { onConflict: 'id' });
+      }
+    } catch (err: any) {
+      if (err.message?.toLowerCase().includes('rate') || err.status === 429) {
+        throw new Error('Too many requests. Please wait 60 seconds and try again.');
+      }
+      throw err;
     }
   };
 
@@ -238,8 +291,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const email = usernameOrEmail.includes('@')
       ? usernameOrEmail.trim().toLowerCase()
       : `${usernameOrEmail.toLowerCase()}@zedvevo.app`;
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        if (error.message?.toLowerCase().includes('rate') || (error as any).status === 429) {
+          throw new Error('Too many login attempts. Please wait 60 seconds and try again.');
+        }
+        throw error;
+      }
+    } catch (err: any) {
+      if (err.message?.toLowerCase().includes('rate') || err.status === 429) {
+        throw new Error('Too many login attempts. Please wait 60 seconds and try again.');
+      }
+      throw err;
+    }
   };
 
   const signOut = async () => {

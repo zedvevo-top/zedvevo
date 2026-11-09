@@ -169,6 +169,9 @@ export interface Video {
   status: ContentStatus;
   is_trending: boolean;
   is_featured: boolean;
+  youtube_url?: string;
+  youtube_id?: string;
+  is_youtube?: boolean;
   created_at: string;
   updated_at: string;
   profiles?: { username?: string; display_name?: string };
@@ -370,11 +373,28 @@ export interface LipilaPaymentResponse {
   message?: string;
 }
 
-export interface PaymentInitResult {
-  payment_id: string;
-  status: PaymentStatus;
-  payment_url?: string;
+export interface PushLogEntry {
+  id: string;
+  timestamp: string;
+  type: 'realtime_event' | 'deliver_success' | 'deliver_fail' | 'error' | 'sw_event';
+  source: string;
   message: string;
-  failure_reason?: string;
+  details?: any;
+}
+
+export interface AndroidSessionMetrics {
+  swStatus: string;
+  deviceInfo: string;
+  totalEvents: number;
+  successCount: number;
+  failCount: number;
+  sessionId: string;
+}
+
+export interface DiagnosticTestSuiteResult {
+  swActive: boolean;
+  fcmCompatible: boolean;
+  navigateProtocolSuccess: boolean;
+  blankScreenSafe: boolean;
 }
 

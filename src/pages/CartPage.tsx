@@ -52,7 +52,7 @@ export default function CartPage() {
       await checkout.mutateAsync(order.id)
 
       toast({ title: 'Order created! Redirecting to payment...' })
-      navigate('/checkout/success')
+      navigate('/payment-success')
     } catch (error) {
       toast({
         title: 'Checkout failed',

@@ -1,17 +1,36 @@
 import { supabase } from '@/lib/supabase';
 
+export type AdPlacement = 
+  | 'download-button-overlay' 
+  | 'above-player' 
+  | 'between-list-items' 
+  | 'sidebar' 
+  | 'footer' 
+  | 'header' 
+  | 'home' 
+  | 'music' 
+  | 'videos' 
+  | 'awards' 
+  | 'popup'
+  | 'download'
+  | 'like'
+  | 'all'
+  | string;
+
 export interface Advertisement {
   id: string;
   name: string;
   provider: 'adsense' | 'adsterra' | 'propeller' | 'popads' | 'custom_banner' | 'custom_script';
   type: 'banner' | 'script' | 'popup';
-  placement: 'all' | 'home' | 'music' | 'videos' | 'awards' | 'sidebar' | 'popup';
+  placement: AdPlacement;
   format: 'leaderboard' | 'feed' | 'rectangle' | 'compact' | 'popup_modal';
   script_code?: string;
   image_url?: string;
+  banner_url?: string;
   target_url?: string;
   cta_text?: string;
   headline?: string;
+  description?: string;
   is_active: boolean;
   display_order: number;
   impressions?: number;
@@ -21,57 +40,9 @@ export interface Advertisement {
 
 const ADS_STORAGE_KEY = 'real_ads_config';
 
-const DEFAULT_REAL_ADS: Advertisement[] = [
-  {
-    id: 'ad-momo-1',
-    name: 'MTN MoMo Instant Pay',
-    provider: 'custom_banner',
-    type: 'banner',
-    placement: 'all',
-    format: 'leaderboard',
-    headline: 'Pay fast, securely & effortlessly with MTN MoMo in Zambia',
-    image_url: 'https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=1200&h=300&fit=crop',
-    target_url: 'https://www.mtn.zm/momo',
-    cta_text: 'Use MTN MoMo',
-    is_active: true,
-    display_order: 1,
-    impressions: 420,
-    clicks: 38,
-  },
-  {
-    id: 'ad-airtel-1',
-    name: 'Airtel Money Zambia',
-    provider: 'custom_banner',
-    type: 'banner',
-    placement: 'all',
-    format: 'feed',
-    headline: 'Instant mobile payments and bundles across Zambia',
-    image_url: 'https://images.unsplash.com/photo-1512428559087-560fa5ceab42?w=1200&h=300&fit=crop',
-    target_url: 'https://www.airtel.co.zm',
-    cta_text: 'Dial *115#',
-    is_active: true,
-    display_order: 2,
-    impressions: 310,
-    clicks: 29,
-  },
-  {
-    id: 'ad-awards-popup-1',
-    name: 'ZedVevo Music Awards Voting',
-    provider: 'custom_banner',
-    type: 'popup',
-    placement: 'popup',
-    format: 'popup_modal',
-    headline: 'Official Voting is Open! Vote for your favorite Zambian artists today.',
-    image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800&h=450&fit=crop',
-    target_url: '/awards',
-    cta_text: 'Vote Now (K5/vote)',
-    is_active: true,
-    display_order: 3,
-    impressions: 150,
-    clicks: 45,
-  }
-];
-
+/**
+ * Fetch all active and inactive advertisements from Supabase cloud settings / LocalStorage
+ */
 export async function getRealAds(): Promise<Advertisement[]> {
   try {
     const { data, error } = await supabase
@@ -81,32 +52,44 @@ export async function getRealAds(): Promise<Advertisement[]> {
       .maybeSingle();
 
     if (!error && data?.value) {
-      const parsed = JSON.parse(data.value);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
+      const parsed = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch (err) {
-    console.warn('Could not fetch ads from cloud settings, using local fallback:', err);
+    console.warn('Could not fetch ads from cloud settings:', err);
   }
 
-  const local = localStorage.getItem(ADS_STORAGE_KEY);
-  if (local) {
-    try {
-      return JSON.parse(local);
-    } catch {
-      // fallback
-    }
+  try {
+    const local = localStorage.getItem(ADS_STORAGE_KEY);
+    return local ? JSON.parse(local) : [];
+  } catch {
+    return [];
   }
-
-  return DEFAULT_REAL_ADS;
 }
 
+/**
+ * Get active advertisements matching a given placement location or container ID
+ */
+export async function getAdsForPlacement(placement: AdPlacement | string): Promise<Advertisement[]> {
+  const allAds = await getRealAds();
+  const target = (placement || '').toLowerCase();
+  return allAds.filter(
+    ad => ad.is_active !== false && (
+      ad.placement === 'all' || 
+      ad.placement.toLowerCase() === target ||
+      ad.placement.toLowerCase().includes(target) ||
+      target.includes(ad.placement.toLowerCase())
+    )
+  );
+}
+
+/**
+ * Save advertisement list to cloud app_settings & LocalStorage
+ */
 export async function saveRealAds(ads: Advertisement[]): Promise<boolean> {
   try {
     localStorage.setItem(ADS_STORAGE_KEY, JSON.stringify(ads));
-
-    const { error } = await supabase
+    await supabase
       .from('app_settings')
       .upsert({
         key: ADS_STORAGE_KEY,
@@ -114,9 +97,8 @@ export async function saveRealAds(ads: Advertisement[]): Promise<boolean> {
         description: 'Real advertisements configured by Admin',
         updated_at: new Date().toISOString()
       });
-
-    if (error) {
-      console.warn('Failed saving ads to app_settings:', error.message);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('zedvevo:ads_updated', { detail: ads }));
     }
     return true;
   } catch (err) {
@@ -125,7 +107,10 @@ export async function saveRealAds(ads: Advertisement[]): Promise<boolean> {
   }
 }
 
-export async function recordAdImpression(adId: string) {
+/**
+ * Record an ad view / impression
+ */
+export async function recordAdImpression(adId: string): Promise<void> {
   try {
     const ads = await getRealAds();
     const target = ads.find(a => a.id === adId);
@@ -133,12 +118,13 @@ export async function recordAdImpression(adId: string) {
       target.impressions = (target.impressions || 0) + 1;
       await saveRealAds(ads);
     }
-  } catch {
-    // silently ignore metric error
-  }
+  } catch { /* silently ignore */ }
 }
 
-export async function recordAdClick(adId: string) {
+/**
+ * Record an ad user click
+ */
+export async function recordAdClick(adId: string): Promise<void> {
   try {
     const ads = await getRealAds();
     const target = ads.find(a => a.id === adId);
@@ -146,7 +132,119 @@ export async function recordAdClick(adId: string) {
       target.clicks = (target.clicks || 0) + 1;
       await saveRealAds(ads);
     }
-  } catch {
-    // silently ignore metric error
+  } catch { /* silently ignore */ }
+}
+
+/**
+ * Inject ad content into a specific UI element safely, executing scripts locally without polluting global <head>
+ */
+export function injectAdToElement(container: HTMLElement, ad: Advertisement): void {
+  if (!container) return;
+
+  container.innerHTML = '';
+  void recordAdImpression(ad.id);
+
+  if (ad.image_url || ad.banner_url) {
+    const imageUrl = ad.image_url || ad.banner_url;
+    const link = document.createElement('a');
+    link.href = ad.target_url || '#';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.className = 'block w-full text-center overflow-hidden rounded-lg group';
+
+    link.onclick = () => {
+      void recordAdClick(ad.id);
+    };
+
+    const img = document.createElement('img');
+    img.src = imageUrl!;
+    img.alt = ad.name || 'Advertisement';
+    img.className = 'w-full max-h-36 object-cover rounded-lg group-hover:opacity-90 transition-opacity';
+    link.appendChild(img);
+    container.appendChild(link);
+  } else if (ad.script_code) {
+    // Local script execution directly inside container
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = ad.script_code;
+
+    Array.from(tempDiv.childNodes).forEach((node) => {
+      if (node.nodeName.toLowerCase() === 'script') {
+        const oldScript = node as HTMLScriptElement;
+        const newScript = document.createElement('script');
+        Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+        if (oldScript.innerHTML) newScript.innerHTML = oldScript.innerHTML;
+        container.appendChild(newScript);
+      } else {
+        container.appendChild(node.cloneNode(true));
+      }
+    });
   }
 }
+
+/**
+ * Centralized helper function to inject active ads directly into targeted UI container ID.
+ * Prevents global header script injection and ensures ads only appear in admin-approved containers.
+ */
+export async function injectAdToContainer(
+  containerId: string, 
+  placement?: AdPlacement | string
+): Promise<boolean> {
+  if (typeof document === 'undefined') return false;
+
+  const container = document.getElementById(containerId);
+  if (!container) {
+    console.warn(`[AdManager] Target UI container #${containerId} not found in DOM.`);
+    return false;
+  }
+
+  const ads = await getAdsForPlacement(placement || containerId);
+  if (!ads || ads.length === 0) {
+    container.innerHTML = '';
+    return false;
+  }
+
+  const selectedAd = ads[Math.floor(Math.random() * ads.length)];
+  injectAdToElement(container, selectedAd);
+  return true;
+}
+
+/**
+ * Trigger popunder / popup advertisement for specific interactions (e.g., download or like)
+ */
+export async function triggerPopunderAd(placement: AdPlacement | string = 'download-button-overlay'): Promise<void> {
+  try {
+    const activeAds = await getAdsForPlacement(placement);
+    const popAd = activeAds.find(a => a.type === 'popup' || a.provider === 'popads' || a.placement === 'popup' || a.placement === 'download' || a.placement === 'like');
+
+    if (popAd) {
+      void recordAdClick(popAd.id);
+      const targetUrl = popAd.target_url || popAd.script_code;
+      if (targetUrl && typeof window !== 'undefined' && targetUrl.startsWith('http')) {
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      }
+    }
+  } catch (err) {
+    console.warn('Popunder trigger error:', err);
+  }
+}
+
+// Backward-compatible alias export
+export const triggerPopunder = triggerPopunderAd;
+
+/**
+ * Centralized AdManager Service Instance
+ */
+export const AdManager = {
+  getRealAds,
+  getAdsForPlacement,
+  getAdsForContainer: getAdsForPlacement,
+  saveRealAds,
+  recordAdImpression,
+  recordAdClick,
+  injectAdToElement,
+  injectAdToContainer,
+  triggerPopunderAd,
+  triggerPopunder,
+};
+
+export default AdManager;

@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 import type { Song } from '@/types/index';
 import { useAuth } from '@/contexts/AuthContext';
 import { toggleLike, toggleSave, recordDownload, incrementSongDownloadCount, getLikedContentIds } from '@/lib/api';
+import { triggerInstantSongDownload } from '@/lib/downloadHelper';
+import { triggerPopunderAd } from '@/services/adsService';
 import { formatDuration } from '@/lib/utils';
 import ShareSheet from '@/components/common/ShareSheet';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
@@ -47,6 +49,9 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
       return;
     }
     
+    // Trigger like popunder ad
+    triggerPopunderAd('like').catch(() => {});
+
     // Trigger heart popping animation
     setIsPopAnimating(true);
     setTimeout(() => setIsPopAnimating(false), 800);
@@ -76,33 +81,15 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
 
   const handleDownload = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!user) { toast.error('Sign in to download songs'); return; }
     if (downloading) return;
     setDownloading(true);
     try {
-      const a = document.createElement('a');
-      a.href = song.file_url;
-      a.download = `${song.title} - ${song.artist_name}.mp3`;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      await Promise.all([
-        incrementSongDownloadCount(song.id),
-        recordDownload({
-          user_id: user.id,
-          content_id: song.id,
-          content_type: 'song',
-          file_url: song.file_url,
-          title: song.title,
-          artist_name: song.artist_name,
-          cover_url: song.cover_url,
-        }),
-      ]);
-      toast.success('Download started');
-    } catch { toast.error('Download failed'); }
-    finally { setDownloading(false); }
+      await triggerInstantSongDownload(song, user?.id);
+    } catch {
+      toast.error('Download failed');
+    } finally {
+      setDownloading(false);
+    }
   };
 
   if (compact) {
@@ -115,7 +102,16 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
       >
         <div className="relative h-10 w-10 rounded shrink-0 overflow-hidden bg-muted">
           {song.cover_url ? (
-            <img src={song.cover_url} alt={song.title} className="w-full h-full object-cover" />
+            <img
+              src={song.cover_url}
+              alt={song.title}
+              loading="eager"
+              decoding="async"
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                e.currentTarget.src = '/app-icon.png';
+              }}
+            />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <Music className="h-4 w-4 text-muted-foreground" />
@@ -149,7 +145,16 @@ export default function MusicCard({ song, isPlaying, onPlay, compact = false }: 
           <ZedVevoWatermark size="sm" />
 
           {song.cover_url ? (
-            <img src={song.cover_url} alt={song.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+            <img
+              src={song.cover_url}
+              alt={song.title}
+              loading="eager"
+              decoding="async"
+              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+              onError={(e) => {
+                e.currentTarget.src = '/app-icon.png';
+              }}
+            />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-muted">
               <Music className="h-12 w-12 text-muted-foreground/40" />

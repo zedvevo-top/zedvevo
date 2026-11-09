@@ -9,6 +9,7 @@ export const ARTIST_PLANS = {
     duration: 1,
     durationUnit: 'day',
     songLimit: 1,
+    planType: 'k10_single',
     features: ['1 Song or Video Upload', '1 Day Access', 'Admin Review (24hrs)'],
   },
   weekly: {
@@ -18,6 +19,7 @@ export const ARTIST_PLANS = {
     duration: 7,
     durationUnit: 'days',
     songLimit: -1,
+    planType: 'k100_weekly',
     features: ['Unlimited Uploads', '7 Days Access', 'Standard Analytics', 'Priority Support'],
   },
   annual: {
@@ -27,7 +29,18 @@ export const ARTIST_PLANS = {
     duration: 365,
     durationUnit: 'days',
     songLimit: -1,
+    planType: 'k300_yearly',
     features: ['Unlimited Uploads', '1 Year Access', 'Advanced Analytics', 'Priority Support', 'Featured Placement'],
+  },
+  freshtunes: {
+    name: 'FreshTunes Distribution Access',
+    price: 120,
+    currency: 'ZMW',
+    duration: 365,
+    durationUnit: 'years',
+    songLimit: 0,
+    planType: 'k120_freshtunes',
+    features: ['Integrated FreshTunes Portal', 'Global DSPs (Spotify, Apple Music)', '100% Royalties Kept', 'One-Time Purchase (No ZedVevo Uploads)'],
   },
 }
 

@@ -133,9 +133,11 @@ export default function ArtistsPage() {
                               {artist.genre}
                             </p>
                           )}
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {formatNumber(artist.play_count || artist.monthly_listeners || 0)} plays
-                          </p>
+                          <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground mt-1.5">
+                            <span>{formatNumber(artist.play_count || 0)} plays</span>
+                            <span className="text-muted-foreground/40">•</span>
+                            <span>{formatNumber(artist.total_followers || 0)} followers</span>
+                          </div>
                         </CardContent>
                       </Card>
                     </Link>

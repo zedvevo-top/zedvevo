@@ -130,7 +130,7 @@ export default function MusicPage() {
                   onPlay={s => playSong(s, filtered)}
                 />
                 {(index + 1) % 10 === 0 && (
-                    <div className="col-span-1 aspect-square">
+                    <div key={`ad-${song.id}`} className="col-span-1 aspect-square">
                         <AdBanner position="music" format="compact" className="h-full w-full" />
                     </div>
                 )}

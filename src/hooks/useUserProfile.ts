@@ -1,9 +1,29 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase, type Profile } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { formatAvatarUrl } from '@/components/ui/avatar';
+import { KNOWN_USER_PHOTOS } from '@/lib/api';
+
+/**
+ * Resolves avatar URL for a profile, string URL, or known user.
+ */
+export function resolveUserAvatarUrl(user?: Partial<Profile> | string | null): string {
+  if (!user) return '';
+  if (typeof user === 'string') {
+    return formatAvatarUrl(user);
+  }
+  const userId = user.id;
+  if (userId && (KNOWN_USER_PHOTOS as Record<string, { avatar: string }>)?.[userId]?.avatar) {
+    return (KNOWN_USER_PHOTOS as Record<string, { avatar: string }>)[userId].avatar;
+  }
+  if (user.avatar_url) {
+    return formatAvatarUrl(user.avatar_url);
+  }
+  return '';
+}
 
 export function useUserProfile(targetUserId?: string | null) {
-  const { user: authUser, profile: authProfile } = useAuth();
+  const { user: authUser, profile: authProfile, refreshProfile: authRefreshProfile } = useAuth();
   const userId = targetUserId || authUser?.id;
 
   const [profile, setProfile] = useState<Profile | null>(() => {
@@ -35,7 +55,7 @@ export function useUserProfile(targetUserId?: string | null) {
       }
 
       if (data) {
-        if (data.avatar_url && !data.avatar_url.startsWith('http') && !data.avatar_url.startsWith('data:')) {
+        if (data.avatar_url && !data.avatar_url.startsWith('http') && !data.avatar_url.startsWith('data:') && !data.avatar_url.startsWith('blob:')) {
           const { data: pub } = supabase.storage.from('avatars').getPublicUrl(data.avatar_url);
           data.avatar_url = pub.publicUrl;
         }
@@ -81,7 +101,38 @@ export function useUserProfile(targetUserId?: string | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [userId, authUser]);
+  }, [userId, authUser, authProfile]);
+
+  const updateProfile = useCallback(async (updates: Partial<Profile>) => {
+    if (!userId) return null;
+    try {
+      const { data, error: updateErr } = await supabase
+        .from('profiles')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId)
+        .select()
+        .single();
+
+      if (updateErr) throw updateErr;
+
+      const updated = data as Profile;
+      if (updated.avatar_url && !updated.avatar_url.startsWith('http') && !updated.avatar_url.startsWith('data:') && !updated.avatar_url.startsWith('blob:')) {
+        const { data: pub } = supabase.storage.from('avatars').getPublicUrl(updated.avatar_url);
+        updated.avatar_url = pub.publicUrl;
+      }
+      setProfile(updated);
+      if (authRefreshProfile && (!targetUserId || targetUserId === authUser?.id)) {
+        await authRefreshProfile();
+      }
+      return updated;
+    } catch (err: any) {
+      console.error('Error updating profile:', err);
+      throw err;
+    }
+  }, [userId, authUser, targetUserId, authRefreshProfile]);
 
   useEffect(() => {
     if (targetUserId && targetUserId !== authUser?.id) {
@@ -106,7 +157,7 @@ export function useUserProfile(targetUserId?: string | null) {
         (payload) => {
           if (payload.new) {
             const updated = payload.new as Profile;
-            if (updated.avatar_url && !updated.avatar_url.startsWith('http') && !updated.avatar_url.startsWith('data:')) {
+            if (updated.avatar_url && !updated.avatar_url.startsWith('http') && !updated.avatar_url.startsWith('data:') && !updated.avatar_url.startsWith('blob:')) {
               const { data: pub } = supabase.storage.from('avatars').getPublicUrl(updated.avatar_url);
               updated.avatar_url = pub.publicUrl;
             }
@@ -121,11 +172,70 @@ export function useUserProfile(targetUserId?: string | null) {
     };
   }, [userId]);
 
+  const avatarUrl = resolveUserAvatarUrl(profile);
+  const displayName = profile?.display_name || profile?.username || authUser?.email?.split('@')[0] || '';
+
   return {
     profile,
+    avatarUrl,
+    displayName,
     isLoading,
+    loading: isLoading,
     error,
     refreshProfile: fetchProfile,
+    updateProfile,
+  };
+}
+
+export function useAllUserProfiles() {
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchProfiles = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data, error: fetchErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (fetchErr) {
+        throw fetchErr;
+      }
+
+      const formatted = (data || []).map((p: Profile) => {
+        let avatar = p.avatar_url;
+        if (avatar && !avatar.startsWith('http') && !avatar.startsWith('data:') && !avatar.startsWith('blob:')) {
+          const { data: pub } = supabase.storage.from('avatars').getPublicUrl(avatar);
+          avatar = pub.publicUrl;
+        }
+        return {
+          ...p,
+          avatar_url: avatar,
+        };
+      });
+
+      setProfiles(formatted);
+      setError(null);
+    } catch (err: any) {
+      console.error('Error fetching all profiles:', err);
+      setError(err?.message || 'Failed to fetch profiles');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProfiles();
+  }, [fetchProfiles]);
+
+  return {
+    profiles,
+    setProfiles,
+    loading,
+    error,
+    refreshProfiles: fetchProfiles,
   };
 }
 
@@ -166,48 +276,4 @@ export function useProfilesMap(userIds: string[]) {
   }, [userIds.join(',')]);
 
   return { profilesMap, isLoading };
-}
-
-export function useAllUserProfiles() {
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchProfiles = useCallback(async () => {
-    try {
-      setLoading(true);
-      const { data, error: fetchErr } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (fetchErr) throw fetchErr;
-      
-      const mapped = (data || []).map(p => {
-        if (p.avatar_url && !p.avatar_url.startsWith('http') && !p.avatar_url.startsWith('data:')) {
-          const { data: pub } = supabase.storage.from('avatars').getPublicUrl(p.avatar_url);
-          p.avatar_url = pub.publicUrl;
-        }
-        return p;
-      });
-      
-      setProfiles(mapped);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchProfiles();
-  }, [fetchProfiles]);
-
-  return { profiles, setProfiles, loading, error, refreshProfiles: fetchProfiles };
-}
-
-export function resolveUserAvatarUrl(profile: Partial<Profile> | null) {
-  if (!profile) return undefined;
-  if (profile.avatar_url) return profile.avatar_url;
-  return undefined;
 }

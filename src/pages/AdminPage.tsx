@@ -3,7 +3,8 @@ import { Navigate } from 'react-router-dom';
 import {
   Users, Music2, Video, CreditCard, Trophy, Image, Settings,
   Pencil, Trash2, Plus,
-  Loader2, TrendingUp, Star, Bell, Download, RefreshCw, Eye, EyeOff, KeyRound
+  Loader2, TrendingUp, Star, Bell, Download, RefreshCw, Eye, EyeOff, KeyRound,
+  CheckCircle2, XCircle, Megaphone, Sparkles
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -33,7 +34,7 @@ import {
   getAllDownloads, getAllNominees, updateNomineeStatus, setVideoDownloadsEnabled,
   getAllWinnersOfMonth, upsertWinnerOfMonth, publishWinnerOfMonth,
   getWeeklyTrending, computeAndStoreWeeklyTrending, createNotification,
-  requestLipilaWithdrawal
+  requestLipilaWithdrawal, confirmPaymentStatus
 } from '@/lib/api';
 import type {
   Profile, Song, Video as VideoType, Payment, Award, AwardCategory,
@@ -41,6 +42,8 @@ import type {
 } from '@/types/index';
 import { formatDate, formatCurrency, getPaymentStatusColor, getPaymentStatusLabel } from '@/lib/utils';
 import AdminArtistEarningsBreakdown from '@/components/admin/AdminArtistEarningsBreakdown';
+import AdminArtists from '@/pages/admin/Artists';
+import AdminAdsPage from '@/pages/admin/AdminAdsPage';
 
 export default function AdminPage() {
   const { profile, user } = useAuth();
@@ -418,7 +421,8 @@ export default function AdminPage() {
     load();
   }, [profile]);
 
-  if (profile?.role !== 'admin') return <Navigate to="/" replace />;
+  const isAdminUser = profile?.role === 'admin' || profile?.role === 'super_admin' || user?.email === 'topkuchalo@gmail.com';
+  if (!isAdminUser) return <Navigate to="/" replace />;
 
   // Settings updater
   const saveSetting = async (key: string, value: string) => {
@@ -620,6 +624,8 @@ export default function AdminPage() {
           <TabsList className="flex flex-wrap gap-1 h-auto bg-transparent border border-border rounded-lg p-1 mb-6">
             {[
               { value: 'content',   label: 'Content',   icon: Music2 },
+              { value: 'artists',   label: 'Artists & Stats', icon: Users },
+              { value: 'ads',       label: 'Advertisements', icon: Megaphone },
               { value: 'downloads', label: 'Downloads',  icon: Download },
               { value: 'nominees',  label: 'Nominees',   icon: Trophy },
               { value: 'winners',   label: 'Winners',    icon: Star },
@@ -637,6 +643,16 @@ export default function AdminPage() {
               </TabsTrigger>
             ))}
           </TabsList>
+
+          {/* Artists tab (Full Management & Statistics) */}
+          <TabsContent value="artists">
+            <AdminArtists />
+          </TabsContent>
+
+          {/* Advertisements tab (Real Ad System) */}
+          <TabsContent value="ads">
+            <AdminAdsPage />
+          </TabsContent>
 
           {/* Downloads tab */}
           <TabsContent value="downloads">
@@ -1051,14 +1067,14 @@ export default function AdminPage() {
               <table className="w-full min-w-[600px] text-sm">
                 <thead>
                   <tr className="border-b border-border">
-                    {['Date', 'Type', 'Method', 'Amount', 'Status', 'Lipila TX'].map(h => (
+                    {['Date', 'Type', 'Method', 'Amount', 'Status', 'Lipila TX', 'Actions'].map(h => (
                       <th key={h} className="text-left py-2 px-2 text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={6}><Skeleton className="h-8 w-full mt-2" /></td></tr>
+                    <tr><td colSpan={7}><Skeleton className="h-8 w-full mt-2" /></td></tr>
                   ) : payments.map(p => (
                     <tr key={p.id} className="border-b border-border hover:bg-muted/30">
                       <td className="py-2 px-2 whitespace-nowrap text-muted-foreground">{formatDate(p.created_at)}</td>
@@ -1069,6 +1085,37 @@ export default function AdminPage() {
                         <span className={`text-xs font-medium ${getPaymentStatusColor(p.status)}`}>{getPaymentStatusLabel(p.status)}</span>
                       </td>
                       <td className="py-2 px-2 whitespace-nowrap text-muted-foreground text-[10px]">{p.lipila_transaction_id || '—'}</td>
+                      <td className="py-2 px-2 whitespace-nowrap">
+                        {p.status === 'pending' ? (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              className="h-6 text-[10px] px-2 bg-green-600 hover:bg-green-700 text-white"
+                              onClick={async () => {
+                                await confirmPaymentStatus(p.id, 'successful');
+                                setPayments(prev => prev.map(item => item.id === p.id ? { ...item, status: 'successful' } : item));
+                                toast.success('Payment confirmed & plan activated!');
+                              }}
+                            >
+                              Confirm
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="h-6 text-[10px] px-2"
+                              onClick={async () => {
+                                await confirmPaymentStatus(p.id, 'failed');
+                                setPayments(prev => prev.map(item => item.id === p.id ? { ...item, status: 'failed' } : item));
+                                toast.info('Payment marked failed');
+                              }}
+                            >
+                              Reject
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground capitalize">Complete</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1602,74 +1649,288 @@ export default function AdminPage() {
             </div>
           </TabsContent>
 
-          {/* Settings */}
+          {/* Fully Functional Settings (Requirement 6) */}
           <TabsContent value="settings">
-            <div className="space-y-6 max-w-xl">
-              <div>
-                <h2 className="text-sm font-semibold mb-3">Upload Plan Prices</h2>
-                <div className="space-y-3">
+            <div className="space-y-8 max-w-3xl">
+              {/* 1. Upload Plans Configuration */}
+              <div className="p-5 border border-border rounded-xl bg-card">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-base font-bold text-foreground">Upload Plan Prices & Durations</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Configure artist upload plan prices, validity periods, and upload allowances.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">upload_plans</Badge>
+                </div>
+                <div className="space-y-4">
                   {plans.map(plan => (
-                    <div key={plan.id} className="flex items-center gap-3">
-                      <Label className="w-40 shrink-0 text-sm">{plan.name}</Label>
-                      <div className="flex items-center gap-2 flex-1">
-                        <span className="text-muted-foreground text-sm">K</span>
-                        <Input
-                          type="number"
-                          defaultValue={plan.price}
-                          className="w-24"
-                          onBlur={async e => {
-                            const val = parseFloat(e.target.value);
-                            if (isNaN(val) || val <= 0) return;
-                            try {
-                              await updatePlan(plan.id, { price: val });
-                              setPlans(prev => prev.map(p => p.id === plan.id ? { ...p, price: val } : p));
-                              toast.success('Plan price updated');
-                            } catch { toast.error('Failed to update price'); }
-                          }}
-                        />
+                    <div key={plan.id} className="p-3.5 border border-border/70 rounded-lg bg-muted/20 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-sm text-foreground">{plan.name}</span>
+                        <Badge variant="secondary" className="text-[10px] font-mono">
+                          {plan.plan_type}
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                        <div>
+                          <Label className="text-[11px] text-muted-foreground">Price (ZMW)</Label>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className="text-xs font-semibold text-muted-foreground">K</span>
+                            <Input
+                              type="number"
+                              defaultValue={plan.price}
+                              className="h-8 text-xs bg-card"
+                              onBlur={async e => {
+                                const val = parseFloat(e.target.value);
+                                if (isNaN(val) || val < 0) return;
+                                try {
+                                  await updatePlan(plan.id, { price: val });
+                                  setPlans(prev => prev.map(p => p.id === plan.id ? { ...p, price: val } : p));
+                                  toast.success(`${plan.name} price updated to K${val}`);
+                                } catch { toast.error('Failed to update price'); }
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <Label className="text-[11px] text-muted-foreground">Duration (Days)</Label>
+                          <Input
+                            type="number"
+                            defaultValue={plan.validity_days || (plan.plan_type === 'k100_weekly' ? 7 : plan.plan_type === 'k300_yearly' ? 365 : 1)}
+                            className="h-8 text-xs mt-1 bg-card"
+                            onBlur={async e => {
+                              const val = parseInt(e.target.value, 10);
+                              if (isNaN(val) || val <= 0) return;
+                              try {
+                                await updatePlan(plan.id, { validity_days: val });
+                                setPlans(prev => prev.map(p => p.id === plan.id ? { ...p, validity_days: val } : p));
+                                toast.success(`${plan.name} duration set to ${val} days`);
+                              } catch { toast.error('Failed to update validity'); }
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <Label className="text-[11px] text-muted-foreground">Uploads Limit</Label>
+                          <Input
+                            type="number"
+                            defaultValue={plan.uploads_allowed === null ? 0 : plan.uploads_allowed}
+                            placeholder="0 = Unlimited"
+                            className="h-8 text-xs mt-1 bg-card"
+                            onBlur={async e => {
+                              const val = parseInt(e.target.value, 10);
+                              const allowed = isNaN(val) || val <= 0 ? null : val;
+                              try {
+                                await updatePlan(plan.id, { uploads_allowed: allowed });
+                                setPlans(prev => prev.map(p => p.id === plan.id ? { ...p, uploads_allowed: allowed } : p));
+                                toast.success(`${plan.name} uploads limit set to ${allowed ?? 'Unlimited'}`);
+                              } catch { toast.error('Failed to update uploads limit'); }
+                            }}
+                          />
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="border-t border-border pt-4">
-                <h2 className="text-sm font-semibold mb-3">Awards Pricing</h2>
+              {/* 2. Payment Gateway Configuration */}
+              <div className="p-5 border border-border rounded-xl bg-card space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-bold text-foreground">Payment Gateway Configuration</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Configure Lipila Mobile Money integration, environment mode, and settlement controls.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">Lipila</Badge>
+                </div>
+
                 <div className="space-y-3">
-                  {[
-                    { key: 'nominee_fee', label: 'Nominee Registration Fee', desc: 'K per nomination' },
-                    { key: 'vote_min_amount', label: 'Minimum Vote Amount', desc: 'K = 1 vote' },
-                  ].map(({ key, label, desc }) => (
-                    <div key={key} className="flex items-center gap-3">
-                      <div className="w-52 shrink-0">
-                        <p className="text-sm font-medium">{label}</p>
-                        <p className="text-xs text-muted-foreground">{desc}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground text-sm">K</span>
-                        <Input
-                          type="number"
-                          defaultValue={settings[key] || ''}
-                          className="w-24"
-                          onBlur={async e => {
-                            const val = e.target.value;
-                            if (!val || isNaN(parseFloat(val))) return;
-                            await saveSetting(key, val);
-                          }}
-                        />
-                        {settingSaving[key] && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-                      </div>
+                  <div>
+                    <Label className="text-xs">Lipila Public Key / Account ID</Label>
+                    <Input
+                      defaultValue={settings['lipila_public_key'] || ''}
+                      placeholder="e.g. lipila_live_pub_..."
+                      className="mt-1 h-8 text-xs font-mono bg-card"
+                      onBlur={e => saveSetting('lipila_public_key', e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Lipila Secret API Key</Label>
+                    <Input
+                      type="password"
+                      defaultValue={settings['lipila_secret_key'] || ''}
+                      placeholder="••••••••••••••••••••••••••••••••"
+                      className="mt-1 h-8 text-xs font-mono bg-card"
+                      onBlur={e => saveSetting('lipila_secret_key', e.target.value)}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-border/70 bg-muted/20">
+                    <div>
+                      <Label className="text-xs font-semibold">Live Production Mode</Label>
+                      <p className="text-[10px] text-muted-foreground">
+                        {settings['lipila_mode'] === 'sandbox' ? 'Currently using Sandbox simulator' : 'Live production mobile money processing active'}
+                      </p>
                     </div>
-                  ))}
+                    <Switch
+                      checked={settings['lipila_mode'] !== 'sandbox'}
+                      onCheckedChange={checked => saveSetting('lipila_mode', checked ? 'live' : 'sandbox')}
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="border-t border-border pt-4">
-                <h2 className="text-sm font-semibold mb-3">Broadcast Notification</h2>
-                <Button size="sm" className="bg-accent hover:bg-accent/90 text-accent-foreground"
-                  onClick={() => setNotifDialog(true)}>
-                  <Bell className="h-3.5 w-3.5 mr-1" />Send to All Users
-                </Button>
+              {/* 3. Advertising System Settings */}
+              <div className="p-5 border border-border rounded-xl bg-card space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-bold text-foreground">Advertising Settings</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Enable or disable advertisements across the platform and configure partner scripts.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">Ads</Badge>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-border/70 bg-muted/20">
+                    <div>
+                      <Label className="text-xs font-semibold">Master Advertisements Switch</Label>
+                      <p className="text-[10px] text-muted-foreground">Turn all banners and ads on or off across ZedVevo</p>
+                    </div>
+                    <Switch
+                      checked={settings['ads_enabled'] !== 'false'}
+                      onCheckedChange={checked => {
+                        saveSetting('ads_enabled', String(checked));
+                        if (typeof window !== 'undefined') {
+                          window.dispatchEvent(new CustomEvent('zedvevo:ads_updated'));
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-xs">Google AdSense Publisher Client ID</Label>
+                    <Input
+                      defaultValue={settings['adsense_client_id'] || ''}
+                      placeholder="ca-pub-XXXXXXXXXXXXXXXX"
+                      className="mt-1 h-8 text-xs font-mono bg-card"
+                      onBlur={e => saveSetting('adsense_client_id', e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-xs">Global Leaderboard Ad Code (HTML / Script)</Label>
+                    <Textarea
+                      defaultValue={settings['ad_code_leaderboard'] || ''}
+                      placeholder="<!-- Paste Adsterra, PropellerAds, or custom script here -->"
+                      rows={2}
+                      className="mt-1 text-xs font-mono bg-card"
+                      onBlur={e => saveSetting('ad_code_leaderboard', e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Approvals & Moderation Settings */}
+              <div className="p-5 border border-border rounded-xl bg-card space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-bold text-foreground">Content & Approval Settings</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Configure automated publishing workflows and default content permissions.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">Workflow</Badge>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-border/70 bg-muted/20">
+                    <div>
+                      <Label className="text-xs font-semibold">Auto-Approve Uploaded Songs & Videos</Label>
+                      <p className="text-[10px] text-muted-foreground">Publish uploads immediately upon submission</p>
+                    </div>
+                    <Switch
+                      checked={settings['auto_approve_content'] !== 'false'}
+                      onCheckedChange={checked => saveSetting('auto_approve_content', String(checked))}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-border/70 bg-muted/20">
+                    <div>
+                      <Label className="text-xs font-semibold">Auto-Approve Paid Nominees</Label>
+                      <p className="text-[10px] text-muted-foreground">Automatically approve award nominees after successful fee payment</p>
+                    </div>
+                    <Switch
+                      checked={settings['auto_approve_nominees'] !== 'false'}
+                      onCheckedChange={checked => saveSetting('auto_approve_nominees', String(checked))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 5. Notification & Alert Settings */}
+              <div className="p-5 border border-border rounded-xl bg-card space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-bold text-foreground">Notification & Admin Alert Settings</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Configure real-time event triggers and notifications for payments, uploads, and votes.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">Realtime</Badge>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <Label className="text-xs">Super Admin Alert Email</Label>
+                    <Input
+                      defaultValue={settings['admin_notification_email'] || 'topkuchalo@gmail.com'}
+                      placeholder="topkuchalo@gmail.com"
+                      className="mt-1 h-8 text-xs bg-card"
+                      onBlur={e => saveSetting('admin_notification_email', e.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-border/70 bg-muted/20">
+                    <div>
+                      <Label className="text-xs font-semibold">Real-Time Alerts for Artist Payments</Label>
+                      <p className="text-[10px] text-muted-foreground">Notify Admin whenever an artist pays for an upload plan</p>
+                    </div>
+                    <Switch
+                      checked={settings['alert_on_payment'] !== 'false'}
+                      onCheckedChange={checked => saveSetting('alert_on_payment', String(checked))}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-border/70 bg-muted/20">
+                    <div>
+                      <Label className="text-xs font-semibold">Real-Time Alerts for Uploads</Label>
+                      <p className="text-[10px] text-muted-foreground">Notify Admin whenever a song or video is uploaded</p>
+                    </div>
+                    <Switch
+                      checked={settings['alert_on_upload'] !== 'false'}
+                      onCheckedChange={checked => saveSetting('alert_on_upload', String(checked))}
+                    />
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-semibold text-foreground">Broadcast Alert to Users</h4>
+                      <p className="text-[10px] text-muted-foreground">Send a system notification to all ZedVevo listeners</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="bg-accent hover:bg-accent/90 text-accent-foreground gap-1.5 h-8 text-xs font-semibold"
+                      onClick={() => setNotifDialog(true)}
+                    >
+                      <Bell className="h-3.5 w-3.5" /> Broadcast Announcement
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
           </TabsContent>
