@@ -1,7 +1,10 @@
 {
   "rewrites": [
     { "source": "/api/payments/verify", "destination": "/api/verify-payment.js" },
+    { "source": "/api/verify-payment", "destination": "/api/verify-payment.js" },
     { "source": "/api/lipila/webhook", "destination": "/api/webhook.js" },
+    { "source": "/api/webhook", "destination": "/api/webhook.js" },
+    { "source": "/api/adsterra-sync", "destination": "/api/adsterra-sync.js" },
     { "source": "/robots.txt", "destination": "/api/robots.js" },
     { "source": "/sitemap.xml", "destination": "/api/sitemap.js" },
     { "source": "/song/:id", "destination": "/api/song.js?slug=:id" },
