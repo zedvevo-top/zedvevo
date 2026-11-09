@@ -1,100 +1,185 @@
-import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { getVideoById } from '@/lib/api';
-import type { Video } from '@/types/index';
-import { useOgMeta } from '@/hooks/use-og-meta';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Button } from '@/components/ui/button';
-import { ArrowLeft, VideoIcon } from 'lucide-react';
-import BackToHome from '@/components/common/BackToHome';
+import { useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { motion } from 'motion/react'
+import { Play, Pause, Share2, Download, ThumbsUp, MessageCircle } from 'lucide-react'
+import { Helmet } from 'react-helmet-async'
+import { useVideo } from '@/hooks'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { UserAvatar } from '@/components/ui/avatar'
+import { formatDuration, formatNumber, formatDate } from '@/utils'
+import { Link } from 'react-router-dom'
+import AdBanner from '@/components/ads/AdBanner'
 
 export default function VideoPage() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const [video, setVideo] = useState<Video | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const { slug } = useParams<{ slug: string }>()
+  const { data: video, isLoading, error } = useVideo(slug!)
+  const [isPlaying, setIsPlaying] = useState(false)
 
-  useEffect(() => {
-    if (!id) { setNotFound(true); setLoading(false); return; }
-    getVideoById(id)
-      .then(v => { if (v) setVideo(v); else setNotFound(true); })
-      .catch(() => setNotFound(true))
-      .finally(() => setLoading(false));
-  }, [id]);
-
-  const artistLabel = video?.featured_artists
-    ? `${video.artist_name} ft. ${video.featured_artists}`
-    : video?.artist_name ?? '';
-
-  useOgMeta({
-    title: video ? `${video.title} — ${artistLabel} | ZedVevo` : 'ZedVevo — Zambian Videos',
-    description: video
-      ? `Watch "${video.title}" by ${artistLabel} on ZedVevo — Zambia's video platform.`
-      : 'Discover Zambian music videos on ZedVevo.',
-    imageUrl: video?.thumbnail_url ?? undefined,
-    pageUrl: video
-      ? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/share?video=${video.id}`
-      : undefined,
-  });
-
-  if (loading) return (
-    <div className="min-h-screen flex flex-col">
-      <BackToHome />
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="w-full max-w-xl space-y-4">
-          <Skeleton className="aspect-video w-full rounded-xl" />
-          <Skeleton className="h-6 w-3/4" />
-          <Skeleton className="h-4 w-1/2" />
-        </div>
+  if (error) {
+    return (
+      <div className="container px-4 py-16 text-center">
+        <h1 className="text-2xl font-bold text-white mb-4">Video not found</h1>
       </div>
-    </div>
-  );
+    )
+  }
 
-  if (notFound || !video) return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-8 text-center">
-      <VideoIcon className="h-12 w-12 text-muted-foreground/30" />
-      <p className="text-muted-foreground">Video not found.</p>
-      <Button variant="outline" onClick={() => navigate('/videos')}>
-        <ArrowLeft className="h-4 w-4 mr-2" /> Browse Videos
-      </Button>
-    </div>
-  );
+  if (isLoading) {
+    return (
+      <div className="container px-4 py-8">
+        <Skeleton className="w-full aspect-video mb-8" />
+        <Skeleton className="w-48 h-8 mb-4" />
+        <Skeleton className="w-32 h-6" />
+      </div>
+    )
+  }
+
+  if (!video) return null
+
+  const rawThumb = video.thumbnail_url || ''
+  const absoluteThumbUrl = rawThumb.startsWith('http://') || rawThumb.startsWith('https://')
+    ? rawThumb
+    : (rawThumb ? `${typeof window !== 'undefined' ? window.location.origin : ''}${rawThumb.startsWith('/') ? '' : '/'}${rawThumb}` : `${typeof window !== 'undefined' ? window.location.origin : ''}/og-image.png`)
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <BackToHome />
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="w-full max-w-xl space-y-5">
-          {/* Video player */}
-          <div className="aspect-video w-full rounded-xl overflow-hidden bg-muted shadow-sm">
-            {video.file_url
-              ? <video
-                  src={video.file_url}
-                  poster={video.thumbnail_url ?? undefined}
-                  controls
-                  className="w-full h-full object-cover"
-                />
-              : video.thumbnail_url
-                ? <img src={video.thumbnail_url} alt={video.title} className="w-full h-full object-cover" />
-                : <div className="w-full h-full flex items-center justify-center">
-                    <VideoIcon className="h-16 w-16 text-muted-foreground/30" />
-                  </div>
+    <>
+      <Helmet>
+        <title>{video.title} by {video.artist?.stage_name || (video as any).artist_name || 'ZedVevo'} — ZedVevo</title>
+        <meta property="og:site_name" content="ZedVevo" />
+        <meta property="og:title" content={`${video.title} by ${video.artist?.stage_name || (video as any).artist_name || 'ZedVevo'} (Official Video)`} />
+        <meta property="og:description" content={video.description ? video.description.slice(0, 160) : `Watch the official music video for "${video.title}" on ZedVevo.`} />
+        <meta property="og:image" content={absoluteThumbUrl} />
+        <meta property="og:image:secure_url" content={absoluteThumbUrl} />
+        <meta property="og:type" content="video.other" />
+        <meta property="og:url" content={typeof window !== 'undefined' ? window.location.href : ''} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={`${video.title} by ${video.artist?.stage_name || (video as any).artist_name || 'ZedVevo'}`} />
+        <meta name="twitter:description" content={video.description ? video.description.slice(0, 160) : `Watch "${video.title}" on ZedVevo.`} />
+        <meta name="twitter:image" content={absoluteThumbUrl} />
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "VideoObject",
+            "name": `${video.title} by ${video.artist?.stage_name || (video as any).artist_name || 'ZedVevo'}`,
+            "description": video.description || `Watch official music video for "${video.title}" on ZedVevo.`,
+            "thumbnailUrl": absoluteThumbUrl,
+            "uploadDate": video.created_at || new Date().toISOString(),
+            "contentUrl": video.video_url || undefined,
+            "embedUrl": typeof window !== 'undefined' ? window.location.href : '',
+            "interactionStatistic": {
+              "@type": "InteractionCounter",
+              "interactionType": "https://schema.org/WatchAction",
+              "userInteractionCount": video.view_count || 0,
             }
+          })}
+        </script>
+      </Helmet>
+      <div className="min-h-screen">
+      {/* Video Player */}
+      <div className="relative bg-black">
+        <div className="container px-4 py-8">
+          <div className="relative aspect-video bg-dark-gray rounded-lg overflow-hidden">
+            <video
+              src={video.video_url || undefined}
+              poster={video.thumbnail_url || undefined}
+              controls
+              className="w-full h-full"
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+            />
           </div>
-
-          {/* Meta */}
-          <div className="space-y-1">
-            <h1 className="text-xl font-semibold leading-tight">{video.title}</h1>
-            <p className="text-sm text-muted-foreground">{artistLabel}</p>
-            {video.genre && <p className="text-xs text-muted-foreground">{video.genre}</p>}
-          </div>
-
-          <Button variant="outline" className="w-full" onClick={() => navigate('/videos')}>
-            <ArrowLeft className="h-4 w-4 mr-2" /> All Videos
-          </Button>
         </div>
       </div>
-    </div>
-  );
+
+      {/* Video Info */}
+      <div className="container px-4 py-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold text-white mb-2">{video.title}</h1>
+              <div className="flex items-center gap-4 text-gray-400">
+                <span>{formatNumber(video.view_count)} views</span>
+                <span>•</span>
+                <span>{formatDate(video.created_at)}</span>
+                <span>•</span>
+                <span>{formatDuration(video.duration)}</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm">
+                <ThumbsUp className="mr-2 h-4 w-4" />
+                Like
+              </Button>
+              <Button variant="outline" size="sm">
+                <Share2 className="mr-2 h-4 w-4" />
+                Share
+              </Button>
+              <Button variant="outline" size="sm">
+                <Download className="mr-2 h-4 w-4" />
+                Download
+              </Button>
+            </div>
+          </div>
+
+          <AdBanner position="videos" format="leaderboard" />
+
+          {/* Artist Info */}
+          <Card className="mb-8">
+            <CardContent className="p-4 flex items-center gap-4">
+              <Link to={`/artist/${video.artist?.id}`}>
+                <UserAvatar
+                  name={video.artist?.stage_name}
+                  image={video.artist?.user?.avatar_url}
+                  size="lg"
+                />
+              </Link>
+              <div className="flex-1">
+                <Link
+                  to={`/artist/${video.artist?.id}`}
+                  className="font-semibold text-white hover:text-electric"
+                >
+                  {video.artist?.stage_name || 'Unknown Artist'}
+                </Link>
+                {video.artist?.verified && (
+                  <Badge variant="default" className="ml-2 text-xs">Verified</Badge>
+                )}
+                <p className="text-sm text-gray-400">
+                  {formatNumber(video.artist?.total_followers || 0)} followers
+                </p>
+              </div>
+              <Button>Follow</Button>
+            </CardContent>
+          </Card>
+
+          {/* Description */}
+          {video.description && (
+            <Card className="mb-8">
+              <CardContent className="p-4">
+                <p className="text-gray-300 whitespace-pre-wrap">{video.description}</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Comments Section Placeholder */}
+          <div>
+            <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+              <MessageCircle className="h-5 w-5" />
+              Comments
+            </h2>
+            <Card>
+              <CardContent className="p-8 text-center text-gray-400">
+                Comments are available after login
+              </CardContent>
+            </Card>
+          </div>
+        </motion.div>
+      </div>
+      </div>
+    </>
+  )
 }

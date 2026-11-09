@@ -42,7 +42,12 @@ export default function LoginPage() {
       toast.success('Welcome back!');
       navigate('/');
     } catch (err: unknown) {
-      toast.error((err as Error).message || 'Login failed. Check your email and password.');
+      const errMsg = (err as Error).message || '';
+      if (errMsg.toLowerCase().includes('rate')) {
+        toast.error('Too many login attempts. Please wait 60 seconds and try again.');
+      } else {
+        toast.error(errMsg || 'Login failed. Check your email and password.');
+      }
     } finally { setLoginLoading(false); }
   };
 
@@ -59,7 +64,12 @@ export default function LoginPage() {
       toast.success('Account created! Welcome to ZedVevo.');
       navigate('/');
     } catch (err: unknown) {
-      toast.error((err as Error).message || 'Registration failed. Try a different username or email.');
+      const errMsg = (err as Error).message || '';
+      if (errMsg.toLowerCase().includes('rate')) {
+        toast.error('Too many requests. Please wait 60 seconds and try again.');
+      } else {
+        toast.error(errMsg || 'Registration failed. Try a different username or email.');
+      }
     } finally { setRegLoading(false); }
   };
 

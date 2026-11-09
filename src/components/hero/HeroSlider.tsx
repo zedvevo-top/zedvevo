@@ -20,7 +20,6 @@ export default function HeroSlider() {
   useEffect(() => {
     getActiveBanners()
       .then(setBanners)
-      .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
 

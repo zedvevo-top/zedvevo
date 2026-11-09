@@ -11,6 +11,7 @@ import { formatDuration } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import ShareSheet from '@/components/common/ShareSheet';
+import { ZedVevoVideoBadge } from './ZedVevoVideoBadge';
 
 interface VideoPlayerProps {
   video: Video;
@@ -41,6 +42,20 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
   const [saved, setSaved] = useState(video.saved ?? false);
   const [shareOpen, setShareOpen] = useState(false);
   const countedRef = useRef(false);
+  const playPromiseRef = useRef<Promise<void> | null>(null);
+
+  const safePause = useCallback((v: HTMLVideoElement | null) => {
+    if (!v) return;
+    if (playPromiseRef.current) {
+      playPromiseRef.current
+        .catch(() => {})
+        .finally(() => {
+          try { v.pause(); } catch {}
+        });
+    } else {
+      try { v.pause(); } catch {}
+    }
+  }, []);
 
   const shareUrl = `${window.location.origin}/video/${video.id}`;
   const shareText = `Watch "${video.title}" by ${video.artist_name} on ZedVevo — ${window.location.origin}/video/${video.id}`;
@@ -52,8 +67,18 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
     setDuration(0);
     setError(null);
     countedRef.current = false;
-    videoRef.current?.load();
-  }, [video.id, video.file_url]);
+    const v = videoRef.current;
+    if (v) {
+      safePause(v);
+      if (playPromiseRef.current) {
+        playPromiseRef.current.catch(() => {}).finally(() => {
+          try { v.load(); } catch {}
+        });
+      } else {
+        try { v.load(); } catch {}
+      }
+    }
+  }, [video.id, video.file_url, safePause]);
 
   // Sync playback rate to the video element whenever it changes
   useEffect(() => {
@@ -85,9 +110,12 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
     const onCanPlay  = () => { setBuffering(false); v.playbackRate = playbackRate; };
     const onError    = () => { setError('Unable to play this video.'); setPlaying(false); };
     const onProgress = () => {
-      if (v.currentTime >= 10 && !countedRef.current) {
+      if (v.currentTime >= 2 && !countedRef.current) {
         countedRef.current = true;
         incrementViewCount(video.id).catch(() => {});
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('zedvevo:video-viewed', { detail: { videoId: video.id } }));
+        }
       }
     };
     const onFsChange = () => setFullscreen(!!document.fullscreenElement);
@@ -110,26 +138,37 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
       v.removeEventListener('canplay',        onCanPlay);
       v.removeEventListener('error',          onError);
       document.removeEventListener('fullscreenchange', onFsChange);
+      safePause(v);
     };
-  }, [video.id, playbackRate]);
+  }, [video.id, playbackRate, safePause]);
 
-  const togglePlay = useCallback(async () => {
+  const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v || error) return;
     if (playing) {
-      v.pause(); setPlaying(false);
+      setPlaying(false);
+      safePause(v);
     } else {
-      try {
-        setBuffering(true);
-        v.playbackRate = playbackRate;
-        await v.play();
-        setPlaying(true);
-      } catch {
-        setError('Playback failed. Try again or check your connection.');
-        setBuffering(false);
+      setBuffering(true);
+      v.playbackRate = playbackRate;
+      const p = v.play();
+      playPromiseRef.current = p;
+      if (p !== undefined) {
+        p.then(() => {
+          playPromiseRef.current = null;
+          setBuffering(false);
+          setPlaying(true);
+        }).catch((err: any) => {
+          playPromiseRef.current = null;
+          setBuffering(false);
+          if (err?.name === 'AbortError' || err?.message?.includes('interrupted') || err?.message?.includes('pause')) {
+            return;
+          }
+          setError('Playback failed. Try again or check your connection.');
+        });
       }
     }
-  }, [playing, error, playbackRate]);
+  }, [playing, error, playbackRate, safePause]);
 
   // Auto-hide controls
   const showControlsTemporarily = useCallback(() => {
@@ -242,18 +281,30 @@ export default function VideoPlayer({ video, onClose }: VideoPlayerProps) {
           </div>
         ) : (
           <>
-            {/* Video element — clicking video surface toggles play */}
-            <video
-              ref={videoRef}
-              src={video.file_url}
-              poster={video.thumbnail_url ?? undefined}
-              className="w-full h-full object-contain cursor-pointer"
-              muted={muted}
-              playsInline
-              preload="auto"
-              crossOrigin="anonymous"
-              onClick={togglePlay}
-            />
+            {/* ZedVevo Video Badge Overlay matching attached video */}
+            <ZedVevoVideoBadge />
+
+            {video.file_url?.includes('youtube.com') || video.file_url?.includes('youtu.be') || video.file_url?.includes('embed/') ? (
+              <iframe
+                src={video.file_url.includes('embed/') ? `${video.file_url}?autoplay=1&enablejsapi=1&rel=0` : `https://www.youtube.com/embed/${video.file_url.includes('youtu.be/') ? video.file_url.split('youtu.be/')[1]?.split('?')[0] : video.file_url.split('watch?v=')[1]?.split('&')[0] || '5qap5aO4i9A'}?autoplay=1&enablejsapi=1&rel=0`}
+                title={video.title}
+                className="w-full h-full border-0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            ) : (
+              <video
+                ref={videoRef}
+                src={video.file_url}
+                poster={video.thumbnail_url ?? undefined}
+                className="w-full h-full object-contain cursor-pointer"
+                muted={muted}
+                playsInline
+                preload="auto"
+                crossOrigin="anonymous"
+                onClick={togglePlay}
+              />
+            )}
 
             {/* Buffering spinner */}
             {buffering && (

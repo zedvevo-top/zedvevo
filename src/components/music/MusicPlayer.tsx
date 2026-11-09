@@ -8,6 +8,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { recordDownload, incrementSongDownloadCount } from '@/lib/api';
 import { formatDuration } from '@/lib/utils';
 import ShareSheet from '@/components/common/ShareSheet';
+import ZedVevoWatermark from '@/components/common/ZedVevoWatermark';
+import AdContainer from '@/components/ads/AdContainer';
 
 export default function MusicPlayer() {
   const { user } = useAuth();
@@ -21,7 +23,8 @@ export default function MusicPlayer() {
   if (!song) return null;
 
   const shareUrl = `${window.location.origin}/song/${song.id}`;
-  const shareText = `Listen to ${song.title} by ${song.artist_name} on ZedVevo`;
+  const shareTitle = `${song.title} by ${song.artist_name}`;
+  const shareText = `🎵 "${song.title}" by ${song.artist_name}\nStream & download on ZedVevo:`;
 
   const handleSeek = (val: number[]) => seek(val[0]);
 
@@ -76,13 +79,15 @@ export default function MusicPlayer() {
 
   return (
     /* sits above MobileNav (z-40) and below Header (z-50) */
-    <div className="fixed bottom-[56px] md:bottom-0 left-0 right-0 z-[45] glass border-t border-border">
+    <div className="fixed bottom-[56px] md:bottom-0 left-0 right-0 z-[45] glass border-t border-border flex flex-col">
+      <AdContainer containerName="above-player" className="px-3 py-1 max-w-7xl mx-auto w-full" />
       <div className="pb-[env(safe-area-inset-bottom,0px)]">
         <div className="max-w-7xl mx-auto px-3 py-2.5 flex items-center gap-2 md:gap-4">
 
           {/* Cover + info */}
           <div className="flex items-center gap-2.5 flex-1 min-w-0">
-            <div className="h-10 w-10 rounded overflow-hidden bg-muted shrink-0">
+            <div className="relative h-10 w-10 rounded overflow-hidden bg-muted shrink-0">
+              <ZedVevoWatermark size="sm" className="top-0.5 left-0.5 scale-75 origin-top-left" />
               {song.cover_url
                 ? <img src={song.cover_url} alt={song.title} className="w-full h-full object-cover" />
                 : <div className="w-full h-full flex items-center justify-center"><Music className="h-4 w-4 text-muted-foreground" /></div>
@@ -158,8 +163,11 @@ export default function MusicPlayer() {
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         url={shareUrl}
-        title={song.title}
+        title={shareTitle}
         text={shareText}
+        thumbnailUrl={song.cover_url}
+        embedId={song.id}
+        embedType="song"
       />
     </div>
   );

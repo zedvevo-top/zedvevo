@@ -9,6 +9,8 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { supabase } from '@/db/supabase';
+import { processUnifiedPayment, listenForPaymentStatus } from '@/lib/paymentProcessor';
+import PaymentStatusOverlay from '@/components/payment/PaymentStatusOverlay';
 
 const QUICK_AMOUNTS = [5, 10, 20, 50, 100];
 
@@ -28,6 +30,7 @@ export default function DonationDialog({ open, onClose }: DonationDialogProps) {
   const [step, setStep] = useState<Step>('form');
   const [polling, setPolling] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [activePaymentId, setActivePaymentId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = () => {
@@ -39,6 +42,7 @@ export default function DonationDialog({ open, onClose }: DonationDialogProps) {
     stopPolling();
     setStep('form');
     setErrorMsg('');
+    setActivePaymentId(null);
   };
 
   const handleClose = () => {
@@ -62,7 +66,7 @@ export default function DonationDialog({ open, onClose }: DonationDialogProps) {
 
         const status = payment?.status;
 
-        if (status === 'successful') {
+        if (status === 'completed' || status === 'successful') {
           stopPolling();
           setStep('done');
           toast.success('Donation confirmed! Thank you for supporting ZedVevo.');
@@ -99,74 +103,62 @@ export default function DonationDialog({ open, onClose }: DonationDialogProps) {
     setLoading(true);
     setErrorMsg('');
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-
-      const { data, error } = await supabase.functions.invoke('lipila-payment', {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        body: {
-          amount: parsed,
-          payment_method: 'mobile_money',
-          payment_type: 'donation',
-          phone_number: rawPhone,
-          idempotency_key: crypto.randomUUID(),
-          description: message.trim() || 'ZedVevo donation',
-          metadata: {
-            donor_name: donorName.trim() || null,
-            message: message.trim() || null,
-            guest_phone: rawPhone,
-          },
+      const result = await processUnifiedPayment({
+        amount: parsed,
+        payment_method: 'mobile_money',
+        phone_number: rawPhone,
+        description: message.trim() || 'ZedVevo donation',
+        payment_type: 'donation',
+        metadata: {
+          donor_name: donorName.trim() || null,
+          message: message.trim() || null,
+          guest_phone: rawPhone,
         },
       });
 
-      console.log('[donation] invoke result — data:', JSON.stringify(data), 'error:', error?.message);
-
-      if (data?.status === 'insufficient_funds') {
-        setErrorMsg('Insufficient funds. Please top up your mobile money and try again.');
+      if (!result.success) {
+        setErrorMsg(result.error || 'Payment failed.');
         setStep('error');
-        toast.error('Insufficient funds. Please top up and try again.');
+        toast.error(result.error || 'Payment failed.');
+        setLoading(false);
         return;
       }
 
-      if (data?.error) {
-        setErrorMsg(data.error);
-        setStep('error');
-        toast.error(data.error);
+      if (result.status === 'completed' || result.status === 'successful') {
+        setStep('done');
+        toast.success('Thank you for your donation!');
+        setLoading(false);
         return;
       }
 
-      if (error) {
-        let msg = error.message || 'Payment initiation failed. Please try again.';
-        try {
-          const ctx = (error as { context?: { json?: () => Promise<{ error?: string }> } }).context;
-          if (ctx?.json) { const b = await ctx.json(); msg = b?.error ?? msg; }
-        } catch { /* ignore */ }
-        setErrorMsg(msg);
-        setStep('error');
-        toast.error(msg);
-        return;
-      }
+      // STRICT PENDING STATE
+      setActivePaymentId(result.payment_id || null);
+      setStep('pending');
+      toast.info('Mobile Money prompt sent! Enter your PIN on your phone to complete the donation.');
 
-      if (data?.payment_id) {
-        setStep('pending');
-        toast.info('Request sent! Check your phone for the Mobile Money PIN prompt.');
-        pollStatus(data.payment_id);
-      } else {
-        throw new Error('No payment ID returned. Please try again.');
-      }
+      listenForPaymentStatus(result.payment_id!, (statusRes) => {
+        if (statusRes.status === 'completed') {
+          setStep('done');
+          toast.success('Thank you for your donation! Lipila confirmed payment.');
+        } else if (statusRes.status === 'failed') {
+          setErrorMsg(statusRes.failure_reason || 'Payment failed or was declined on phone.');
+          setStep('error');
+          toast.error(statusRes.failure_reason || 'Payment failed or was declined.');
+        }
+        setLoading(false);
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Payment failed. Please try again.';
       setErrorMsg(msg);
       setStep('error');
       toast.error(msg);
-    } finally {
       setLoading(false);
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) handleClose(); }}>
-      <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-md">
+      <DialogContent className="max-w-[calc(100%-2rem)] md:max-w-lg p-6 max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Heart className="h-5 w-5 text-destructive fill-destructive" />
@@ -284,63 +276,22 @@ export default function DonationDialog({ open, onClose }: DonationDialogProps) {
           </div>
         )}
 
-        {/* ── PENDING STEP ── */}
-        {step === 'pending' && (
-          <div className="py-6 flex flex-col items-center gap-4 text-center">
-            <div className="relative">
-              {polling
-                ? <Loader2 className="h-14 w-14 animate-spin text-accent" />
-                : <Clock className="h-14 w-14 text-muted-foreground" />
-              }
-            </div>
-            <div className="space-y-2">
-              <p className="font-semibold text-base">Check your phone now</p>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                A <span className="font-medium text-foreground">mobile money PIN prompt</span> has been sent to{' '}
-                <span className="font-medium text-foreground">{phone}</span>.
-              </p>
-              <div className="flex items-start gap-2 bg-muted/60 rounded-lg p-3 text-left">
-                <AlertCircle className="h-4 w-4 shrink-0 text-accent mt-0.5" />
-                <p className="text-xs text-muted-foreground">
-                  Enter your <strong className="text-foreground">mobile money PIN</strong> on your phone to confirm the K{parseFloat(amount || '0').toFixed(0)} donation. This page updates automatically.
-                </p>
-              </div>
-            </div>
-            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={handleClose}>
-              Close — donation will still process
-            </Button>
-          </div>
-        )}
-
-        {/* ── ERROR STEP ── */}
-        {step === 'error' && (
-          <div className="py-6 flex flex-col items-center gap-4 text-center">
-            <div className="h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center">
-              <XCircle className="h-8 w-8 text-destructive" />
-            </div>
-            <div className="space-y-1">
-              <p className="font-semibold">Payment Failed</p>
-              <p className="text-sm text-muted-foreground">{errorMsg || 'Something went wrong. Please try again.'}</p>
-            </div>
-            <Button className="w-full" onClick={resetForm}>Try Again</Button>
-          </div>
-        )}
-
-        {/* ── DONE STEP ── */}
-        {step === 'done' && (
-          <div className="py-6 flex flex-col items-center gap-4 text-center">
-            <div className="h-16 w-16 rounded-full bg-green-500/10 flex items-center justify-center">
-              <CheckCircle2 className="h-8 w-8 text-green-500" />
-            </div>
-            <div className="space-y-1">
-              <p className="font-semibold text-lg">Thank you! 🎵</p>
-              <p className="text-sm text-muted-foreground">
-                Your donation of <span className="font-medium text-foreground">K{parseFloat(amount || '0').toFixed(0)}</span> was received.
-                You help keep Zambian music free for everyone.
-              </p>
-            </div>
-            <Button className="w-full" onClick={handleClose}>Close</Button>
-          </div>
+        {/* Centralized Payment Status Overlay */}
+        {(step === 'pending' || step === 'done' || step === 'error') && (
+          <PaymentStatusOverlay
+            status={
+              step === 'pending' ? 'pending' :
+              step === 'done' ? 'success' :
+              'failed'
+            }
+            amount={parseFloat(amount || '0')}
+            description={message ? `Donation: ${message}` : 'Donation to ZedVevo'}
+            phone={phone}
+            failureReason={errorMsg}
+            onClose={handleClose}
+            onRetry={resetForm}
+            paymentId={activePaymentId || undefined}
+          />
         )}
       </DialogContent>
     </Dialog>

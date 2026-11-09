@@ -12,8 +12,15 @@ export function formatDuration(seconds?: number | null): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-ZM', { year: 'numeric', month: 'short', day: 'numeric' });
+export function formatDate(dateStr?: string | null): string {
+  if (!dateStr) return '—';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-ZM', { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch {
+    return '—';
+  }
 }
 
 export function formatCurrency(amount: number): string {

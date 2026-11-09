@@ -1,0 +1,6 @@
+{
+  "name": "ZedVevo",
+  "description": "Zambian Music, Video Streaming, and Annual Awards Platform",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
