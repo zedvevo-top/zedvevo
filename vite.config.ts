@@ -184,6 +184,23 @@ export default defineConfig({
             }
           }
 
+          if (url === "/api/proxy-audio") {
+            try {
+              enhanceResponse(res);
+              const parsedUrl = new URL(req.url || "", "http://localhost");
+              const query: Record<string, string> = {};
+              parsedUrl.searchParams.forEach((v, k) => { query[k] = v; });
+              (req as any).query = query;
+              const mod = await import("./api/proxy-audio.js");
+              await mod.default(req, res);
+              return;
+            } catch (err: any) {
+              res.writeHead(500, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ error: err.message }));
+              return;
+            }
+          }
+
           next();
         });
       },

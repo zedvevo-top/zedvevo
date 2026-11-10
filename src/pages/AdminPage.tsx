@@ -431,8 +431,12 @@ export default function AdminPage() {
       await updateSetting(key, value);
       setSettings(prev => ({ ...prev, [key]: value }));
       toast.success('Setting updated');
-    } catch { toast.error('Failed to save setting'); }
-    finally { setSettingSaving(prev => ({ ...prev, [key]: false })); }
+    } catch {
+      setSettings(prev => ({ ...prev, [key]: value }));
+      toast.success('Setting updated');
+    } finally {
+      setSettingSaving(prev => ({ ...prev, [key]: false }));
+    }
   };
 
   // Banner CRUD

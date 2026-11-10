@@ -12,16 +12,17 @@ export interface DownloadStartedPayload {
   file_url: string;
 }
 
-export function getCustomVoiceWatermarkUrl(): string | null {
+export function getCustomVoiceWatermarkUrl(): string {
   try {
     return (
       localStorage.getItem('zed_setting_audio_branding_voice_url') ||
       localStorage.getItem('zed_setting_watermark_voice_url') ||
-      localStorage.getItem('zed_setting_audio_jingle_url') ||
-      null
+      localStorage.getItem('zed_setting_audio_tag_custom_file_url') ||
+      localStorage.getItem('zed_setting_audio_branding_jingle_url') ||
+      '/audio/zedvevo-voice-watermark.wav'
     );
   } catch {
-    return null;
+    return '/audio/zedvevo-voice-watermark.wav';
   }
 }
 
@@ -58,9 +59,9 @@ export async function triggerInstantSongDownload(song: any, userId?: string) {
   const cleanArtist = (song.artist_name || song.artist?.stage_name || 'ZedVevo Artist').replace(/[/\\?%*:|"<>]/g, '').trim();
 
   // Sticked ZedVevo Watermark in the downloaded file name
-  const songFileName = `[ZedVevo] ${cleanTitle} - ${cleanArtist}.wav`;
+  const songFileName = `[ZedVevo] ${cleanTitle} - ${cleanArtist}.mp3`;
 
-  const toastId = toast.loading('Attaching ZedVevo voice tagline watermark...');
+  const toastId = toast.loading('Attaching ZedVevo voice watermark to download...');
 
   try {
     // 1. Attempt to create a real watermarked audio blob via OfflineAudioContext
@@ -75,14 +76,14 @@ export async function triggerInstantSongDownload(song: any, userId?: string) {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-      toast.success('Watermarked song download completed!', { id: toastId });
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+      toast.success('Watermarked song download completed! [ZedVevo Voice Attached]', { id: toastId });
     } else {
       // Fallback: Direct download with [ZedVevo] filename
       const a = document.createElement('a');
       a.href = url;
-      a.download = `[ZedVevo] ${cleanTitle} - ${cleanArtist}.mp3`;
-      a.setAttribute('download', `[ZedVevo] ${cleanTitle} - ${cleanArtist}.mp3`);
+      a.download = songFileName;
+      a.setAttribute('download', songFileName);
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
       document.body.appendChild(a);
@@ -94,8 +95,8 @@ export async function triggerInstantSongDownload(song: any, userId?: string) {
     // Direct download fallback
     const a = document.createElement('a');
     a.href = url;
-    a.download = `[ZedVevo] ${cleanTitle} - ${cleanArtist}.mp3`;
-    a.setAttribute('download', `[ZedVevo] ${cleanTitle} - ${cleanArtist}.mp3`);
+    a.download = songFileName;
+    a.setAttribute('download', songFileName);
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     document.body.appendChild(a);

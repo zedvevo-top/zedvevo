@@ -72,21 +72,37 @@ export async function getOrSynthesizeVoiceWatermarkBuffer(
 ): Promise<AudioBuffer> {
   const customVoiceUrl = getCustomVoiceWatermarkUrl();
 
-  if (customVoiceUrl) {
+  // 1. Try loading custom voice watermark or official voice watermark file
+  const candidateUrls = [
+    customVoiceUrl,
+    '/audio/zedvevo-voice-watermark.wav',
+    '/audio/zedvevo-voice-watermark.mp3',
+  ].filter(Boolean) as string[];
+
+  for (const url of candidateUrls) {
     try {
-      const res = await fetch(customVoiceUrl);
-      if (res.ok) {
+      let res = await fetch(url).catch(() => null);
+      if (!res || !res.ok) {
+        // Try proxy if external URL
+        if (url.startsWith('http')) {
+          res = await fetch(`/api/proxy-audio?url=${encodeURIComponent(url)}`).catch(() => null);
+        }
+      }
+      if (res && res.ok) {
         const ab = await res.arrayBuffer();
-        return await audioCtx.decodeAudioData(ab);
+        const decoded = await audioCtx.decodeAudioData(ab.slice(0));
+        if (decoded && decoded.duration > 0.5) {
+          return decoded;
+        }
       }
     } catch {
-      // Fallback to synthesized watermark
+      // Continue to next candidate
     }
   }
 
-  // Synthesize a clean 1.8-second ZedVevo brand voice chime + audio watermark
-  const sampleRate = audioCtx.sampleRate;
-  const duration = 1.8;
+  // 2. Synthesize fallback energetic radio chime + voice drop watermark
+  const sampleRate = audioCtx.sampleRate || 44100;
+  const duration = 2.4;
   const numSamples = Math.floor(sampleRate * duration);
   const buffer = audioCtx.createBuffer(2, numSamples, sampleRate);
   const left = buffer.getChannelData(0);
@@ -113,9 +129,9 @@ export async function getOrSynthesizeVoiceWatermarkBuffer(
       const envelope = Math.sin(((t - 0.5) / 0.7) * Math.PI);
       sample += 0.3 * Math.sin(2 * Math.PI * freqs[2] * t) * envelope;
     }
-    // Note 4: 0.8s - 1.8s
+    // Note 4: 0.8s - 2.4s (sustaining chime)
     if (t >= 0.8) {
-      const envelope = Math.exp(-(t - 0.8) * 3);
+      const envelope = Math.exp(-(t - 0.8) * 2.5);
       sample += 0.35 * Math.sin(2 * Math.PI * freqs[3] * t) * envelope;
     }
 
@@ -133,46 +149,46 @@ export async function createWatermarkedAudioBlob(
   audioUrl: string
 ): Promise<Blob | null> {
   try {
-    const res = await fetch(audioUrl);
-    if (!res.ok) return null;
-    const arrayBuffer = await res.arrayBuffer();
+    let res = await fetch(audioUrl, { mode: 'cors' }).catch(() => null);
+    if (!res || !res.ok) {
+      // Try audio proxy fallback
+      res = await fetch(`/api/proxy-audio?url=${encodeURIComponent(audioUrl)}`).catch(() => null);
+    }
+    if (!res || !res.ok) return null;
 
+    const arrayBuffer = await res.arrayBuffer();
     const tempCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const songBuffer = await tempCtx.decodeAudioData(arrayBuffer);
+    const songBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
 
     // Get voice watermark buffer
     const voiceBuffer = await getOrSynthesizeVoiceWatermarkBuffer(tempCtx);
 
-    const sampleRate = songBuffer.sampleRate;
+    const sampleRate = songBuffer.sampleRate || 44100;
     const voiceDuration = voiceBuffer.duration;
-    const totalDuration = songBuffer.duration + voiceDuration;
-    const totalSamples = Math.floor(totalDuration * sampleRate);
+    const songStartTime = Math.max(0, voiceDuration - 0.25);
+    const totalSamples = Math.ceil((songStartTime + songBuffer.duration + 0.5) * sampleRate);
 
-    // Create OfflineAudioContext to render watermarked audio
-    const offlineCtx = new OfflineAudioContext(
-      songBuffer.numberOfChannels,
-      totalSamples,
-      sampleRate
-    );
+    // Create 2-channel stereo OfflineAudioContext to render watermarked audio
+    const offlineCtx = new OfflineAudioContext(2, totalSamples, sampleRate);
 
     // Voice tag source at 0.0s
     const voiceSource = offlineCtx.createBufferSource();
     voiceSource.buffer = voiceBuffer;
 
     const voiceGain = offlineCtx.createGain();
-    voiceGain.gain.setValueAtTime(0.85, 0);
+    voiceGain.gain.setValueAtTime(0.95, 0);
+    voiceGain.gain.setValueAtTime(0.95, songStartTime);
+    voiceGain.gain.linearRampToValueAtTime(0.0, voiceDuration);
     voiceSource.connect(voiceGain);
     voiceGain.connect(offlineCtx.destination);
 
-    // Song source starting right after voice tag
+    // Song source starting seamlessly after voice tag
     const songSource = offlineCtx.createBufferSource();
     songSource.buffer = songBuffer;
 
     const songGain = offlineCtx.createGain();
-    const songStartTime = Math.max(0, voiceDuration - 0.2);
-
-    songGain.gain.setValueAtTime(0.1, songStartTime);
-    songGain.gain.linearRampToValueAtTime(1.0, songStartTime + 0.5);
+    songGain.gain.setValueAtTime(0.0, songStartTime);
+    songGain.gain.linearRampToValueAtTime(1.0, voiceDuration + 0.2);
 
     songSource.connect(songGain);
     songGain.connect(offlineCtx.destination);

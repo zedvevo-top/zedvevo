@@ -9,19 +9,47 @@ interface AdContainerProps {
   className?: string;
 }
 
+function AdContainerScriptItem({ code }: { code: string }) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || !code) return;
+    containerRef.current.innerHTML = '';
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = code;
+    Array.from(tempDiv.childNodes).forEach((node) => {
+      if (node.nodeName.toLowerCase() === 'script') {
+        const oldScript = node as HTMLScriptElement;
+        const newScript = document.createElement('script');
+        Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+        if (oldScript.innerHTML) newScript.innerHTML = oldScript.innerHTML;
+        containerRef.current?.appendChild(newScript);
+      } else {
+        containerRef.current?.appendChild(node.cloneNode(true));
+      }
+    });
+  }, [code]);
+
+  return <div ref={containerRef} className="overflow-hidden text-center min-h-[50px] flex items-center justify-center" />;
+}
+
 export default function AdContainer({ containerName, className = '' }: AdContainerProps) {
   const [ads, setAds] = useState<Advertisement[]>([]);
 
   useEffect(() => {
     let isMounted = true;
     AdManager.getAdsForContainer(containerName).then(data => {
-      if (isMounted) setAds(data);
-    }).catch(() => {});
+      if (isMounted) setAds(data || []);
+    }).catch(() => {
+      if (isMounted) setAds([]);
+    });
 
     const handleUpdate = () => {
       AdManager.getAdsForContainer(containerName).then(data => {
-        if (isMounted) setAds(data);
-      }).catch(() => {});
+        if (isMounted) setAds(data || []);
+      }).catch(() => {
+        if (isMounted) setAds([]);
+      });
     };
 
     window.addEventListener('zedvevo:ads_updated', handleUpdate);
@@ -31,7 +59,7 @@ export default function AdContainer({ containerName, className = '' }: AdContain
     };
   }, [containerName]);
 
-  if (ads.length === 0) return null;
+  if (!ads || ads.length === 0) return null;
 
   return (
     <div className={`w-full my-2 space-y-2 ${className}`}>
@@ -51,7 +79,7 @@ export default function AdContainer({ containerName, className = '' }: AdContain
                 <img src={ad.image_url} alt={ad.name} className="w-full h-24 object-cover rounded-lg group-hover:opacity-90 transition-opacity" />
               </a>
             ) : ad.script_code ? (
-              <div dangerouslySetInnerHTML={{ __html: ad.script_code }} className="overflow-hidden text-center" />
+              <AdContainerScriptItem code={ad.script_code} />
             ) : (
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">

@@ -97,7 +97,7 @@ export function applyTheme(presetId: string, isDark?: boolean) {
     }
   `;
 
-  if (typeof isDark === 'boolean') {
+    if (typeof isDark === 'boolean') {
     if (isDark) {
       document.documentElement.classList.add('dark');
       localStorage.setItem('zed_theme_mode', 'dark');
@@ -106,6 +106,16 @@ export function applyTheme(presetId: string, isDark?: boolean) {
       localStorage.setItem('zed_theme_mode', 'light');
     }
   }
+
+  // Persist to Supabase cloud settings via SettingsManager
+  import('@/services/SettingsManager').then(({ SettingsManager }) => {
+    SettingsManager.saveThemeConfig({
+      preset: preset.id,
+      primaryColor: preset.primary,
+      accentColor: preset.accent,
+      mode: typeof isDark === 'boolean' ? (isDark ? 'dark' : 'light') : 'dark',
+    }).catch(() => {});
+  }).catch(() => {});
 
   window.dispatchEvent(new CustomEvent('zed_theme_changed', { detail: { preset, isDark } }));
 }

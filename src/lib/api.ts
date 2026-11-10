@@ -2098,55 +2098,16 @@ export async function markNotificationRead(id: string) {
 // ============================================================
 // APP SETTINGS
 // ============================================================
+// APP SETTINGS (SettingsManager integration)
+// ============================================================
 export async function getSettings(): Promise<Record<string, string>> {
-  const map: Record<string, string> = {};
-  
-  // 1. First populate with local storage cached settings if any
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && key.startsWith('zed_setting_')) {
-        const rawKey = key.replace('zed_setting_', '');
-        map[rawKey] = localStorage.getItem(key) || '';
-      }
-    }
-  } catch { /* ignore storage errors */ }
-
-  // 2. Fetch all cloud settings from Supabase
-  try {
-    const { data, error } = await supabase.from('app_settings').select('key, value');
-    if (!error && Array.isArray(data)) {
-      data.forEach((s: { key: string; value: string }) => {
-        map[s.key] = s.value;
-        try { localStorage.setItem('zed_setting_' + s.key, s.value); } catch { /* ignore */ }
-      });
-    }
-  } catch (err) {
-    console.warn('Could not fetch app_settings from Supabase, using local cached settings:', err);
-  }
-
-  return map;
+  const { SettingsManager } = await import('@/services/SettingsManager');
+  return await SettingsManager.init();
 }
 
 export async function updateSetting(key: string, value: string) {
-  // 1. Immediately update local storage so UI and components react instantly
-  try {
-    localStorage.setItem('zed_setting_' + key, value);
-  } catch { /* ignore */ }
-
-  // 2. Upsert into Supabase app_settings
-  const { error } = await supabase
-    .from('app_settings')
-    .upsert({
-      key,
-      value,
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'key' });
-
-  if (error) {
-    console.warn('Failed to upsert setting to Supabase app_settings:', error.message);
-    throw error;
-  }
+  const { SettingsManager } = await import('@/services/SettingsManager');
+  await SettingsManager.set(key, value);
 }
 
 // ============================================================

@@ -40,10 +40,36 @@ export interface Advertisement {
 
 const ADS_STORAGE_KEY = 'real_ads_config';
 
+const LEGACY_DUMMY_IDS = new Set([
+  'ad-mtn-momo',
+  'ad-airtel-money',
+  'ad-zedvevo-awards',
+  'mtn-momo-ad',
+  'airtel-money-ad',
+  'zedvevo-awards-ad'
+]);
+
+function filterOutLegacyDummies(ads: Advertisement[]): Advertisement[] {
+  if (!Array.isArray(ads)) return [];
+  return ads.filter(ad => ad && !LEGACY_DUMMY_IDS.has(ad.id));
+}
+
 /**
- * Fetch all active and inactive advertisements from Supabase cloud settings / LocalStorage
+ * Fetch all active and inactive advertisements from Supabase cloud settings / LocalStorage.
+ * Returns only admin-configured advertisements; never returns hardcoded or mock ads.
  */
 export async function getRealAds(): Promise<Advertisement[]> {
+  try {
+    const { SettingsManager } = await import('@/services/SettingsManager');
+    const cloudAds = SettingsManager.get<Advertisement[]>(ADS_STORAGE_KEY);
+    if (Array.isArray(cloudAds)) {
+      const filtered = filterOutLegacyDummies(cloudAds);
+      if (filtered.length > 0) return filtered;
+    }
+  } catch {
+    // continue
+  }
+
   try {
     const { data, error } = await supabase
       .from('app_settings')
@@ -53,18 +79,32 @@ export async function getRealAds(): Promise<Advertisement[]> {
 
     if (!error && data?.value) {
       const parsed = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        const filtered = filterOutLegacyDummies(parsed);
+        try {
+          localStorage.setItem(ADS_STORAGE_KEY, JSON.stringify(filtered));
+          localStorage.setItem('zed_setting_' + ADS_STORAGE_KEY, JSON.stringify(filtered));
+        } catch { /* ignore */ }
+        return filtered;
+      }
     }
   } catch (err) {
     console.warn('Could not fetch ads from cloud settings:', err);
   }
 
   try {
-    const local = localStorage.getItem(ADS_STORAGE_KEY);
-    return local ? JSON.parse(local) : [];
+    const local = localStorage.getItem(ADS_STORAGE_KEY) || localStorage.getItem('zed_setting_' + ADS_STORAGE_KEY);
+    if (local) {
+      const parsed = JSON.parse(local);
+      if (Array.isArray(parsed)) {
+        return filterOutLegacyDummies(parsed);
+      }
+    }
   } catch {
-    return [];
+    // ignore
   }
+
+  return [];
 }
 
 /**
@@ -84,22 +124,12 @@ export async function getAdsForPlacement(placement: AdPlacement | string): Promi
 }
 
 /**
- * Save advertisement list to cloud app_settings & LocalStorage
+ * Save advertisement list to cloud app_settings & LocalStorage via SettingsManager
  */
 export async function saveRealAds(ads: Advertisement[]): Promise<boolean> {
   try {
-    localStorage.setItem(ADS_STORAGE_KEY, JSON.stringify(ads));
-    await supabase
-      .from('app_settings')
-      .upsert({
-        key: ADS_STORAGE_KEY,
-        value: JSON.stringify(ads),
-        description: 'Real advertisements configured by Admin',
-        updated_at: new Date().toISOString()
-      });
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('zedvevo:ads_updated', { detail: ads }));
-    }
+    const { SettingsManager } = await import('@/services/SettingsManager');
+    await SettingsManager.set(ADS_STORAGE_KEY, ads, 'Real advertisements configured by Admin');
     return true;
   } catch (err) {
     console.error('Error saving real ads:', err);

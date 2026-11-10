@@ -75,17 +75,13 @@ export default function AdminVideoAdPlacements() {
       setPlacementsMap(updated);
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
 
-      // Save to Supabase database
-      await supabase.from('app_settings').upsert({
-        key: SETTINGS_KEY,
-        value: JSON.stringify(updated),
-        description: 'Per-video ad placements (banner & popunder) configured by Admin',
-        updated_at: new Date().toISOString()
-      });
+      // Save to Supabase database via SettingsManager
+      const { SettingsManager } = await import('@/services/SettingsManager');
+      await SettingsManager.set(SETTINGS_KEY, updated, 'Per-video ad placements (banner & popunder) configured by Admin');
 
       toast.success('Video ad placement preferences saved to database successfully!');
     } catch (e: any) {
-      toast.error('Failed to save to database: ' + e.message);
+      toast.error('Failed to save to database: ' + (e.message || 'Unknown error'));
     } finally {
       setSaving(false);
     }

@@ -7,131 +7,6 @@ import { getActiveSponsors } from '@/lib/api';
 import { getRealAds, recordAdImpression, recordAdClick, type Advertisement } from '@/services/adsService';
 import type { Sponsor } from '@/types';
 
-// Authentic Zambian partner sponsor ads fallback to guarantee ads always work
-const FALLBACK_ADS: Sponsor[] = [
-  {
-    id: 'mtn-momo-ad',
-    name: 'MTN Mobile Money',
-    headline: 'Pay fast, securely & effortlessly with MTN MoMo in Zambia',
-    logo_url: 'https://images.unsplash.com/photo-1556742049-0a67c5574f73?w=200',
-    banner_url: 'https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=1200&h=300&fit=crop',
-    website_url: 'https://www.mtn.zm/momo',
-    cta_text: 'Use MTN MoMo',
-    cta_url: 'https://www.mtn.zm/momo',
-    tier: 'gold',
-    display_order: 1,
-    is_active: true,
-    position: 'all',
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'airtel-money-ad',
-    name: 'Airtel Money Zambia',
-    headline: 'Send money, buy bundles & vote without transaction hassles',
-    logo_url: 'https://images.unsplash.com/photo-1563986768609-322da13575f3?w=200',
-    banner_url: 'https://images.unsplash.com/photo-1512428559087-560fa5ceab42?w=1200&h=300&fit=crop',
-    website_url: 'https://www.airtel.co.zm',
-    cta_text: 'Dial *115#',
-    cta_url: 'https://www.airtel.co.zm',
-    tier: 'gold',
-    display_order: 2,
-    is_active: true,
-    position: 'all',
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'zedvevo-awards-ad',
-    name: 'ZedVevo Music Awards 2026',
-    headline: 'Vote for your favorite Zambian music icons — Live voting now open!',
-    logo_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=200',
-    banner_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=1200&h=300&fit=crop',
-    website_url: '/awards',
-    cta_text: 'Vote Now',
-    cta_url: '/awards',
-    tier: 'gold',
-    display_order: 3,
-    is_active: true,
-    position: 'all',
-    created_at: new Date().toISOString(),
-  }
-];
-
-// Profitablerate CPM Ad Network Container & Invoker with Anti-Adblock Force Loading
-function ProfitablerateCpmContainer() {
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const [adBlocked, setAdBlocked] = React.useState(false);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    containerRef.current.innerHTML = '';
-
-    try {
-      const targetDiv = document.createElement('div');
-      targetDiv.id = 'container-29a990e051b1bc82dfb7d8c83a9a64af';
-      targetDiv.className = 'w-full min-h-[60px] flex justify-center items-center text-center';
-
-      const script = document.createElement('script');
-      script.async = true;
-      script.setAttribute('data-cfasync', 'false');
-      script.src = 'https://pl30824478.profitableratecpmnetwork.com/29a990e051b1bc82dfb7d8c83a9a64af/invoke.js';
-
-      script.onerror = () => {
-        console.warn('AdBlocker detected blocking CPM script. Force loading native sponsor ads.');
-        setAdBlocked(true);
-      };
-
-      containerRef.current.appendChild(targetDiv);
-      containerRef.current.appendChild(script);
-
-      const timer = setTimeout(() => {
-        if (targetDiv && (targetDiv.clientHeight === 0 || targetDiv.children.length === 0)) {
-          setAdBlocked(true);
-        }
-      }, 2000);
-
-      return () => clearTimeout(timer);
-    } catch (e) {
-      setAdBlocked(true);
-    }
-  }, []);
-
-  if (adBlocked) {
-    return (
-      <div className="w-full my-2 rounded-xl border border-accent/30 bg-accent/5 p-3 text-center">
-        <div className="flex items-center justify-between text-[10px] text-muted-foreground uppercase tracking-wider mb-2 font-semibold">
-          <span>Native Sponsor Deal</span>
-          <span className="text-accent text-[9px]">Adblocker Force-Loaded</span>
-        </div>
-        <a
-          href="https://momo.mtn.zm"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-between gap-3 p-2 bg-card/80 rounded-lg hover:border-accent border border-border/50 transition-all"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center font-bold text-xs">
-              MTN
-            </div>
-            <div className="text-left">
-              <p className="text-xs font-bold text-foreground">MTN MoMo Music Pass</p>
-              <p className="text-[10px] text-muted-foreground">Subscribe to ZedVevo Unlimited Music with MTN MoMo *115#</p>
-            </div>
-          </div>
-          <span className="text-xs font-semibold px-2.5 py-1 rounded bg-amber-500 text-black hover:bg-amber-400">
-            Subscribe
-          </span>
-        </a>
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-full flex justify-center items-center overflow-visible my-2 min-h-[60px]">
-      <div ref={containerRef} className="w-full min-h-[60px] flex justify-center items-center text-center" />
-    </div>
-  );
-}
-
 // Dynamic script injection wrapper using isolated iframe doc.write for full ad network compatibility (Adsterra, PropellerAds, PopAds, AdSense, etc.)
 function ScriptHtmlContainer({ code }: { code: string }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -216,7 +91,7 @@ export default function AdBanner({
   className = '',
   adSlot,
 }: AdBannerProps) {
-  const [activeAd, setActiveAd] = useState<Sponsor | null>(FALLBACK_ADS[0]);
+  const [activeAd, setActiveAd] = useState<Sponsor | null>(null);
   const [adsenseClientId, setAdsenseClientId] = useState<string | null>(null);
   const [adsEnabled, setAdsEnabled] = useState<boolean>(true);
   const [customLeaderboardCode, setCustomLeaderboardCode] = useState<string | null>(null);
@@ -227,16 +102,30 @@ export default function AdBanner({
 
     async function loadAdData() {
       try {
-        // 1. Fetch settings from app_settings
-        const { data: settings } = await supabase
-          .from('app_settings')
-          .select('key, value')
-          .in('key', ['ads_enabled', 'adsense_client_id', 'ad_code_leaderboard', 'ad_code_feed']);
-
         let enabled = true;
         let client = import.meta.env.VITE_ADSENSE_CLIENT_ID || null;
         let leaderboardCode: string | null = null;
         let feedCode: string | null = null;
+
+        // 1. Sync from SettingsManager if available
+        try {
+          const { SettingsManager } = await import('@/services/SettingsManager');
+          const smLeaderboard = SettingsManager.get<string>('ad_code_leaderboard');
+          const smFeed = SettingsManager.get<string>('ad_code_feed');
+          const smAdsEnabled = SettingsManager.get<boolean | string>('ads_enabled');
+          const smAdsense = SettingsManager.get<string>('adsense_client_id');
+
+          if (smLeaderboard) leaderboardCode = smLeaderboard;
+          if (smFeed) feedCode = smFeed;
+          if (smAdsEnabled === false || smAdsEnabled === 'false') enabled = false;
+          if (smAdsense) client = smAdsense;
+        } catch { /* continue */ }
+
+        // 2. Fetch latest settings from app_settings
+        const { data: settings } = await supabase
+          .from('app_settings')
+          .select('key, value')
+          .in('key', ['ads_enabled', 'adsense_client_id', 'ad_code_leaderboard', 'ad_code_feed']);
 
         if (settings) {
           const adsSetting = settings.find((s: any) => s.key === 'ads_enabled');
@@ -250,20 +139,26 @@ export default function AdBanner({
           if (feedSetting && feedSetting.value) feedCode = String(feedSetting.value);
         }
 
-        // 2. ALSO fetch real ads configured in Admin Ads Page
+        // 3. ALSO fetch real ads configured in Admin Ads Page
         const realAds = await getRealAds();
         const activeRealAds = realAds.filter(
-          a => a.is_active !== false && (a.placement === 'all' || a.placement === position)
+          a => a.is_active !== false && (a.placement === 'all' || a.placement === position || a.placement.includes(position))
         );
 
         // Check if there are active script codes or custom banner ads from Admin Ads campaigns
-        const matchingRealScriptAd = activeRealAds.find(
-          a => a.script_code && a.script_code.trim().length > 0 && (a.format === format || a.format === 'leaderboard' || a.format === 'feed')
+        const matchingScriptAds = activeRealAds.filter(
+          a => a.script_code && a.script_code.trim().length > 0 && (a.placement === 'all' || a.placement === position || a.placement.includes(position))
         );
+        const matchingRealScriptAd = matchingScriptAds.length > 0
+          ? matchingScriptAds[Math.floor(Math.random() * matchingScriptAds.length)]
+          : null;
 
-        const matchingRealBannerAd = activeRealAds.find(
-          a => (a.image_url || a.banner_url) && !a.script_code && (a.placement === 'all' || a.placement === position)
+        const matchingBannerAds = activeRealAds.filter(
+          a => (a.image_url || a.banner_url) && !a.script_code && (a.placement === 'all' || a.placement === position || a.placement.includes(position))
         );
+        const matchingRealBannerAd = matchingBannerAds.length > 0
+          ? matchingBannerAds[Math.floor(Math.random() * matchingBannerAds.length)]
+          : null;
 
         if (matchingRealScriptAd?.script_code) {
           if (format === 'leaderboard') leaderboardCode = matchingRealScriptAd.script_code;
@@ -279,7 +174,10 @@ export default function AdBanner({
         setCustomLeaderboardCode(leaderboardCode);
         setCustomFeedCode(feedCode);
 
-        if (!enabled) return;
+        if (!enabled) {
+          setActiveAd(null);
+          return;
+        }
 
         // If a real custom banner ad was configured by Admin in the ads system:
         if (matchingRealBannerAd && !matchingRealScriptAd) {
@@ -303,7 +201,7 @@ export default function AdBanner({
           return;
         }
 
-        // 3. Fetch active sponsors from Supabase created by Admin
+        // 4. Fetch active sponsors from Supabase created by Admin
         const dbSponsors = await getActiveSponsors();
         const matchingSponsors = dbSponsors.filter(
           s => s.is_active && (!s.position || s.position === 'all' || s.position === position)
@@ -316,7 +214,24 @@ export default function AdBanner({
             .from('sponsors')
             .update({ impression_count: ((picked as any).impression_count || 0) + 1 })
             .eq('id', picked.id);
+        } else if (matchingRealBannerAd) {
+          setActiveAd({
+            id: matchingRealBannerAd.id,
+            name: matchingRealBannerAd.name,
+            headline: matchingRealBannerAd.headline || matchingRealBannerAd.description,
+            logo_url: matchingRealBannerAd.image_url,
+            banner_url: matchingRealBannerAd.image_url || matchingRealBannerAd.banner_url,
+            website_url: matchingRealBannerAd.target_url,
+            cta_text: matchingRealBannerAd.cta_text || 'Learn More',
+            cta_url: matchingRealBannerAd.target_url,
+            tier: 'gold',
+            display_order: 1,
+            is_active: true,
+            position: (matchingRealBannerAd.placement as any) || 'all',
+            created_at: matchingRealBannerAd.created_at,
+          });
         } else {
+          // Strictly show NO ad if Admin has not configured one
           setActiveAd(null);
         }
       } catch (err) {
@@ -335,7 +250,7 @@ export default function AdBanner({
     };
   }, [position, format]);
 
-  // If ads are explicitly disabled by admin or no active admin ad exists, render nothing
+  // If ads are explicitly disabled by admin, render nothing
   if (!adsEnabled) return null;
 
   // 1. Render custom admin ad codes if provided (Adsterra, PropellerAds, custom banner scripts, etc.)
@@ -360,6 +275,19 @@ export default function AdBanner({
         </div>
         <div className="p-2 min-h-[90px] flex items-center justify-center">
           <ScriptHtmlContainer code={customFeedCode} />
+        </div>
+      </div>
+    );
+  }
+
+  if (format === 'compact' && (customLeaderboardCode || customFeedCode)) {
+    return (
+      <div className={`w-full overflow-hidden rounded-xl border border-border/40 bg-card/40 my-3 text-center ${className}`}>
+        <div className="flex items-center justify-between px-3 py-1 bg-muted/40 border-b border-border/20 text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">
+          <span>Sponsored Ad</span>
+        </div>
+        <div className="p-2 min-h-[60px] flex items-center justify-center">
+          <ScriptHtmlContainer code={customLeaderboardCode || customFeedCode || ''} />
         </div>
       </div>
     );
