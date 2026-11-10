@@ -1,4 +1,7 @@
 {
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "rewrites": [
     { "source": "/api/payments/verify", "destination": "/api/verify-payment.js" },
     { "source": "/api/verify-payment", "destination": "/api/verify-payment.js" },
