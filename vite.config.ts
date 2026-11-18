@@ -332,8 +332,33 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
-    // Ensure only a single copy of React is ever bundled (prevents HMR useState=null)
-    dedupe: ["react", "react-dom"],
+    // Ensure only a single copy of React is ever bundled (prevents duplicate React hook errors)
+    dedupe: [
+      "react",
+      "react-dom",
+      "react/jsx-runtime",
+      "react/jsx-dev-runtime",
+      "react-dom/client",
+    ],
+  },
+  optimizeDeps: {
+    include: [
+      "react",
+      "react-dom",
+      "react-dom/client",
+      "react/jsx-runtime",
+      "react/jsx-dev-runtime",
+      "@radix-ui/react-tooltip",
+      "react-helmet-async",
+      "@sentry/react",
+      "@tanstack/react-query",
+      "react-router-dom",
+      "firebase/app",
+      "firebase/auth",
+      "firebase/firestore",
+      "sonner",
+      "lucide-react",
+    ],
   },
   build: {
     target: "es2020",

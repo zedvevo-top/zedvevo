@@ -1,0 +1,521 @@
+{
+  "entities": {
+    "Admin": {
+      "title": "Admin",
+      "description": "Authorized platform administrator record keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "role": { "type": "string", "enum": ["admin", "super_admin"] },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["uid", "role"]
+    },
+    "Profile": {
+      "title": "Profile",
+      "description": "Private user profile containing PII (email, phone) and role/entitlement state. Strictly owner or admin readable.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 254 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "username": { "type": "string", "maxLength": 64 },
+        "display_name": { "type": "string", "maxLength": 120 },
+        "avatar_url": { "type": "string", "maxLength": 1024 },
+        "bio": { "type": "string", "maxLength": 5000 },
+        "role": { "type": "string", "enum": ["user", "artist", "admin", "super_admin", "judge"] },
+        "is_artist": { "type": "boolean" },
+        "upload_access": { "type": "string", "maxLength": 32 },
+        "created_at": { "type": "string", "maxLength": 64 },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "role"]
+    },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Non-PII public user identity for attribution across songs, videos, and nominees.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "username": { "type": "string", "maxLength": 64 },
+        "display_name": { "type": "string", "maxLength": 120 },
+        "avatar_url": { "type": "string", "maxLength": 1024 },
+        "bio": { "type": "string", "maxLength": 5000 },
+        "is_artist": { "type": "boolean" },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id"]
+    },
+    "Artist": {
+      "title": "Artist",
+      "description": "Artist profile and streaming metadata.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "user_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "profile_id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 160 },
+        "stage_name": { "type": "string", "maxLength": 160 },
+        "bio": { "type": "string", "maxLength": 5000 },
+        "avatar_url": { "type": "string", "maxLength": 1024 },
+        "cover_url": { "type": "string", "maxLength": 1024 },
+        "genre": { "type": "string", "maxLength": 100 },
+        "is_featured": { "type": "boolean" },
+        "verified": { "type": "boolean" },
+        "play_count": { "type": "number" },
+        "total_followers": { "type": "number" },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name"]
+    },
+    "Song": {
+      "title": "Song",
+      "description": "Uploaded audio track in the ZedVevo music catalog.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "user_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "artist_id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "artist_name": { "type": "string", "maxLength": 200 },
+        "album": { "type": "string", "maxLength": 200 },
+        "genre": { "type": "string", "maxLength": 100 },
+        "cover_url": { "type": "string", "maxLength": 1024 },
+        "thumbnail_url": { "type": "string", "maxLength": 1024 },
+        "file_url": { "type": "string", "maxLength": 1024 },
+        "duration": { "type": "number" },
+        "play_count": { "type": "number" },
+        "like_count": { "type": "number" },
+        "download_count": { "type": "number" },
+        "share_count": { "type": "number" },
+        "featured_artists": { "type": "string", "maxLength": 250 },
+        "producer": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "is_trending": { "type": "boolean" },
+        "is_featured": { "type": "boolean" },
+        "created_at": { "type": "string", "maxLength": 64 },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "user_id", "title", "artist_name", "file_url", "status"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "Uploaded music video or YouTube video entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "user_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "artist_id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "artist_name": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "genre": { "type": "string", "maxLength": 100 },
+        "thumbnail_url": { "type": "string", "maxLength": 1024 },
+        "file_url": { "type": "string", "maxLength": 1024 },
+        "duration": { "type": "number" },
+        "view_count": { "type": "number" },
+        "like_count": { "type": "number" },
+        "download_count": { "type": "number" },
+        "share_count": { "type": "number" },
+        "downloads_enabled": { "type": "boolean" },
+        "featured_artists": { "type": "string", "maxLength": 250 },
+        "producer": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "is_trending": { "type": "boolean" },
+        "is_featured": { "type": "boolean" },
+        "youtube_url": { "type": "string", "maxLength": 512 },
+        "youtube_id": { "type": "string", "maxLength": 64 },
+        "is_youtube": { "type": "boolean" },
+        "created_at": { "type": "string", "maxLength": 64 },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "user_id", "title", "artist_name", "file_url", "status"]
+    },
+    "UploadPlan": {
+      "title": "UploadPlan",
+      "description": "Subscription plan for artist content uploads.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 120 },
+        "plan_type": { "type": "string", "maxLength": 64 },
+        "price": { "type": "number" },
+        "description": { "type": "string", "maxLength": 500 },
+        "uploads_allowed": { "type": "number" },
+        "validity_days": { "type": "number" },
+        "is_active": { "type": "boolean" },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "plan_type", "price", "is_active"]
+    },
+    "UserSubscription": {
+      "title": "UserSubscription",
+      "description": "Active or past upload plan entitlement for a user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "user_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "plan_id": { "type": "string", "maxLength": 128 },
+        "plan_type": { "type": "string", "maxLength": 64 },
+        "uploads_used": { "type": "number" },
+        "uploads_allowed": { "type": "number" },
+        "activated_at": { "type": "string", "maxLength": 64 },
+        "expires_at": { "type": "string", "maxLength": 64 },
+        "is_active": { "type": "boolean" },
+        "consumed": { "type": "boolean" },
+        "status": { "type": "string", "maxLength": 32 },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "user_id", "plan_id", "plan_type", "is_active"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Mobile money or card payment transaction record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 16 },
+        "payment_method": { "type": "string", "maxLength": 64 },
+        "lipila_transaction_id": { "type": "string", "maxLength": 128 },
+        "lipila_reference": { "type": "string", "maxLength": 128 },
+        "plan_id": { "type": "string", "maxLength": 128 },
+        "subscription_id": { "type": "string", "maxLength": 128 },
+        "payment_type": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["pending", "successful", "failed", "cancelled", "insufficient_funds", "invalid_transaction"] },
+        "failure_reason": { "type": "string", "maxLength": 500 },
+        "phone_number": { "type": "string", "maxLength": 32 },
+        "idempotency_key": { "type": "string", "maxLength": 128 },
+        "metadata": { "type": "object" },
+        "created_at": { "type": "string", "maxLength": 64 },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "amount", "payment_type", "status"]
+    },
+    "Award": {
+      "title": "Award",
+      "description": "ZedVevo Music Awards season configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "year": { "type": "number" },
+        "season_label": { "type": "string", "maxLength": 100 },
+        "is_active": { "type": "boolean" },
+        "voting_open": { "type": "boolean" },
+        "nominees_open": { "type": "boolean" },
+        "voting_starts_at": { "type": "string", "maxLength": 64 },
+        "voting_ends_at": { "type": "string", "maxLength": 64 },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "is_active", "voting_open"]
+    },
+    "AwardCategory": {
+      "title": "AwardCategory",
+      "description": "Category within an Award season.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "award_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 160 },
+        "description": { "type": "string", "maxLength": 500 },
+        "grand_prize": { "type": "string", "maxLength": 200 },
+        "is_active": { "type": "boolean" },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "award_id", "name", "is_active"]
+    },
+    "Nominee": {
+      "title": "Nominee",
+      "description": "Artist nomination entry for an award category.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "user_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "category_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 200 },
+        "bio": { "type": "string", "maxLength": 2000 },
+        "photo_url": { "type": "string", "maxLength": 1024 },
+        "song_title": { "type": "string", "maxLength": 200 },
+        "song_url": { "type": "string", "maxLength": 1024 },
+        "video_url": { "type": "string", "maxLength": 1024 },
+        "total_votes": { "type": "number" },
+        "payment_id": { "type": "string", "maxLength": 128 },
+        "registration_status": { "type": "string", "maxLength": 32 },
+        "nomination_status": { "type": "string", "enum": ["pending_payment", "pending_review", "approved", "rejected", "winner"] },
+        "is_winner": { "type": "boolean" },
+        "achievements": { "type": "string", "maxLength": 1000 },
+        "social_links": { "type": "object" },
+        "contact_email": { "type": "string", "maxLength": 254 },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "user_id", "category_id", "name", "nomination_status"]
+    },
+    "Vote": {
+      "title": "Vote",
+      "description": "Fan vote record linked to a nominee and payment.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "nominee_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "category_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "amount": { "type": "number" },
+        "vote_count": { "type": "number" },
+        "payment_id": { "type": "string", "maxLength": 128 },
+        "payment_status": { "type": "string", "maxLength": 32 },
+        "vote_approval_status": { "type": "string", "maxLength": 32 },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "nominee_id", "category_id", "amount", "vote_count", "payment_status"]
+    },
+    "HeroBanner": {
+      "title": "HeroBanner",
+      "description": "Homepage hero banner slider item.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "image_url": { "type": "string", "maxLength": 1024 },
+        "title": { "type": "string", "maxLength": 200 },
+        "subtitle": { "type": "string", "maxLength": 300 },
+        "button_text": { "type": "string", "maxLength": 80 },
+        "button_url": { "type": "string", "maxLength": 512 },
+        "starts_at": { "type": "string", "maxLength": 64 },
+        "ends_at": { "type": "string", "maxLength": 64 },
+        "is_active": { "type": "boolean" },
+        "display_order": { "type": "number" },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "image_url", "title", "is_active"]
+    },
+    "Sponsor": {
+      "title": "Sponsor",
+      "description": "Admin-managed sponsor/ad partner record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "award_id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "headline": { "type": "string", "maxLength": 300 },
+        "logo_url": { "type": "string", "maxLength": 1024 },
+        "banner_url": { "type": "string", "maxLength": 1024 },
+        "website_url": { "type": "string", "maxLength": 512 },
+        "cta_text": { "type": "string", "maxLength": 80 },
+        "cta_url": { "type": "string", "maxLength": 512 },
+        "tier": { "type": "string", "enum": ["gold", "silver", "bronze"] },
+        "display_order": { "type": "number" },
+        "is_active": { "type": "boolean" },
+        "position": { "type": "string", "maxLength": 64 },
+        "impression_count": { "type": "number" },
+        "click_count": { "type": "number" },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "tier", "is_active"]
+    },
+    "AppSetting": {
+      "title": "AppSetting",
+      "description": "Global platform configuration, theme, watermark, and admin-inserted ad codes.",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "value": { "type": "string", "maxLength": 500000 },
+        "description": { "type": "string", "maxLength": 500 },
+        "is_public": { "type": "boolean" },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["key", "value"]
+    },
+    "ContentLike": {
+      "title": "ContentLike",
+      "description": "User like association for a song or video.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "user_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "content_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "content_type": { "type": "string", "enum": ["song", "video"] },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "user_id", "content_id", "content_type"]
+    },
+    "UserLibraryItem": {
+      "title": "UserLibraryItem",
+      "description": "User saved bookmark for a song or video.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "user_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "content_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "content_type": { "type": "string", "enum": ["song", "video"] },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "user_id", "content_id", "content_type"]
+    },
+    "Download": {
+      "title": "Download",
+      "description": "User download log for songs and videos.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "user_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "content_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "content_type": { "type": "string", "enum": ["song", "video"] },
+        "file_url": { "type": "string", "maxLength": 1024 },
+        "title": { "type": "string", "maxLength": 200 },
+        "artist_name": { "type": "string", "maxLength": 200 },
+        "cover_url": { "type": "string", "maxLength": 1024 },
+        "downloaded_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "user_id", "content_id", "content_type", "file_url", "title"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User-specific or broadcast notification.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 2000 },
+        "type": { "type": "string", "maxLength": 64 },
+        "notification_type": { "type": "string", "maxLength": 64 },
+        "link": { "type": "string", "maxLength": 512 },
+        "is_read": { "type": "boolean" },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "title", "message", "notification_type", "is_read"]
+    },
+    "WeeklyTrending": {
+      "title": "WeeklyTrending",
+      "description": "Computed weekly chart entries.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "week_start": { "type": "string", "maxLength": 32 },
+        "content_id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "content_type": { "type": "string", "enum": ["song", "video"] },
+        "rank": { "type": "number" },
+        "category": { "type": "string", "maxLength": 64 },
+        "metric_value": { "type": "number" },
+        "title": { "type": "string", "maxLength": 200 },
+        "artist_name": { "type": "string", "maxLength": 200 },
+        "cover_url": { "type": "string", "maxLength": 1024 },
+        "created_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "week_start", "content_id", "content_type", "rank", "category"]
+    },
+    "WinnerOfMonth": {
+      "title": "WinnerOfMonth",
+      "description": "Featured monthly artist winner announcement.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "month": { "type": "number" },
+        "year": { "type": "number" },
+        "artist_name": { "type": "string", "maxLength": 200 },
+        "award": { "type": "string", "maxLength": 200 },
+        "award_category": { "type": "string", "maxLength": 200 },
+        "photo_url": { "type": "string", "maxLength": 1024 },
+        "prize": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "is_published": { "type": "boolean" },
+        "created_at": { "type": "string", "maxLength": 64 },
+        "updated_at": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "month", "year", "artist_name", "award", "is_published"]
+    }
+  },
+  "firestore": {
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/Admin" },
+      "description": "Administrator registry keyed by Firebase UID."
+    },
+    "/profiles/{userId}": {
+      "schema": { "$ref": "#/entities/Profile" },
+      "description": "Private user profiles with PII and role/entitlement state."
+    },
+    "/public_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/PublicProfile" },
+      "description": "Non-PII public user attribution profiles."
+    },
+    "/artists/{artistId}": {
+      "schema": { "$ref": "#/entities/Artist" },
+      "description": "Public artist directory and streaming statistics."
+    },
+    "/songs/{songId}": {
+      "schema": { "$ref": "#/entities/Song" },
+      "description": "Music catalog tracks."
+    },
+    "/videos/{videoId}": {
+      "schema": { "$ref": "#/entities/Video" },
+      "description": "Music video catalog."
+    },
+    "/upload_plans/{planId}": {
+      "schema": { "$ref": "#/entities/UploadPlan" },
+      "description": "Artist upload subscription plans."
+    },
+    "/user_subscriptions/{subscriptionId}": {
+      "schema": { "$ref": "#/entities/UserSubscription" },
+      "description": "User upload access subscriptions."
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "Payment records strictly scoped to owner or admin."
+    },
+    "/awards/{awardId}": {
+      "schema": { "$ref": "#/entities/Award" },
+      "description": "Awards seasons."
+    },
+    "/award_categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/AwardCategory" },
+      "description": "Award categories."
+    },
+    "/nominees/{nomineeId}": {
+      "schema": { "$ref": "#/entities/Nominee" },
+      "description": "Award nominees."
+    },
+    "/votes/{voteId}": {
+      "schema": { "$ref": "#/entities/Vote" },
+      "description": "Fan votes for award nominees."
+    },
+    "/hero_banners/{bannerId}": {
+      "schema": { "$ref": "#/entities/HeroBanner" },
+      "description": "Homepage hero sliders."
+    },
+    "/sponsors/{sponsorId}": {
+      "schema": { "$ref": "#/entities/Sponsor" },
+      "description": "Admin-managed sponsors."
+    },
+    "/app_settings/{settingKey}": {
+      "schema": { "$ref": "#/entities/AppSetting" },
+      "description": "Platform settings, themes, and admin-configured ad codes."
+    },
+    "/content_likes/{likeId}": {
+      "schema": { "$ref": "#/entities/ContentLike" },
+      "description": "User likes on songs and videos."
+    },
+    "/user_library/{itemId}": {
+      "schema": { "$ref": "#/entities/UserLibraryItem" },
+      "description": "User saved songs and videos."
+    },
+    "/downloads/{downloadId}": {
+      "schema": { "$ref": "#/entities/Download" },
+      "description": "User content download history."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "User and broadcast notifications."
+    },
+    "/weekly_trending/{entryId}": {
+      "schema": { "$ref": "#/entities/WeeklyTrending" },
+      "description": "Weekly trending chart entries."
+    },
+    "/winner_of_month/{winnerId}": {
+      "schema": { "$ref": "#/entities/WinnerOfMonth" },
+      "description": "Published monthly artist winners."
+    }
+  }
+}

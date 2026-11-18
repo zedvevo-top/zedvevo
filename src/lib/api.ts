@@ -1,4 +1,14 @@
 import { supabase } from '@/db/supabase';
+import {
+  fbGetSongs, fbGetSongById, fbCreateSong, fbUpdateSong, fbDeleteSong,
+  fbGetVideos, fbGetVideoById, fbCreateVideo, fbUpdateVideo, fbDeleteVideo,
+  fbGetArtists, fbGetAllProfiles, fbUpsertProfile,
+  fbGetBanners, fbGetSponsors, fbGetUploadPlans, fbGetAwards, fbGetNominees,
+  fbGetPayments, fbGetDownloads, fbGetWeeklyTrending, fbGetWinnersOfMonth,
+  fbGetNotifications,
+} from '@/lib/firebaseDb';
+import { auth, db, sanitizeId, stripUndefined } from '@/lib/firebase';
+import { doc, setDoc, updateDoc, deleteDoc, increment } from 'firebase/firestore';
 import type {
   Song, Video, HeroBanner, Artist, Sponsor, Award, AwardCategory,
   Nominee, Vote, UploadPlan, UserSubscription, Payment, Notification,
@@ -8,10 +18,29 @@ import type {
 
 export type { Payment, Sponsor, Song, Video, Artist, Award, Nominee, Vote, Profile };
 
+function isFirebaseAdmin(): boolean {
+  return (
+    auth.currentUser?.email?.toLowerCase() === 'topkuchalo@gmail.com' &&
+    auth.currentUser?.emailVerified === true
+  );
+}
+
 // ============================================================
 // SONGS
 // ============================================================
 export async function getSongs(opts: { status?: string; limit?: number; offset?: number; userId?: string } = {}) {
+  try {
+    const canReadStatus = !opts.status || opts.status === 'approved' || isFirebaseAdmin() || (opts.userId && opts.userId === auth.currentUser?.uid);
+    if (canReadStatus) {
+      const fbRows = await fbGetSongs({ status: opts.status, userId: opts.userId });
+      if (fbRows.length > 0) {
+        const start = opts.offset ?? 0;
+        const lim = opts.limit ?? 20;
+        return fbRows.slice(start, start + lim);
+      }
+    }
+  } catch { /* fallback to Supabase */ }
+
   let q = supabase.from('songs').select('*').order('created_at', { ascending: false }).limit(opts.limit ?? 20);
   if (opts.status) q = q.eq('status', opts.status);
   if (opts.userId) q = q.eq('user_id', opts.userId);
@@ -22,6 +51,19 @@ export async function getSongs(opts: { status?: string; limit?: number; offset?:
 }
 
 export async function getTrendingSongs(limit = 10) {
+  try {
+    const fbApproved = await fbGetSongs({ status: 'approved' });
+    if (fbApproved.length > 0) {
+      const flagged = fbApproved
+        .filter((s) => s.is_trending)
+        .sort((a, b) => (b.play_count ?? 0) - (a.play_count ?? 0));
+      if (flagged.length > 0) return flagged.slice(0, limit);
+      return [...fbApproved]
+        .sort((a, b) => (b.play_count ?? 0) - (a.play_count ?? 0))
+        .slice(0, limit);
+    }
+  } catch { /* fallback to Supabase */ }
+
   // First try songs explicitly flagged as trending
   const { data: trending, error: e1 } = await supabase
     .from('songs').select('*').eq('status', 'approved').eq('is_trending', true)
@@ -38,6 +80,13 @@ export async function getTrendingSongs(limit = 10) {
 }
 
 export async function getPopularSongs(limit = 10) {
+  try {
+    const fbApproved = await fbGetSongs({ status: 'approved' });
+    if (fbApproved.length > 0) {
+      return [...fbApproved].sort((a, b) => (b.play_count ?? 0) - (a.play_count ?? 0)).slice(0, limit);
+    }
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase
     .from('songs').select('*').eq('status', 'approved')
     .order('play_count', { ascending: false }).limit(limit);
@@ -46,6 +95,11 @@ export async function getPopularSongs(limit = 10) {
 }
 
 export async function getNewSongs(limit = 10) {
+  try {
+    const fbApproved = await fbGetSongs({ status: 'approved', limit });
+    if (fbApproved.length > 0) return fbApproved;
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase
     .from('songs').select('*').eq('status', 'approved')
     .order('created_at', { ascending: false }).limit(limit);
@@ -54,24 +108,40 @@ export async function getNewSongs(limit = 10) {
 }
 
 export async function getSongById(id: string) {
+  try {
+    const fbSong = await fbGetSongById(id);
+    if (fbSong) return fbSong;
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase.from('songs').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
   return data as Song | null;
 }
 
 export async function createSong(payload: Partial<Song>) {
-  const { error } = await supabase.from('songs').insert(payload);
+  const id = payload.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `song_${Date.now()}`);
+  const withId = { ...payload, id };
+  const { error } = await supabase.from('songs').insert(withId);
   if (error) throw error;
+  if (auth.currentUser) {
+    await fbCreateSong(withId).catch(console.warn);
+  }
 }
 
 export async function updateSong(id: string, payload: Partial<Song>) {
   const { error } = await supabase.from('songs').update(payload).eq('id', id);
   if (error) throw error;
+  if (auth.currentUser) {
+    await fbUpdateSong(id, payload).catch(console.warn);
+  }
 }
 
 export async function deleteSong(id: string) {
   const { error } = await supabase.from('songs').delete().eq('id', id);
   if (error) throw error;
+  if (auth.currentUser) {
+    await fbDeleteSong(id).catch(console.warn);
+  }
 }
 
 export async function incrementPlayCount(songId: string) {
@@ -84,6 +154,7 @@ export async function incrementPlayCount(songId: string) {
         await supabase.from('songs').update({ play_count: (Number(data.play_count) || 0) + 1 }).eq('id', songId);
       }
     }
+    updateDoc(doc(db, 'songs', sanitizeId(songId)), { play_count: increment(1) }).catch(() => {});
   } catch (err) {
     console.error('play count error', err);
   }
@@ -93,6 +164,18 @@ export async function incrementPlayCount(songId: string) {
 // VIDEOS
 // ============================================================
 export async function getVideos(opts: { status?: string; limit?: number; offset?: number; userId?: string } = {}) {
+  try {
+    const canReadStatus = !opts.status || opts.status === 'approved' || isFirebaseAdmin() || (opts.userId && opts.userId === auth.currentUser?.uid);
+    if (canReadStatus) {
+      const fbRows = await fbGetVideos({ status: opts.status, userId: opts.userId });
+      if (fbRows.length > 0) {
+        const start = opts.offset ?? 0;
+        const lim = opts.limit ?? 20;
+        return fbRows.slice(start, start + lim);
+      }
+    }
+  } catch { /* fallback */ }
+
   let q = supabase.from('videos').select('*').order('created_at', { ascending: false }).limit(opts.limit ?? 20);
   if (opts.status) q = q.eq('status', opts.status);
   if (opts.userId) q = q.eq('user_id', opts.userId);
@@ -103,6 +186,19 @@ export async function getVideos(opts: { status?: string; limit?: number; offset?
 }
 
 export async function getTrendingVideos(limit = 10) {
+  try {
+    const fbApproved = await fbGetVideos({ status: 'approved' });
+    if (fbApproved.length > 0) {
+      const flagged = fbApproved
+        .filter((v) => v.is_trending)
+        .sort((a, b) => (b.view_count ?? 0) - (a.view_count ?? 0));
+      if (flagged.length > 0) return flagged.slice(0, limit);
+      return [...fbApproved]
+        .sort((a, b) => (b.view_count ?? 0) - (a.view_count ?? 0))
+        .slice(0, limit);
+    }
+  } catch { /* fallback */ }
+
   // First try videos explicitly flagged as trending
   const { data: trending, error: e1 } = await supabase
     .from('videos').select('*').eq('status', 'approved').eq('is_trending', true)
@@ -119,24 +215,40 @@ export async function getTrendingVideos(limit = 10) {
 }
 
 export async function getVideoById(id: string) {
+  try {
+    const fbVideo = await fbGetVideoById(id);
+    if (fbVideo) return fbVideo;
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase.from('videos').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
   return data as Video | null;
 }
 
 export async function createVideo(payload: Partial<Video>) {
-  const { error } = await supabase.from('videos').insert(payload);
+  const id = payload.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `video_${Date.now()}`);
+  const withId = { ...payload, id };
+  const { error } = await supabase.from('videos').insert(withId);
   if (error) throw error;
+  if (auth.currentUser) {
+    await fbCreateVideo(withId).catch(console.warn);
+  }
 }
 
 export async function updateVideo(id: string, payload: Partial<Video>) {
   const { error } = await supabase.from('videos').update(payload).eq('id', id);
   if (error) throw error;
+  if (auth.currentUser) {
+    await fbUpdateVideo(id, payload).catch(console.warn);
+  }
 }
 
 export async function deleteVideo(id: string) {
   const { error } = await supabase.from('videos').delete().eq('id', id);
   if (error) throw error;
+  if (auth.currentUser) {
+    await fbDeleteVideo(id).catch(console.warn);
+  }
 }
 
 export async function incrementViewCount(videoId: string) {
@@ -149,6 +261,7 @@ export async function incrementViewCount(videoId: string) {
         await supabase.from('videos').update({ view_count: (Number(data.view_count) || 0) + 1 }).eq('id', videoId);
       }
     }
+    updateDoc(doc(db, 'videos', sanitizeId(videoId)), { view_count: increment(1) }).catch(() => {});
   } catch (err) {
     console.error('view count error', err);
   }
@@ -626,6 +739,11 @@ export async function getArtistRealStatistics(
 // HERO BANNERS
 // ============================================================
 export async function getActiveBanners(): Promise<HeroBanner[]> {
+  try {
+    const fb = await fbGetBanners(true);
+    if (fb.length > 0) return fb.slice(0, 10);
+  } catch { /* fallback */ }
+
   const now = new Date().toISOString();
   const { data, error } = await supabase
     .from('hero_banners').select('*').eq('is_active', true)
@@ -637,24 +755,41 @@ export async function getActiveBanners(): Promise<HeroBanner[]> {
 }
 
 export async function getAllBanners(): Promise<HeroBanner[]> {
+  try {
+    if (isFirebaseAdmin()) {
+      const fb = await fbGetBanners(false);
+      if (fb.length > 0) return fb;
+    }
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase.from('hero_banners').select('*').order('display_order', { ascending: true });
   if (error) throw error;
   return Array.isArray(data) ? data : [];
 }
 
 export async function createBanner(payload: Partial<HeroBanner>) {
-  const { error } = await supabase.from('hero_banners').insert(payload);
+  const id = payload.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `banner_${Date.now()}`);
+  const { error } = await supabase.from('hero_banners').insert({ ...payload, id });
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await setDoc(doc(db, 'hero_banners', sanitizeId(id)), stripUndefined({ ...payload, id, created_at: new Date().toISOString() }), { merge: true }).catch(console.warn);
+  }
 }
 
 export async function updateBanner(id: string, payload: Partial<HeroBanner>) {
   const { error } = await supabase.from('hero_banners').update(payload).eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await updateDoc(doc(db, 'hero_banners', sanitizeId(id)), stripUndefined({ ...payload })).catch(console.warn);
+  }
 }
 
 export async function deleteBanner(id: string) {
   const { error } = await supabase.from('hero_banners').delete().eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await deleteDoc(doc(db, 'hero_banners', sanitizeId(id))).catch(console.warn);
+  }
 }
 
 // ============================================================
@@ -992,17 +1127,32 @@ export async function resolveArtistAvatarWithStorage(
 }
 
 export async function getFeaturedArtists(limit = 8): Promise<Artist[]> {
-  const { data: artistsData, error: artistsErr } = await supabase
-    .from('artists')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (artistsErr) throw artistsErr;
+  let artistsData: any[] | null = null;
+  let songsData: any[] | null = null;
 
-  const { data: songsData, error: songsErr } = await supabase
-    .from('songs')
-    .select('id, play_count, cover_url, artist_name, user_id, artist_id')
-    .eq('status', 'approved');
-  
+  try {
+    const [fbArtists, fbSongs] = await Promise.all([fbGetArtists(200), fbGetSongs({ status: 'approved' })]);
+    if (fbArtists.length > 0) {
+      artistsData = fbArtists;
+      songsData = fbSongs;
+    }
+  } catch { /* fallback */ }
+
+  if (!artistsData) {
+    const { data, error: artistsErr } = await supabase
+      .from('artists')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (artistsErr) throw artistsErr;
+    artistsData = data;
+
+    const { data: sData } = await supabase
+      .from('songs')
+      .select('id, play_count, cover_url, artist_name, user_id, artist_id')
+      .eq('status', 'approved');
+    songsData = sData;
+  }
+
   const allSongs = Array.isArray(songsData) ? songsData : [];
   const list = Array.isArray(artistsData) ? artistsData : [];
 
@@ -1046,15 +1196,31 @@ export async function getFeaturedArtists(limit = 8): Promise<Artist[]> {
 }
 
 export async function getAllArtists(): Promise<Artist[]> {
-  const [artistsRes, songsRes, followersRes] = await Promise.all([
-    supabase.from('artists').select('*').order('name'),
-    supabase.from('songs').select('id, play_count, cover_url, artist_name, user_id, artist_id').eq('status', 'approved'),
-    supabase.from('content_likes').select('content_id').eq('content_type', 'artist'),
-  ]);
-  if (artistsRes.error) throw artistsRes.error;
+  let artistsData: any[] | null = null;
+  let songsData: any[] | null = null;
 
-  const allSongs = Array.isArray(songsRes.data) ? songsRes.data : [];
-  const list = Array.isArray(artistsRes.data) ? artistsRes.data : [];
+  try {
+    const [fbArtists, fbSongs] = await Promise.all([fbGetArtists(500), fbGetSongs({ status: 'approved' })]);
+    if (fbArtists.length > 0) {
+      artistsData = fbArtists;
+      songsData = fbSongs;
+    }
+  } catch { /* fallback */ }
+
+  const followersRes = await supabase.from('content_likes').select('content_id').eq('content_type', 'artist');
+
+  if (!artistsData) {
+    const [artistsRes, songsRes] = await Promise.all([
+      supabase.from('artists').select('*').order('name'),
+      supabase.from('songs').select('id, play_count, cover_url, artist_name, user_id, artist_id').eq('status', 'approved'),
+    ]);
+    if (artistsRes.error) throw artistsRes.error;
+    artistsData = artistsRes.data;
+    songsData = songsRes.data;
+  }
+
+  const allSongs = Array.isArray(songsData) ? songsData : [];
+  const list = Array.isArray(artistsData) ? artistsData : [];
 
   const followerMap: Record<string, number> = {};
   (followersRes.data || []).forEach((row: any) => {
@@ -1228,6 +1394,11 @@ export async function confirmPaymentStatus(paymentId: string, status: 'successfu
 // SPONSORS
 // ============================================================
 export async function getActiveSponsors(): Promise<Sponsor[]> {
+  try {
+    const fb = await fbGetSponsors(true);
+    if (fb.length > 0) return fb.slice(0, 20);
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase
     .from('sponsors').select('*').eq('is_active', true)
     .order('display_order', { ascending: true }).limit(20);
@@ -1239,6 +1410,11 @@ export async function getActiveSponsors(): Promise<Sponsor[]> {
 // AWARDS
 // ============================================================
 export async function getActiveAwards(): Promise<Award[]> {
+  try {
+    const fb = await fbGetAwards(true);
+    if (fb.length > 0) return fb.slice(0, 5);
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase
     .from('awards').select('*, award_categories(*, nominees(id, name, photo_url, total_votes, is_winner, registration_status))')
     .eq('is_active', true).order('created_at', { ascending: false }).limit(5);
@@ -1247,6 +1423,13 @@ export async function getActiveAwards(): Promise<Award[]> {
 }
 
 export async function getAllAwards(): Promise<Award[]> {
+  try {
+    if (isFirebaseAdmin()) {
+      const fb = await fbGetAwards(false);
+      if (fb.length > 0) return fb;
+    }
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase
     .from('awards').select('*, award_categories(*)').order('created_at', { ascending: false });
   if (error) throw error;
@@ -1261,33 +1444,53 @@ export async function getAwardCategories(awardId: string): Promise<AwardCategory
 }
 
 export async function createAward(payload: Partial<Award>) {
-  const { error } = await supabase.from('awards').insert(payload);
+  const id = payload.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `award_${Date.now()}`);
+  const { error } = await supabase.from('awards').insert({ ...payload, id });
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await setDoc(doc(db, 'awards', sanitizeId(id)), stripUndefined({ ...payload, id, created_at: new Date().toISOString() }), { merge: true }).catch(console.warn);
+  }
 }
 
 export async function updateAward(id: string, payload: Partial<Award>) {
   const { error } = await supabase.from('awards').update(payload).eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await updateDoc(doc(db, 'awards', sanitizeId(id)), stripUndefined({ ...payload })).catch(console.warn);
+  }
 }
 
 export async function deleteAward(id: string) {
   const { error } = await supabase.from('awards').delete().eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await deleteDoc(doc(db, 'awards', sanitizeId(id))).catch(console.warn);
+  }
 }
 
 export async function createAwardCategory(payload: Partial<AwardCategory>) {
-  const { error } = await supabase.from('award_categories').insert(payload);
+  const id = payload.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `cat_${Date.now()}`);
+  const { error } = await supabase.from('award_categories').insert({ ...payload, id });
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await setDoc(doc(db, 'award_categories', sanitizeId(id)), stripUndefined({ ...payload, id, created_at: new Date().toISOString() }), { merge: true }).catch(console.warn);
+  }
 }
 
 export async function updateAwardCategory(id: string, payload: Partial<AwardCategory>) {
   const { error } = await supabase.from('award_categories').update(payload).eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await updateDoc(doc(db, 'award_categories', sanitizeId(id)), stripUndefined({ ...payload })).catch(console.warn);
+  }
 }
 
 export async function deleteAwardCategory(id: string) {
   const { error } = await supabase.from('award_categories').delete().eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await deleteDoc(doc(db, 'award_categories', sanitizeId(id))).catch(console.warn);
+  }
 }
 
 // ============================================================
@@ -1605,9 +1808,17 @@ export async function getNomineeVotes(nomineeId: string) {
 // ============================================================
 export async function getActivePlans(): Promise<UploadPlan[]> {
   try {
-    const { data, error } = await supabase.from('upload_plans').select('*').eq('is_active', true).order('price');
-    if (error) throw error;
-    const dbPlans: UploadPlan[] = Array.isArray(data) ? (data as UploadPlan[]) : [];
+    let dbPlans: UploadPlan[] = [];
+    try {
+      const fbPlans = await fbGetUploadPlans(true);
+      if (fbPlans.length > 0) dbPlans = fbPlans;
+    } catch { /* fallback */ }
+
+    if (dbPlans.length === 0) {
+      const { data, error } = await supabase.from('upload_plans').select('*').eq('is_active', true).order('price');
+      if (error) throw error;
+      dbPlans = Array.isArray(data) ? (data as UploadPlan[]) : [];
+    }
 
     const normalized: UploadPlan[] = dbPlans.map(p => {
       // Fix legacy K5 basic upload to standard K10 single release
@@ -1718,6 +1929,13 @@ export async function getActivePlans(): Promise<UploadPlan[]> {
 }
 
 export async function getAllPlans(): Promise<UploadPlan[]> {
+  try {
+    if (isFirebaseAdmin()) {
+      const fb = await fbGetUploadPlans(false);
+      if (fb.length > 0) return fb;
+    }
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase.from('upload_plans').select('*').order('price');
   if (error) throw error;
   return Array.isArray(data) ? data : [];
@@ -1726,6 +1944,9 @@ export async function getAllPlans(): Promise<UploadPlan[]> {
 export async function updatePlan(id: string, payload: Partial<UploadPlan>) {
   const { error } = await supabase.from('upload_plans').update(payload).eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await updateDoc(doc(db, 'upload_plans', sanitizeId(id)), stripUndefined({ ...payload })).catch(console.warn);
+  }
 }
 
 // ============================================================
@@ -2053,6 +2274,13 @@ export async function getUserPayments(userId: string): Promise<Payment[]> {
 }
 
 export async function getAllPayments(): Promise<Payment[]> {
+  try {
+    if (isFirebaseAdmin()) {
+      const fb = await fbGetPayments();
+      if (fb.length > 0) return fb.slice(0, 100);
+    }
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase
     .from('payments').select('*, upload_plans(name)').order('created_at', { ascending: false }).limit(100);
   if (error) throw error;
@@ -2071,6 +2299,17 @@ export async function getPaymentByIdempotencyKey(key: string): Promise<Payment |
 // ============================================================
 export async function getUserNotifications(userId: string): Promise<Notification[]> {
   try {
+    if (auth.currentUser && (auth.currentUser.uid === userId || isFirebaseAdmin())) {
+      const [userNotifs, globalNotifs] = await Promise.all([
+        fbGetNotifications(userId).catch(() => []),
+        fbGetNotifications(undefined).catch(() => []),
+      ]);
+      const combined = [...userNotifs, ...globalNotifs];
+      if (combined.length > 0) {
+        return combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 30);
+      }
+    }
+
     const { data, error } = await supabase
       .from('notifications').select('*')
       .or(`user_id.eq.${userId},user_id.is.null`)
@@ -2114,7 +2353,14 @@ export async function updateSetting(key: string, value: string) {
 // PROFILES (admin)
 // ============================================================
 export async function getAllProfiles(): Promise<Profile[]> {
-  const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false }).limit(100);
+  try {
+    if (isFirebaseAdmin()) {
+      const fb = await fbGetAllProfiles();
+      if (fb.length > 0) return fb;
+    }
+  } catch { /* fallback */ }
+
+  const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false }).limit(200);
   if (error) throw error;
   return Array.isArray(data) ? data : [];
 }
@@ -2122,6 +2368,9 @@ export async function getAllProfiles(): Promise<Profile[]> {
 export async function updateProfile(id: string, payload: Partial<Profile>) {
   const { error } = await supabase.from('profiles').update(payload).eq('id', id);
   if (error) throw error;
+  if (auth.currentUser && (isFirebaseAdmin() || auth.currentUser.uid === id)) {
+    await fbUpsertProfile({ ...payload, id }).catch(console.warn);
+  }
 }
 
 // ============================================================
@@ -2153,6 +2402,9 @@ export async function approveContent(table: 'songs' | 'videos', id: string) {
   // 2. Update status in database
   const { error } = await supabase.from(table).update({ status: 'approved' }).eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await updateDoc(doc(db, table, sanitizeId(id)), { status: 'approved', updated_at: new Date().toISOString() }).catch(console.warn);
+  }
 
   const itemTitle = item?.title || 'Your content';
   const itemType = table === 'songs' ? 'Song' : 'Video';
@@ -2186,6 +2438,9 @@ export async function rejectContent(table: 'songs' | 'videos', id: string, reaso
   // 2. Update status
   const { error } = await supabase.from(table).update({ status: 'rejected' }).eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await updateDoc(doc(db, table, sanitizeId(id)), { status: 'rejected', updated_at: new Date().toISOString() }).catch(console.warn);
+  }
 
   const itemTitle = item?.title || 'Your content';
   const itemType = table === 'songs' ? 'Song' : 'Video';
@@ -2214,14 +2469,27 @@ export async function rejectContent(table: 'songs' | 'videos', id: string, reaso
 export async function setTrending(table: 'songs' | 'videos', id: string, value: boolean) {
   const { error } = await supabase.from(table).update({ is_trending: value }).eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await updateDoc(doc(db, table, sanitizeId(id)), { is_trending: value, updated_at: new Date().toISOString() }).catch(console.warn);
+  }
 }
 
 export async function setWinner(nomineeId: string) {
   const { error } = await supabase.from('nominees').update({ is_winner: true, nomination_status: 'winner' }).eq('id', nomineeId);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await updateDoc(doc(db, 'nominees', sanitizeId(nomineeId)), { is_winner: true, nomination_status: 'winner' }).catch(console.warn);
+  }
 }
 
 export async function getAllNominees(): Promise<Nominee[]> {
+  try {
+    if (isFirebaseAdmin()) {
+      const fb = await fbGetNominees(false);
+      if (fb.length > 0) return fb;
+    }
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase
     .from('nominees')
     .select('*, award_categories(name, awards(name)), profiles(username, display_name)')
@@ -2235,6 +2503,9 @@ export async function updateNomineeStatus(id: string, nomination_status: string,
 
   const { error } = await supabase.from('nominees').update({ nomination_status }).eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await updateDoc(doc(db, 'nominees', sanitizeId(id)), { nomination_status }).catch(console.warn);
+  }
 
   // Real-time notification to the nominee artist
   if (nom?.user_id) {
@@ -2366,6 +2637,13 @@ export async function getUserDownloads(userId: string): Promise<Download[]> {
 }
 
 export async function getAllDownloads(): Promise<Download[]> {
+  try {
+    if (isFirebaseAdmin()) {
+      const fb = await fbGetDownloads();
+      if (fb.length > 0) return fb.slice(0, 200);
+    }
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase
     .from('downloads')
     .select('*')
@@ -2394,6 +2672,14 @@ export async function setVideoDownloadsEnabled(videoId: string, enabled: boolean
 // WEEKLY TRENDING
 // ============================================================
 export async function getWeeklyTrending(category?: string): Promise<WeeklyTrending[]> {
+  try {
+    const fb = await fbGetWeeklyTrending();
+    if (fb.length > 0) {
+      const filtered = category ? fb.filter((w) => w.category === category) : fb;
+      return filtered.slice(0, 40);
+    }
+  } catch { /* fallback */ }
+
   // Get the most recent week_start
   const { data: latestWeek } = await supabase
     .from('weekly_trending')
@@ -2459,6 +2745,12 @@ export async function computeAndStoreWeeklyTrending(): Promise<void> {
 // ============================================================
 export async function getCurrentWinnerOfMonth(): Promise<WinnerOfMonth | null> {
   const now = new Date();
+  try {
+    const fb = await fbGetWinnersOfMonth(true);
+    const matched = fb.find((w) => w.month === now.getMonth() + 1 && w.year === now.getFullYear());
+    if (matched) return matched;
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase
     .from('winner_of_month')
     .select('*')
@@ -2471,6 +2763,13 @@ export async function getCurrentWinnerOfMonth(): Promise<WinnerOfMonth | null> {
 }
 
 export async function getAllWinnersOfMonth(): Promise<WinnerOfMonth[]> {
+  try {
+    if (isFirebaseAdmin()) {
+      const fb = await fbGetWinnersOfMonth(false);
+      if (fb.length > 0) return fb;
+    }
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase
     .from('winner_of_month')
     .select('*')
@@ -2487,15 +2786,22 @@ export async function upsertWinnerOfMonth(payload: Partial<WinnerOfMonth>): Prom
     .select()
     .single();
   if (error) throw error;
+  if (isFirebaseAdmin() && data?.id) {
+    await setDoc(doc(db, 'winner_of_month', sanitizeId(data.id)), stripUndefined(data), { merge: true }).catch(console.warn);
+  }
   return data as WinnerOfMonth;
 }
 
 export async function publishWinnerOfMonth(id: string): Promise<void> {
+  const publishedAt = new Date().toISOString();
   const { error } = await supabase
     .from('winner_of_month')
-    .update({ is_published: true, published_at: new Date().toISOString() })
+    .update({ is_published: true, published_at: publishedAt })
     .eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await updateDoc(doc(db, 'winner_of_month', sanitizeId(id)), { is_published: true, updated_at: publishedAt }).catch(console.warn);
+  }
 }
 
 // ============================================================
@@ -2747,6 +3053,13 @@ export async function incrementVisitorCount(): Promise<number> {
 // SPONSORS
 // ============================================================
 export async function getAllSponsors(): Promise<Sponsor[]> {
+  try {
+    if (isFirebaseAdmin()) {
+      const fb = await fbGetSponsors(false);
+      if (fb.length > 0) return fb;
+    }
+  } catch { /* fallback */ }
+
   const { data, error } = await supabase
     .from('sponsors').select('*')
     .order('display_order', { ascending: true })
@@ -2767,18 +3080,28 @@ export async function getActiveSponsorsForAward(awardId?: string): Promise<Spons
 }
 
 export async function createSponsor(payload: Partial<Sponsor>) {
-  const { error } = await supabase.from('sponsors').insert(payload);
+  const id = payload.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `sponsor_${Date.now()}`);
+  const { error } = await supabase.from('sponsors').insert({ ...payload, id });
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await setDoc(doc(db, 'sponsors', sanitizeId(id)), stripUndefined({ ...payload, id, created_at: new Date().toISOString() }), { merge: true }).catch(console.warn);
+  }
 }
 
 export async function updateSponsor(id: string, payload: Partial<Sponsor>) {
   const { error } = await supabase.from('sponsors').update(payload).eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await updateDoc(doc(db, 'sponsors', sanitizeId(id)), stripUndefined({ ...payload })).catch(console.warn);
+  }
 }
 
 export async function deleteSponsor(id: string) {
   const { error } = await supabase.from('sponsors').delete().eq('id', id);
   if (error) throw error;
+  if (isFirebaseAdmin()) {
+    await deleteDoc(doc(db, 'sponsors', sanitizeId(id))).catch(console.warn);
+  }
 }
 
 // ============================================================

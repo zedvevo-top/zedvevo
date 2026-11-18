@@ -28,6 +28,7 @@ import { routes } from './routes';
 import { AdminNotificationListener } from '@/components/admin/AdminNotificationListener';
 import { UniversalNotificationListener } from '@/components/notifications/UniversalNotificationListener';
 import { analytics } from '@/lib/analytics';
+import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 
 // Guard for admin routes — only admin/super_admin can access
 function AdminGuard({ children }: { children: React.ReactNode }) {
@@ -138,58 +139,60 @@ const NavigationAnalytics: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <QueryClientProvider client={queryClient}>
-      <Router>
-        <AuthProvider>
-          <PlayerProvider>
-          <RouteGuard>
-            <ScrollToTop />
-            <GlobalScriptsAndTheme />
-            <NavigationAnalytics />
-            <IntersectObserver />
-            <AdminNotificationListener />
-            <UniversalNotificationListener />
-            <Routes>
-              {/* Admin sub-routes — full-screen layout, no Header/MobileNav */}
-              <Route path="/admin" element={<AdminGuard><AdminOverviewPage /></AdminGuard>} />
-              <Route path="/admin/content"       element={<AdminGuard><AdminContentPage /></AdminGuard>} />
-              <Route path="/admin/videos"        element={<AdminGuard><AdminContentPage /></AdminGuard>} />
-              <Route path="/admin/users"         element={<SuperAdminGuard><AdminUsersPage /></SuperAdminGuard>} />
-              <Route path="/admin/payments"      element={<SuperAdminGuard><AdminPaymentsPage /></SuperAdminGuard>} />
-              <Route path="/admin/awards"        element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
-              <Route path="/admin/nominees"      element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
-              <Route path="/admin/trending"      element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
-              <Route path="/admin/downloads"     element={<SuperAdminGuard><AdminDownloadsPage /></SuperAdminGuard>} />
-              <Route path="/admin/notifications" element={<SuperAdminGuard><AdminNotificationsPage /></SuperAdminGuard>} />
-              <Route path="/admin/banners"       element={<SuperAdminGuard><AdminSettingsPage /></SuperAdminGuard>} />
-              <Route path="/admin/settings"      element={<SuperAdminGuard><AdminSettingsPage /></SuperAdminGuard>} />
-              <Route path="/admin/sponsors"      element={<SuperAdminGuard><AdminSponsorsPage /></SuperAdminGuard>} />
-              <Route path="/admin/payment-gateway" element={<SuperAdminGuard><AdminPaymentGatewayPage /></SuperAdminGuard>} />
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <Router>
+          <AuthProvider>
+            <PlayerProvider>
+            <RouteGuard>
+              <ScrollToTop />
+              <GlobalScriptsAndTheme />
+              <NavigationAnalytics />
+              <IntersectObserver />
+              <AdminNotificationListener />
+              <UniversalNotificationListener />
+              <Routes>
+                {/* Admin sub-routes — full-screen layout, no Header/MobileNav */}
+                <Route path="/admin" element={<AdminGuard><AdminOverviewPage /></AdminGuard>} />
+                <Route path="/admin/content"       element={<AdminGuard><AdminContentPage /></AdminGuard>} />
+                <Route path="/admin/videos"        element={<AdminGuard><AdminContentPage /></AdminGuard>} />
+                <Route path="/admin/users"         element={<SuperAdminGuard><AdminUsersPage /></SuperAdminGuard>} />
+                <Route path="/admin/payments"      element={<SuperAdminGuard><AdminPaymentsPage /></SuperAdminGuard>} />
+                <Route path="/admin/awards"        element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
+                <Route path="/admin/nominees"      element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
+                <Route path="/admin/trending"      element={<SuperAdminGuard><AdminAwardsPage /></SuperAdminGuard>} />
+                <Route path="/admin/downloads"     element={<SuperAdminGuard><AdminDownloadsPage /></SuperAdminGuard>} />
+                <Route path="/admin/notifications" element={<SuperAdminGuard><AdminNotificationsPage /></SuperAdminGuard>} />
+                <Route path="/admin/banners"       element={<SuperAdminGuard><AdminSettingsPage /></SuperAdminGuard>} />
+                <Route path="/admin/settings"      element={<SuperAdminGuard><AdminSettingsPage /></SuperAdminGuard>} />
+                <Route path="/admin/sponsors"      element={<SuperAdminGuard><AdminSponsorsPage /></SuperAdminGuard>} />
+                <Route path="/admin/payment-gateway" element={<SuperAdminGuard><AdminPaymentGatewayPage /></SuperAdminGuard>} />
 
-              {/* All other routes wrapped in the public layout */}
-              <Route path="/*" element={
-                <div className="flex flex-col min-h-screen">
-                  <Header />
-                  <main className="flex-grow">
-                    <Routes>
-                      {routes.filter(r => !r.path.startsWith('/admin')).map((route) => (
-                        <Route key={route.path} path={route.path} element={<route.component />} />
-                      ))}
-                      <Route path="*" element={<Navigate to="/" replace />} />
-                    </Routes>
-                  </main>
-                  {/* Player sits above mobile nav */}
-                  <MusicPlayer />
-                  <MobileNav />
-                </div>
-              } />
-            </Routes>
-            <Toaster richColors />
-          </RouteGuard>
-          </PlayerProvider>
-        </AuthProvider>
-      </Router>
-    </QueryClientProvider>
+                {/* All other routes wrapped in the public layout */}
+                <Route path="/*" element={
+                  <div className="flex flex-col min-h-screen">
+                    <Header />
+                    <main className="flex-grow">
+                      <Routes>
+                        {routes.filter(r => !r.path.startsWith('/admin')).map((route) => (
+                          <Route key={route.path} path={route.path} element={<route.component />} />
+                        ))}
+                        <Route path="*" element={<Navigate to="/" replace />} />
+                      </Routes>
+                    </main>
+                    {/* Player sits above mobile nav */}
+                    <MusicPlayer />
+                    <MobileNav />
+                  </div>
+                } />
+              </Routes>
+              <Toaster richColors />
+            </RouteGuard>
+            </PlayerProvider>
+          </AuthProvider>
+        </Router>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 };
 

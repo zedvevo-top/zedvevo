@@ -44,6 +44,7 @@ import { formatDate, formatCurrency, getPaymentStatusColor, getPaymentStatusLabe
 import AdminArtistEarningsBreakdown from '@/components/admin/AdminArtistEarningsBreakdown';
 import AdminArtists from '@/pages/admin/Artists';
 import AdminAdsPage from '@/pages/admin/AdminAdsPage';
+import { AdminFirebaseSync } from '@/components/admin/AdminFirebaseSync';
 
 export default function AdminPage() {
   const { profile, user } = useAuth();
@@ -622,6 +623,10 @@ export default function AdminPage() {
               </CardContent>
             </Card>
           ))}
+        </div>
+
+        <div className="mb-6">
+          <AdminFirebaseSync />
         </div>
 
         <Tabs defaultValue="content">

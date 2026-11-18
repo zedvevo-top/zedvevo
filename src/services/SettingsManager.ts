@@ -116,6 +116,25 @@ class SettingsManagerService {
       }
     }
 
+    // 1b. Merge/hydrate from Firebase Firestore app_settings
+    try {
+      const { fbGetSettings } = await import('@/lib/firebaseDb');
+      const { auth } = await import('@/lib/firebase');
+      const isAdmin = auth.currentUser?.email?.toLowerCase() === 'topkuchalo@gmail.com';
+      const fbSettings = await fbGetSettings(isAdmin);
+      if (fbSettings && Object.keys(fbSettings).length > 0) {
+        Object.entries(fbSettings).forEach(([k, v]) => {
+          this.cache[k] = v;
+          try {
+            localStorage.setItem(STORAGE_PREFIX + k, v);
+            localStorage.setItem(k, v);
+          } catch { /* ignore */ }
+        });
+      }
+    } catch {
+      // Firestore unseeded or unavailable; Supabase & localStorage cache remain active
+    }
+
     this.initialized = true;
 
     // 2. Automatically apply theme & branding on app load
@@ -213,6 +232,17 @@ class SettingsManagerService {
       } catch (err) {
         // try next candidate
       }
+    }
+
+    // Also persist to Firebase Firestore app_settings if Admin session active
+    try {
+      const { auth } = await import('@/lib/firebase');
+      if (auth.currentUser?.email?.toLowerCase() === 'topkuchalo@gmail.com') {
+        const { fbUpsertSetting } = await import('@/lib/firebaseDb');
+        await fbUpsertSetting(key, stringVal, description);
+      }
+    } catch {
+      // ignore if user is not signed in with Firebase Google Admin
     }
 
     // If setting affects theme or branding, apply immediately

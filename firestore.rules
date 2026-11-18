@@ -1,0 +1,866 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'topkuchalo@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOptStr(data, field, maxLen) {
+      return !(field in data) || data[field] == null || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptBool(data, field) {
+      return !(field in data) || data[field] == null || data[field] is bool;
+    }
+
+    function isOptNum(data, field) {
+      return !(field in data) || data[field] == null || (data[field] is int || data[field] is float);
+    }
+
+    function isValidPlayInc() {
+      return !incoming().diff(existing()).affectedKeys().hasAny(['play_count']) || (
+        (!('play_count' in existing()) || existing().play_count == null)
+          ? incoming().play_count == 1
+          : (existing().play_count is number && incoming().play_count == existing().play_count + 1)
+      );
+    }
+
+    function isValidViewInc() {
+      return !incoming().diff(existing()).affectedKeys().hasAny(['view_count']) || (
+        (!('view_count' in existing()) || existing().view_count == null)
+          ? incoming().view_count == 1
+          : (existing().view_count is number && incoming().view_count == existing().view_count + 1)
+      );
+    }
+
+    function isValidDownloadInc() {
+      return !incoming().diff(existing()).affectedKeys().hasAny(['download_count']) || (
+        (!('download_count' in existing()) || existing().download_count == null)
+          ? incoming().download_count == 1
+          : (existing().download_count is number && incoming().download_count == existing().download_count + 1)
+      );
+    }
+
+    function isValidShareInc() {
+      return !incoming().diff(existing()).affectedKeys().hasAny(['share_count']) || (
+        (!('share_count' in existing()) || existing().share_count == null)
+          ? incoming().share_count == 1
+          : (existing().share_count is number && incoming().share_count == existing().share_count + 1)
+      );
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidAdminDoc(data) {
+      return data.keys().hasAll(['uid', 'role'])
+        && data.keys().hasOnly(['uid', 'email', 'role', 'created_at'])
+        && isValidId(data.uid)
+        && data.role in ['admin', 'super_admin']
+        && isOptStr(data, 'email', 254)
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidProfile(data) {
+      return data.keys().hasAll(['id', 'role'])
+        && data.keys().hasOnly([
+          'id', 'email', 'phone', 'username', 'display_name', 'avatar_url',
+          'bio', 'role', 'is_artist', 'upload_access', 'created_at', 'updated_at'
+        ])
+        && isValidId(data.id)
+        && data.role in ['user', 'artist', 'admin', 'super_admin', 'judge']
+        && isOptStr(data, 'email', 254)
+        && isOptStr(data, 'phone', 32)
+        && isOptStr(data, 'username', 64)
+        && isOptStr(data, 'display_name', 120)
+        && isOptStr(data, 'avatar_url', 1024)
+        && isOptStr(data, 'bio', 5000)
+        && isOptBool(data, 'is_artist')
+        && isOptStr(data, 'upload_access', 32)
+        && isOptStr(data, 'created_at', 64)
+        && isOptStr(data, 'updated_at', 64);
+    }
+
+    function isValidPublicProfile(data) {
+      return data.keys().hasAll(['id'])
+        && data.keys().hasOnly([
+          'id', 'username', 'display_name', 'avatar_url', 'bio', 'is_artist', 'created_at'
+        ])
+        && isValidId(data.id)
+        && isOptStr(data, 'username', 64)
+        && isOptStr(data, 'display_name', 120)
+        && isOptStr(data, 'avatar_url', 1024)
+        && isOptStr(data, 'bio', 5000)
+        && isOptBool(data, 'is_artist')
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidArtist(data) {
+      return data.keys().hasAll(['id', 'name'])
+        && data.keys().hasOnly([
+          'id', 'user_id', 'profile_id', 'name', 'stage_name', 'bio',
+          'avatar_url', 'cover_url', 'genre', 'is_featured', 'verified',
+          'play_count', 'total_followers', 'created_at'
+        ])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() <= 160
+        && isOptStr(data, 'user_id', 128)
+        && isOptStr(data, 'profile_id', 128)
+        && isOptStr(data, 'stage_name', 160)
+        && isOptStr(data, 'bio', 5000)
+        && isOptStr(data, 'avatar_url', 1024)
+        && isOptStr(data, 'cover_url', 1024)
+        && isOptStr(data, 'genre', 100)
+        && isOptBool(data, 'is_featured')
+        && isOptBool(data, 'verified')
+        && isOptNum(data, 'play_count')
+        && isOptNum(data, 'total_followers')
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidSong(data) {
+      return data.keys().hasAll(['id', 'user_id', 'title', 'artist_name', 'file_url', 'status'])
+        && data.keys().hasOnly([
+          'id', 'user_id', 'artist_id', 'title', 'artist_name', 'album', 'genre',
+          'cover_url', 'thumbnail_url', 'file_url', 'duration', 'play_count',
+          'like_count', 'download_count', 'share_count', 'featured_artists',
+          'producer', 'status', 'is_trending', 'is_featured', 'created_at', 'updated_at'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.user_id)
+        && data.title is string && data.title.size() <= 200
+        && data.artist_name is string && data.artist_name.size() <= 200
+        && data.file_url is string && data.file_url.size() <= 1024
+        && data.status in ['pending', 'approved', 'rejected']
+        && isOptStr(data, 'artist_id', 128)
+        && isOptStr(data, 'album', 200)
+        && isOptStr(data, 'genre', 100)
+        && isOptStr(data, 'cover_url', 1024)
+        && isOptStr(data, 'thumbnail_url', 1024)
+        && isOptNum(data, 'duration')
+        && isOptNum(data, 'play_count')
+        && isOptNum(data, 'like_count')
+        && isOptNum(data, 'download_count')
+        && isOptNum(data, 'share_count')
+        && isOptStr(data, 'featured_artists', 250)
+        && isOptStr(data, 'producer', 200)
+        && isOptBool(data, 'is_trending')
+        && isOptBool(data, 'is_featured')
+        && isOptStr(data, 'created_at', 64)
+        && isOptStr(data, 'updated_at', 64);
+    }
+
+    function isValidVideo(data) {
+      return data.keys().hasAll(['id', 'user_id', 'title', 'artist_name', 'file_url', 'status'])
+        && data.keys().hasOnly([
+          'id', 'user_id', 'artist_id', 'title', 'artist_name', 'description', 'genre',
+          'thumbnail_url', 'file_url', 'duration', 'view_count', 'like_count',
+          'download_count', 'share_count', 'downloads_enabled', 'featured_artists',
+          'producer', 'status', 'is_trending', 'is_featured', 'youtube_url',
+          'youtube_id', 'is_youtube', 'created_at', 'updated_at'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.user_id)
+        && data.title is string && data.title.size() <= 200
+        && data.artist_name is string && data.artist_name.size() <= 200
+        && data.file_url is string && data.file_url.size() <= 1024
+        && data.status in ['pending', 'approved', 'rejected']
+        && isOptStr(data, 'artist_id', 128)
+        && isOptStr(data, 'description', 2000)
+        && isOptStr(data, 'genre', 100)
+        && isOptStr(data, 'thumbnail_url', 1024)
+        && isOptNum(data, 'duration')
+        && isOptNum(data, 'view_count')
+        && isOptNum(data, 'like_count')
+        && isOptNum(data, 'download_count')
+        && isOptNum(data, 'share_count')
+        && isOptBool(data, 'downloads_enabled')
+        && isOptStr(data, 'featured_artists', 250)
+        && isOptStr(data, 'producer', 200)
+        && isOptBool(data, 'is_trending')
+        && isOptBool(data, 'is_featured')
+        && isOptStr(data, 'youtube_url', 512)
+        && isOptStr(data, 'youtube_id', 64)
+        && isOptBool(data, 'is_youtube')
+        && isOptStr(data, 'created_at', 64)
+        && isOptStr(data, 'updated_at', 64);
+    }
+
+    function isValidUploadPlan(data) {
+      return data.keys().hasAll(['id', 'name', 'plan_type', 'price', 'is_active'])
+        && data.keys().hasOnly([
+          'id', 'name', 'plan_type', 'price', 'description',
+          'uploads_allowed', 'validity_days', 'is_active', 'created_at'
+        ])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() <= 120
+        && data.plan_type is string && data.plan_type.size() <= 64
+        && (data.price is int || data.price is float)
+        && data.is_active is bool
+        && isOptStr(data, 'description', 500)
+        && isOptNum(data, 'uploads_allowed')
+        && isOptNum(data, 'validity_days')
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidUserSubscription(data) {
+      return data.keys().hasAll(['id', 'user_id', 'plan_id', 'plan_type', 'is_active'])
+        && data.keys().hasOnly([
+          'id', 'user_id', 'plan_id', 'plan_type', 'uploads_used',
+          'uploads_allowed', 'activated_at', 'expires_at', 'is_active',
+          'consumed', 'status', 'created_at'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.user_id)
+        && data.plan_id is string && data.plan_id.size() <= 128
+        && data.plan_type is string && data.plan_type.size() <= 64
+        && data.is_active is bool
+        && isOptNum(data, 'uploads_used')
+        && isOptNum(data, 'uploads_allowed')
+        && isOptStr(data, 'activated_at', 64)
+        && isOptStr(data, 'expires_at', 64)
+        && isOptBool(data, 'consumed')
+        && isOptStr(data, 'status', 32)
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidPayment(data) {
+      return data.keys().hasAll(['id', 'amount', 'payment_type', 'status'])
+        && data.keys().hasOnly([
+          'id', 'user_id', 'amount', 'currency', 'payment_method',
+          'lipila_transaction_id', 'lipila_reference', 'plan_id',
+          'subscription_id', 'payment_type', 'status', 'failure_reason',
+          'phone_number', 'idempotency_key', 'metadata', 'created_at', 'updated_at'
+        ])
+        && isValidId(data.id)
+        && (data.amount is int || data.amount is float)
+        && data.payment_type is string && data.payment_type.size() <= 64
+        && data.status in ['pending', 'successful', 'failed', 'cancelled', 'insufficient_funds', 'invalid_transaction']
+        && isOptStr(data, 'user_id', 128)
+        && isOptStr(data, 'currency', 16)
+        && isOptStr(data, 'payment_method', 64)
+        && isOptStr(data, 'lipila_transaction_id', 128)
+        && isOptStr(data, 'lipila_reference', 128)
+        && isOptStr(data, 'plan_id', 128)
+        && isOptStr(data, 'subscription_id', 128)
+        && isOptStr(data, 'failure_reason', 500)
+        && isOptStr(data, 'phone_number', 32)
+        && isOptStr(data, 'idempotency_key', 128)
+        && (!('metadata' in data) || data.metadata == null || data.metadata is map)
+        && isOptStr(data, 'created_at', 64)
+        && isOptStr(data, 'updated_at', 64);
+    }
+
+    function isValidAward(data) {
+      return data.keys().hasAll(['id', 'name', 'is_active', 'voting_open'])
+        && data.keys().hasOnly([
+          'id', 'name', 'description', 'year', 'season_label',
+          'is_active', 'voting_open', 'nominees_open', 'voting_starts_at',
+          'voting_ends_at', 'created_at'
+        ])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() <= 200
+        && data.is_active is bool
+        && data.voting_open is bool
+        && isOptStr(data, 'description', 1000)
+        && isOptNum(data, 'year')
+        && isOptStr(data, 'season_label', 100)
+        && isOptBool(data, 'nominees_open')
+        && isOptStr(data, 'voting_starts_at', 64)
+        && isOptStr(data, 'voting_ends_at', 64)
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidAwardCategory(data) {
+      return data.keys().hasAll(['id', 'award_id', 'name', 'is_active'])
+        && data.keys().hasOnly([
+          'id', 'award_id', 'name', 'description', 'grand_prize', 'is_active', 'created_at'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.award_id)
+        && data.name is string && data.name.size() <= 160
+        && data.is_active is bool
+        && isOptStr(data, 'description', 500)
+        && isOptStr(data, 'grand_prize', 200)
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidNominee(data) {
+      return data.keys().hasAll(['id', 'user_id', 'category_id', 'name', 'nomination_status'])
+        && data.keys().hasOnly([
+          'id', 'user_id', 'category_id', 'name', 'bio', 'photo_url',
+          'song_title', 'song_url', 'video_url', 'total_votes', 'payment_id',
+          'registration_status', 'nomination_status', 'is_winner',
+          'achievements', 'social_links', 'contact_email', 'created_at'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.user_id)
+        && isValidId(data.category_id)
+        && data.name is string && data.name.size() <= 200
+        && data.nomination_status in ['pending_payment', 'pending_review', 'approved', 'rejected', 'winner']
+        && isOptStr(data, 'bio', 2000)
+        && isOptStr(data, 'photo_url', 1024)
+        && isOptStr(data, 'song_title', 200)
+        && isOptStr(data, 'song_url', 1024)
+        && isOptStr(data, 'video_url', 1024)
+        && isOptNum(data, 'total_votes')
+        && isOptStr(data, 'payment_id', 128)
+        && isOptStr(data, 'registration_status', 32)
+        && isOptBool(data, 'is_winner')
+        && isOptStr(data, 'achievements', 1000)
+        && (!('social_links' in data) || data.social_links == null || data.social_links is map)
+        && isOptStr(data, 'contact_email', 254)
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidVote(data) {
+      return data.keys().hasAll(['id', 'nominee_id', 'category_id', 'amount', 'vote_count', 'payment_status'])
+        && data.keys().hasOnly([
+          'id', 'user_id', 'nominee_id', 'category_id', 'amount',
+          'vote_count', 'payment_id', 'payment_status', 'vote_approval_status', 'created_at'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.nominee_id)
+        && isValidId(data.category_id)
+        && (data.amount is int || data.amount is float)
+        && (data.vote_count is int || data.vote_count is float)
+        && data.payment_status is string && data.payment_status.size() <= 32
+        && isOptStr(data, 'user_id', 128)
+        && isOptStr(data, 'payment_id', 128)
+        && isOptStr(data, 'vote_approval_status', 32)
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidHeroBanner(data) {
+      return data.keys().hasAll(['id', 'image_url', 'title', 'is_active'])
+        && data.keys().hasOnly([
+          'id', 'image_url', 'title', 'subtitle', 'button_text', 'button_url',
+          'starts_at', 'ends_at', 'is_active', 'display_order', 'created_at'
+        ])
+        && isValidId(data.id)
+        && data.image_url is string && data.image_url.size() <= 1024
+        && data.title is string && data.title.size() <= 200
+        && data.is_active is bool
+        && isOptStr(data, 'subtitle', 300)
+        && isOptStr(data, 'button_text', 80)
+        && isOptStr(data, 'button_url', 512)
+        && isOptStr(data, 'starts_at', 64)
+        && isOptStr(data, 'ends_at', 64)
+        && isOptNum(data, 'display_order')
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidSponsor(data) {
+      return data.keys().hasAll(['id', 'name', 'tier', 'is_active'])
+        && data.keys().hasOnly([
+          'id', 'award_id', 'name', 'headline', 'logo_url', 'banner_url',
+          'website_url', 'cta_text', 'cta_url', 'tier', 'display_order',
+          'is_active', 'position', 'impression_count', 'click_count', 'created_at'
+        ])
+        && isValidId(data.id)
+        && data.name is string && data.name.size() <= 200
+        && data.tier in ['gold', 'silver', 'bronze']
+        && data.is_active is bool
+        && isOptStr(data, 'award_id', 128)
+        && isOptStr(data, 'headline', 300)
+        && isOptStr(data, 'logo_url', 1024)
+        && isOptStr(data, 'banner_url', 1024)
+        && isOptStr(data, 'website_url', 512)
+        && isOptStr(data, 'cta_text', 80)
+        && isOptStr(data, 'cta_url', 512)
+        && isOptNum(data, 'display_order')
+        && isOptStr(data, 'position', 64)
+        && isOptNum(data, 'impression_count')
+        && isOptNum(data, 'click_count')
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidAppSetting(data) {
+      return data.keys().hasAll(['key', 'value'])
+        && data.keys().hasOnly(['key', 'value', 'description', 'is_public', 'updated_at'])
+        && isValidId(data.key)
+        && data.value is string && data.value.size() <= 500000
+        && isOptStr(data, 'description', 500)
+        && isOptBool(data, 'is_public')
+        && isOptStr(data, 'updated_at', 64);
+    }
+
+    function isValidContentLike(data) {
+      return data.keys().hasAll(['id', 'user_id', 'content_id', 'content_type'])
+        && data.keys().hasOnly(['id', 'user_id', 'content_id', 'content_type', 'created_at'])
+        && isValidId(data.id)
+        && isValidId(data.user_id)
+        && isValidId(data.content_id)
+        && data.content_type in ['song', 'video']
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidUserLibraryItem(data) {
+      return data.keys().hasAll(['id', 'user_id', 'content_id', 'content_type'])
+        && data.keys().hasOnly(['id', 'user_id', 'content_id', 'content_type', 'created_at'])
+        && isValidId(data.id)
+        && isValidId(data.user_id)
+        && isValidId(data.content_id)
+        && data.content_type in ['song', 'video']
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidDownload(data) {
+      return data.keys().hasAll(['id', 'user_id', 'content_id', 'content_type', 'file_url', 'title'])
+        && data.keys().hasOnly([
+          'id', 'user_id', 'content_id', 'content_type', 'file_url',
+          'title', 'artist_name', 'cover_url', 'downloaded_at'
+        ])
+        && isValidId(data.id)
+        && isValidId(data.user_id)
+        && isValidId(data.content_id)
+        && data.content_type in ['song', 'video']
+        && data.file_url is string && data.file_url.size() <= 1024
+        && data.title is string && data.title.size() <= 200
+        && isOptStr(data, 'artist_name', 200)
+        && isOptStr(data, 'cover_url', 1024)
+        && isOptStr(data, 'downloaded_at', 64);
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'title', 'message', 'notification_type', 'is_read'])
+        && data.keys().hasOnly([
+          'id', 'user_id', 'title', 'message', 'type',
+          'notification_type', 'link', 'is_read', 'created_at'
+        ])
+        && isValidId(data.id)
+        && data.title is string && data.title.size() <= 200
+        && data.message is string && data.message.size() <= 2000
+        && data.notification_type is string && data.notification_type.size() <= 64
+        && data.is_read is bool
+        && isOptStr(data, 'user_id', 128)
+        && isOptStr(data, 'type', 64)
+        && isOptStr(data, 'link', 512)
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidWeeklyTrending(data) {
+      return data.keys().hasAll(['id', 'week_start', 'content_id', 'content_type', 'rank', 'category'])
+        && data.keys().hasOnly([
+          'id', 'week_start', 'content_id', 'content_type', 'rank',
+          'category', 'metric_value', 'title', 'artist_name', 'cover_url', 'created_at'
+        ])
+        && isValidId(data.id)
+        && data.week_start is string && data.week_start.size() <= 32
+        && isValidId(data.content_id)
+        && data.content_type in ['song', 'video']
+        && (data.rank is int || data.rank is float)
+        && data.category is string && data.category.size() <= 64
+        && isOptNum(data, 'metric_value')
+        && isOptStr(data, 'title', 200)
+        && isOptStr(data, 'artist_name', 200)
+        && isOptStr(data, 'cover_url', 1024)
+        && isOptStr(data, 'created_at', 64);
+    }
+
+    function isValidWinnerOfMonth(data) {
+      return data.keys().hasAll(['id', 'month', 'year', 'artist_name', 'award', 'is_published'])
+        && data.keys().hasOnly([
+          'id', 'month', 'year', 'artist_name', 'award', 'award_category',
+          'photo_url', 'prize', 'description', 'is_published', 'created_at', 'updated_at'
+        ])
+        && isValidId(data.id)
+        && (data.month is int || data.month is float)
+        && (data.year is int || data.year is float)
+        && data.artist_name is string && data.artist_name.size() <= 200
+        && data.award is string && data.award.size() <= 200
+        && data.is_published is bool
+        && isOptStr(data, 'award_category', 200)
+        && isOptStr(data, 'photo_url', 1024)
+        && isOptStr(data, 'prize', 200)
+        && isOptStr(data, 'description', 1000)
+        && isOptStr(data, 'created_at', 64)
+        && isOptStr(data, 'updated_at', 64);
+    }
+
+    // 4. Collection Rules
+
+    // Connection validation document
+    match /test/connection {
+      allow get: if isSignedIn() || resource == null || resource != null;
+    }
+
+    // Admins registry
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) && isValidAdminDoc(incoming()) && (
+        isAdmin() ||
+        (isVerifiedUser() && request.auth.token.email == 'topkuchalo@gmail.com' && isOwner(userId))
+      );
+      allow update: if isValidId(userId) && isAdmin() && isValidAdminDoc(incoming());
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // Private Profiles (PII Isolated: email, phone, role, upload_access)
+    match /profiles/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) && isValidProfile(incoming()) && (
+        isAdmin() || (
+          isVerifiedUser()
+          && isOwner(userId)
+          && incoming().id == request.auth.uid
+          && incoming().role == 'user'
+          && (!('is_artist' in incoming()) || incoming().is_artist == false)
+          && (!('upload_access' in incoming()) || incoming().upload_access == 'inactive')
+        )
+      );
+      allow update: if isValidId(userId) && isValidProfile(incoming()) && (
+        isAdmin() || (
+          isVerifiedUser()
+          && isOwner(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['username', 'display_name', 'avatar_url', 'bio', 'phone', 'updated_at'])
+        )
+      );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // Public Non-PII Profiles
+    match /public_profiles/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if true;
+      allow create: if isValidId(userId) && isValidPublicProfile(incoming()) && (
+        isAdmin() || (
+          isVerifiedUser()
+          && isOwner(userId)
+          && incoming().id == request.auth.uid
+          && (!('is_artist' in incoming()) || incoming().is_artist == false)
+        )
+      );
+      allow update: if isValidId(userId) && isValidPublicProfile(incoming()) && (
+        isAdmin() || (
+          isVerifiedUser()
+          && isOwner(userId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['username', 'display_name', 'avatar_url', 'bio'])
+        )
+      );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // Artists
+    match /artists/{artistId} {
+      allow get: if isValidId(artistId);
+      allow list: if true;
+      allow create: if isValidId(artistId) && isValidArtist(incoming()) && (
+        isAdmin() || (isVerifiedUser() && incoming().user_id == request.auth.uid)
+      );
+      allow update: if isValidId(artistId) && isValidArtist(incoming()) && (
+        isAdmin() || (
+          isVerifiedUser()
+          && existing().user_id == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'stage_name', 'bio', 'avatar_url', 'cover_url', 'genre'])
+        )
+      );
+      allow delete: if isValidId(artistId) && isAdmin();
+    }
+
+    // Songs
+    match /songs/{songId} {
+      allow get: if isValidId(songId) && (
+        resource == null ||
+        existing().status == 'approved' ||
+        (isSignedIn() && existing().user_id == request.auth.uid) ||
+        isAdmin()
+      );
+      allow list: if existing().status == 'approved'
+        || (isSignedIn() && existing().user_id == request.auth.uid)
+        || isAdmin();
+      allow create: if isValidId(songId) && isValidSong(incoming()) && (
+        isAdmin() || (
+          isVerifiedUser()
+          && incoming().user_id == request.auth.uid
+          && incoming().status == 'pending'
+          && (!('is_trending' in incoming()) || incoming().is_trending == false)
+          && (!('is_featured' in incoming()) || incoming().is_featured == false)
+        )
+      );
+      allow update: if isValidId(songId) && isValidSong(incoming()) && (
+        isAdmin() ||
+        (
+          isVerifiedUser()
+          && existing().user_id == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'artist_name', 'album', 'genre', 'cover_url', 'thumbnail_url',
+            'featured_artists', 'producer', 'updated_at'
+          ])
+        ) ||
+        (
+          isVerifiedUser()
+          && existing().status == 'approved'
+          && incoming().diff(existing()).affectedKeys().hasOnly(['play_count', 'like_count', 'download_count', 'share_count', 'updated_at'])
+          && isValidPlayInc()
+          && isValidDownloadInc()
+          && isValidShareInc()
+        )
+      );
+      allow delete: if isValidId(songId) && (
+        isAdmin() || (isVerifiedUser() && existing().user_id == request.auth.uid)
+      );
+    }
+
+    // Videos
+    match /videos/{videoId} {
+      allow get: if isValidId(videoId) && (
+        resource == null ||
+        existing().status == 'approved' ||
+        (isSignedIn() && existing().user_id == request.auth.uid) ||
+        isAdmin()
+      );
+      allow list: if existing().status == 'approved'
+        || (isSignedIn() && existing().user_id == request.auth.uid)
+        || isAdmin();
+      allow create: if isValidId(videoId) && isValidVideo(incoming()) && (
+        isAdmin() || (
+          isVerifiedUser()
+          && incoming().user_id == request.auth.uid
+          && incoming().status == 'pending'
+          && (!('is_trending' in incoming()) || incoming().is_trending == false)
+          && (!('is_featured' in incoming()) || incoming().is_featured == false)
+        )
+      );
+      allow update: if isValidId(videoId) && isValidVideo(incoming()) && (
+        isAdmin() ||
+        (
+          isVerifiedUser()
+          && existing().user_id == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'artist_name', 'description', 'genre', 'thumbnail_url',
+            'featured_artists', 'producer', 'updated_at'
+          ])
+        ) ||
+        (
+          isVerifiedUser()
+          && existing().status == 'approved'
+          && incoming().diff(existing()).affectedKeys().hasOnly(['view_count', 'like_count', 'download_count', 'share_count', 'updated_at'])
+          && isValidViewInc()
+          && isValidDownloadInc()
+          && isValidShareInc()
+        )
+      );
+      allow delete: if isValidId(videoId) && (
+        isAdmin() || (isVerifiedUser() && existing().user_id == request.auth.uid)
+      );
+    }
+
+    // Upload Plans
+    match /upload_plans/{planId} {
+      allow get: if isValidId(planId) && (resource == null || existing().is_active == true || isAdmin());
+      allow list: if existing().is_active == true || isAdmin();
+      allow create, update: if isValidId(planId) && isAdmin() && isValidUploadPlan(incoming());
+      allow delete: if isValidId(planId) && isAdmin();
+    }
+
+    // User Subscriptions
+    match /user_subscriptions/{subscriptionId} {
+      allow get: if isValidId(subscriptionId) && (isOwner(existing().user_id) || isAdmin());
+      allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isAdmin();
+      allow create, update: if isValidId(subscriptionId) && isAdmin() && isValidUserSubscription(incoming());
+      allow delete: if isValidId(subscriptionId) && isAdmin();
+    }
+
+    // Payments
+    match /payments/{paymentId} {
+      allow get: if isValidId(paymentId) && ((isSignedIn() && existing().user_id == request.auth.uid) || isAdmin());
+      allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isAdmin();
+      allow create: if isValidId(paymentId) && isValidPayment(incoming()) && (
+        isAdmin() || (
+          isVerifiedUser()
+          && incoming().user_id == request.auth.uid
+          && incoming().status == 'pending'
+        )
+      );
+      allow update: if isValidId(paymentId) && isAdmin() && isValidPayment(incoming());
+      allow delete: if isValidId(paymentId) && isAdmin();
+    }
+
+    // Awards
+    match /awards/{awardId} {
+      allow get: if isValidId(awardId) && (resource == null || existing().is_active == true || isAdmin());
+      allow list: if existing().is_active == true || isAdmin();
+      allow create, update: if isValidId(awardId) && isAdmin() && isValidAward(incoming());
+      allow delete: if isValidId(awardId) && isAdmin();
+    }
+
+    // Award Categories
+    match /award_categories/{categoryId} {
+      allow get: if isValidId(categoryId) && (resource == null || existing().is_active == true || isAdmin());
+      allow list: if existing().is_active == true || isAdmin();
+      allow create, update: if isValidId(categoryId) && isAdmin() && isValidAwardCategory(incoming());
+      allow delete: if isValidId(categoryId) && isAdmin();
+    }
+
+    // Nominees
+    match /nominees/{nomineeId} {
+      allow get: if isValidId(nomineeId) && (
+        resource == null ||
+        existing().nomination_status in ['approved', 'winner'] ||
+        (isSignedIn() && existing().user_id == request.auth.uid) ||
+        isAdmin()
+      );
+      allow list: if existing().nomination_status in ['approved', 'winner']
+        || (isSignedIn() && existing().user_id == request.auth.uid)
+        || isAdmin();
+      allow create: if isValidId(nomineeId) && isValidNominee(incoming()) && (
+        isAdmin() || (
+          isVerifiedUser()
+          && incoming().user_id == request.auth.uid
+          && incoming().nomination_status == 'pending_payment'
+          && (!('is_winner' in incoming()) || incoming().is_winner == false)
+          && (!('total_votes' in incoming()) || incoming().total_votes == 0)
+          && exists(/databases/$(database)/documents/award_categories/$(incoming().category_id))
+        )
+      );
+      allow update: if isValidId(nomineeId) && isValidNominee(incoming()) && isAdmin();
+      allow delete: if isValidId(nomineeId) && isAdmin();
+    }
+
+    // Votes
+    match /votes/{voteId} {
+      allow get: if isValidId(voteId) && ((isSignedIn() && existing().user_id == request.auth.uid) || isAdmin());
+      allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isAdmin();
+      allow create: if isValidId(voteId) && isValidVote(incoming()) && (
+        isAdmin() || (
+          isVerifiedUser()
+          && incoming().user_id == request.auth.uid
+          && incoming().payment_status == 'pending'
+          && exists(/databases/$(database)/documents/nominees/$(incoming().nominee_id))
+        )
+      );
+      allow update, delete: if isValidId(voteId) && isAdmin();
+    }
+
+    // Hero Banners
+    match /hero_banners/{bannerId} {
+      allow get: if isValidId(bannerId) && (resource == null || existing().is_active == true || isAdmin());
+      allow list: if existing().is_active == true || isAdmin();
+      allow create, update: if isValidId(bannerId) && isAdmin() && isValidHeroBanner(incoming());
+      allow delete: if isValidId(bannerId) && isAdmin();
+    }
+
+    // Sponsors
+    match /sponsors/{sponsorId} {
+      allow get: if isValidId(sponsorId) && (resource == null || existing().is_active == true || isAdmin());
+      allow list: if existing().is_active == true || isAdmin();
+      allow create, update: if isValidId(sponsorId) && isAdmin() && isValidSponsor(incoming());
+      allow delete: if isValidId(sponsorId) && isAdmin();
+    }
+
+    // App Settings & Admin Ad Codes
+    match /app_settings/{settingKey} {
+      allow get: if isValidId(settingKey) && (resource == null || existing().is_public == true || isAdmin());
+      allow list: if existing().is_public == true || isAdmin();
+      allow create, update: if isValidId(settingKey) && isAdmin() && isValidAppSetting(incoming());
+      allow delete: if isValidId(settingKey) && isAdmin();
+    }
+
+    // Content Likes
+    match /content_likes/{likeId} {
+      allow get: if isValidId(likeId) && (isOwner(existing().user_id) || isAdmin());
+      allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isAdmin();
+      allow create: if isValidId(likeId) && isValidContentLike(incoming()) && (
+        isAdmin() || (isVerifiedUser() && incoming().user_id == request.auth.uid)
+      );
+      allow delete: if isValidId(likeId) && (
+        isAdmin() || (isVerifiedUser() && existing().user_id == request.auth.uid)
+      );
+    }
+
+    // User Library
+    match /user_library/{itemId} {
+      allow get: if isValidId(itemId) && (isOwner(existing().user_id) || isAdmin());
+      allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isAdmin();
+      allow create: if isValidId(itemId) && isValidUserLibraryItem(incoming()) && (
+        isAdmin() || (isVerifiedUser() && incoming().user_id == request.auth.uid)
+      );
+      allow delete: if isValidId(itemId) && (
+        isAdmin() || (isVerifiedUser() && existing().user_id == request.auth.uid)
+      );
+    }
+
+    // Downloads
+    match /downloads/{downloadId} {
+      allow get: if isValidId(downloadId) && (isOwner(existing().user_id) || isAdmin());
+      allow list: if (isSignedIn() && existing().user_id == request.auth.uid) || isAdmin();
+      allow create: if isValidId(downloadId) && isValidDownload(incoming()) && (
+        isAdmin() || (isVerifiedUser() && incoming().user_id == request.auth.uid)
+      );
+      allow delete: if isValidId(downloadId) && isAdmin();
+    }
+
+    // Notifications
+    match /notifications/{notificationId} {
+      allow get: if isValidId(notificationId) && (
+        resource == null ||
+        existing().user_id == null ||
+        (isSignedIn() && existing().user_id == request.auth.uid) ||
+        isAdmin()
+      );
+      allow list: if existing().user_id == null
+        || (isSignedIn() && existing().user_id == request.auth.uid)
+        || isAdmin();
+      allow create: if isValidId(notificationId) && isAdmin() && isValidNotification(incoming());
+      allow update: if isValidId(notificationId) && isValidNotification(incoming()) && (
+        isAdmin() || (
+          isVerifiedUser()
+          && existing().user_id == request.auth.uid
+          && incoming().diff(existing()).affectedKeys().hasOnly(['is_read'])
+        )
+      );
+      allow delete: if isValidId(notificationId) && isAdmin();
+    }
+
+    // Weekly Trending
+    match /weekly_trending/{entryId} {
+      allow get: if isValidId(entryId);
+      allow list: if true;
+      allow create, update: if isValidId(entryId) && isAdmin() && isValidWeeklyTrending(incoming());
+      allow delete: if isValidId(entryId) && isAdmin();
+    }
+
+    // Winner of Month
+    match /winner_of_month/{winnerId} {
+      allow get: if isValidId(winnerId) && (resource == null || existing().is_published == true || isAdmin());
+      allow list: if existing().is_published == true || isAdmin();
+      allow create, update: if isValidId(winnerId) && isAdmin() && isValidWinnerOfMonth(incoming());
+      allow delete: if isValidId(winnerId) && isAdmin();
+    }
+  }
+}

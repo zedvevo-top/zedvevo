@@ -19,6 +19,7 @@ import { formatCurrency } from '@/lib/utils';
 import type { Payment, Song, Video as VideoType } from '@/types/index';
 import { analytics } from '@/lib/analytics';
 import { AdminNotificationControl } from '@/components/admin/AdminNotificationControl';
+import { AdminFirebaseSync } from '@/components/admin/AdminFirebaseSync';
 
 const ACCENT = 'hsl(var(--accent))';
 const MUTED  = 'hsl(var(--muted-foreground))';
@@ -117,6 +118,9 @@ export default function AdminOverviewPage() {
 
       {/* Real-time background OS pop-up alert controls for admin */}
       <AdminNotificationControl />
+
+      {/* Firebase Firestore Database Sync & Status */}
+      <AdminFirebaseSync />
 
       {/* Live Revenue & Instant Lipila Withdrawal Banner */}
       <Card className="bg-gradient-to-r from-emerald-950/40 via-card to-card border-emerald-500/30">
